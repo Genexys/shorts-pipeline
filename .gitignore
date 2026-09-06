@@ -20,3 +20,4 @@ Songs/
 venv/
 Backend/youtube_token.json
 *.db
+secrets/
