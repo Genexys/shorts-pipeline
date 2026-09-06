@@ -1,21 +1,27 @@
-FROM python:3.11-slim-buster
+FROM python:3.11-slim-bookworm
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.8 /uv /uvx /bin/
 
-RUN apt-get update && apt-get install --no-install-recommends -y \
-    build-essential autoconf pkg-config wget ghostscript curl libpng-dev
-
-RUN wget https://github.com/ImageMagick/ImageMagick/archive/refs/tags/7.1.0-31.tar.gz && \
-    tar xzf 7.1.0-31.tar.gz && \
-    rm 7.1.0-31.tar.gz && \
-    apt-get clean && \
-    apt-get autoremove
-
-RUN sh ./ImageMagick-7.1.0-31/configure --prefix=/usr/local --with-bzlib=yes --with-fontconfig=yes --with-freetype=yes --with-gslib=yes --with-gvc=yes --with-jpeg=yes --with-jp2=yes --with-png=yes --with-tiff=yes --with-xml=yes --with-gs-font-dir=yes && \
-    make -j && make install && ldconfig /usr/local/lib/
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg imagemagick \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY pyproject.toml .
+# Use the image's Python 3.11; never download another interpreter.
+ENV UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
 
-RUN uv pip install --system -r pyproject.toml
+COPY pyproject.toml uv.lock .python-version ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY Backend Backend
+COPY fonts fonts
+COPY Frontend Frontend
+
+RUN mkdir -p temp subtitles output Songs secrets
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    IMAGEMAGICK_BINARY=/usr/bin/convert \
+    PYTHONUNBUFFERED=1
