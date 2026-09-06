@@ -104,5 +104,5 @@ Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_UR
 - **JS**: `camelCase`, centralized API calls via `apiRequest()`
 - **API responses**: `{"status": "success|error", ...}` with proper HTTP codes
 - **Long-running work**: database-backed queue and separate worker process
-- **Concurrency**: multiple jobs can be queued; worker processes them safely via DB locking
+- **Concurrency**: multiple jobs can be queued, but run exactly one `worker.py` process at a time. `recover_running_jobs` requeues (or fails) *every* `running` job at startup, and each job clears `temp/`/`subtitles/` before it runs — both are destructive if a second worker is processing a different job concurrently.
 - Update `docs/` when setup, env vars, or runtime behavior changes

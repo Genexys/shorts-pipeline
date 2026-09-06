@@ -17,6 +17,7 @@ from moviepy import (
 from dotenv import load_dotenv
 from logstream import log
 from moviepy.video.tools.subtitles import SubtitlesClip
+from search import PEXELS_TIMEOUT
 from utils import ENV_FILE, TEMP_DIR, SUBTITLES_DIR, FONTS_DIR
 
 load_dotenv(ENV_FILE)
@@ -41,7 +42,7 @@ def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
     video_id = uuid.uuid4()
     video_path = destination / f"{video_id}.mp4"
     with open(video_path, "wb") as f:
-        f.write(requests.get(video_url, timeout=60).content)
+        f.write(requests.get(video_url, timeout=PEXELS_TIMEOUT).content)
 
     return str(video_path)
 

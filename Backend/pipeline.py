@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 from uuid import uuid4
 
 from moviepy import (
@@ -44,8 +44,8 @@ class PipelineResult:
 
 def run_generation_pipeline(
     data: dict,
-    is_cancelled,
-    on_log,
+    is_cancelled: Callable[[], bool],
+    on_log: Callable[[str, str], None],
     amount_of_stock_videos: int = 5,
 ) -> PipelineResult:
     def emit(message: str, level: str = "info") -> None:
@@ -316,7 +316,7 @@ def run_generation_pipeline(
         shutil.copy2(rendered_video_path, final_output_path)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    archived_path = f"output/{job_id}.mp4"
+    archived_path = f"{OUTPUT_DIR.name}/{job_id}.mp4"
     shutil.copy2(final_output_path, str(PROJECT_ROOT / archived_path))
 
     emit(f"[+] Video generated: {final_video_path} (archived as {archived_path})", "success")
