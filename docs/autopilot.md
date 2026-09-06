@@ -57,4 +57,4 @@ If the token or chat id is empty, messages are printed to the log with a `[teleg
 
 ## Pausing
 
-Set `AUTOPILOT_ENABLED=false` and restart the autopilot process (in Docker: `docker compose up -d autopilot`). Finished jobs are still reported.
+Set `AUTOPILOT_ENABLED=false` and restart the autopilot process. Finished jobs are still reported.

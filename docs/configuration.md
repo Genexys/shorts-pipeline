@@ -48,12 +48,12 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_WINDOW` | `HH:MM-HH:MM` in `TZ`, start before end, same day. | `09:00-21:00` |
 | `AUTOPILOT_MODEL` | Ollama model for topics and scripts. | `OLLAMA_MODEL` |
 | `AUTOPILOT_VOICE` | TikTok TTS voice. | `en_us_001` |
-| `AUTOPILOT_PARAGRAPHS` | Paragraphs in the script. | `1` |
+| `AUTOPILOT_PARAGRAPHS` | Paragraphs in the script, 1..10. | `1` |
 | `AUTOPILOT_SUBTITLES_POSITION` | Same values as the UI. | `center,center` |
 | `AUTOPILOT_COLOR` | Subtitle colour. | `#FFFF00` |
 | `AUTOPILOT_USE_MUSIC` | Mix a random MP3 from `Songs/`. | `false` |
 | `AUTOPILOT_CUSTOM_PROMPT` | Custom script prompt. | empty |
-| `OUTPUT_RETENTION_DAYS` | Days to keep `output/*.mp4`. | `7` |
+| `OUTPUT_RETENTION_DAYS` | Days to keep `output/*.mp4`, 1..365. | `7` |
 | `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
 | `TELEGRAM_CHAT_ID` | Chat that receives notifications. | empty |
 | `TZ` | Timezone for the window and the daily counter. | `UTC` |
