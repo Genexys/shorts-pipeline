@@ -85,6 +85,12 @@ def test_videos_per_day_must_be_between_1_and_6(value):
         AutopilotConfig.from_env({**BASE_ENV, "AUTOPILOT_VIDEOS_PER_DAY": value})
 
 
+@pytest.mark.parametrize("value", [1, 6])
+def test_videos_per_day_accepts_boundary_values(value):
+    config = AutopilotConfig.from_env({**BASE_ENV, "AUTOPILOT_VIDEOS_PER_DAY": str(value)})
+    assert config.videos_per_day == value
+
+
 @pytest.mark.parametrize("value", ["21:00-09:00", "09:00-09:00", "9-21", "09:00", "25:00-26:00"])
 def test_window_validation(value):
     with pytest.raises(ConfigError, match="AUTOPILOT_WINDOW"):
@@ -96,9 +102,18 @@ def test_parse_window_ok():
     assert parse_window(" 07:15 - 08:45 ") == (time(7, 15), time(8, 45))
 
 
+def test_parse_window_accepts_full_day_boundary():
+    assert parse_window("00:00-23:59") == (time(0, 0), time(23, 59))
+
+
 def test_invalid_timezone_is_config_error():
     with pytest.raises(ConfigError, match="TZ"):
         AutopilotConfig.from_env({**BASE_ENV, "TZ": "Mars/Olympus"})
+
+
+def test_invalid_bool_error_names_the_env_var():
+    with pytest.raises(ConfigError, match="AUTOPILOT_ENABLED"):
+        AutopilotConfig.from_env({**BASE_ENV, "AUTOPILOT_ENABLED": "maybe"})
 
 
 # --- slot_available -------------------------------------------------------

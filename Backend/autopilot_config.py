@@ -9,7 +9,7 @@ class ConfigError(ValueError):
     """Invalid autopilot configuration. The process should exit with code 1."""
 
 
-def _parse_bool(value: str, default: bool) -> bool:
+def _parse_bool(name: str, value: str, default: bool) -> bool:
     cleaned = value.strip().lower()
     if not cleaned:
         return default
@@ -17,7 +17,7 @@ def _parse_bool(value: str, default: bool) -> bool:
         return True
     if cleaned in ("0", "false", "no", "off"):
         return False
-    raise ConfigError(f"Expected a boolean, got '{value}'.")
+    raise ConfigError(f"{name}: expected a boolean, got '{value}'.")
 
 
 def _parse_int(name: str, value: str, default: int, minimum: int, maximum: int) -> int:
@@ -99,7 +99,7 @@ class AutopilotConfig:
         def get(name: str, default: str = "") -> str:
             return source.get(name, default)
 
-        enabled = _parse_bool(get("AUTOPILOT_ENABLED"), default=True)
+        enabled = _parse_bool("AUTOPILOT_ENABLED", get("AUTOPILOT_ENABLED"), default=True)
         niche = get("AUTOPILOT_NICHE").strip()
         if enabled and not niche:
             raise ConfigError(
@@ -127,7 +127,7 @@ class AutopilotConfig:
             paragraphs=_parse_int("AUTOPILOT_PARAGRAPHS", get("AUTOPILOT_PARAGRAPHS"), 1, 1, 10),
             subtitles_position=get("AUTOPILOT_SUBTITLES_POSITION").strip() or "center,center",
             color=get("AUTOPILOT_COLOR").strip() or "#FFFF00",
-            use_music=_parse_bool(get("AUTOPILOT_USE_MUSIC"), default=False),
+            use_music=_parse_bool("AUTOPILOT_USE_MUSIC", get("AUTOPILOT_USE_MUSIC"), default=False),
             custom_prompt=get("AUTOPILOT_CUSTOM_PROMPT"),
             output_retention_days=_parse_int("OUTPUT_RETENTION_DAYS", get("OUTPUT_RETENTION_DAYS"), 7, 1, 365),
             telegram_bot_token=get("TELEGRAM_BOT_TOKEN").strip(),
