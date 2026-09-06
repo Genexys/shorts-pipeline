@@ -20,6 +20,7 @@ ollama pull llama3.1:8b     # pull default model
 ```bash
 uv run python Backend/main.py                              # API on :8080
 uv run python Backend/worker.py                            # queue worker
+uv run python Backend/autopilot.py                         # scheduled topic → job creator
 python3 -m http.server 3000 --directory Frontend           # frontend on :3000
 ```
 
@@ -62,7 +63,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 ```
 
 ### Frontend ↔ Backend Communication
-- **REST**: JSON payloads to Flask endpoints (`/api/generate`, `/api/jobs/:id`, `/api/jobs/:id/events`, `/api/jobs/:id/cancel`, `/api/models`, `/api/upload-songs`)
+- **REST**: JSON payloads to Flask endpoints (`/api/generate`, `/api/jobs/:id`, `/api/jobs/:id/events`, `/api/jobs/:id/cancel`, `/api/models`, `/api/upload-songs`, `/api/topics`)
 - **Polling**: frontend polls job status and persisted generation events.
 
 ### Key Backend Modules
@@ -78,6 +79,9 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 | `youtube.py` | YouTube upload via google-auth-oauthlib token file (Backend/youtube_token.json); youtube_auth.py creates it once |
 | `utils.py` | Path constants, env validation, ImageMagick detection |
 | `pipeline.py` | Reusable generation pipeline used by worker |
+| `autopilot.py` | Scheduled loop: topic generation, job queuing, Telegram reports, output cleanup |
+| `autopilot_config.py` | `AutopilotConfig.from_env()` and pure `slot_available` rule |
+| `notify.py` | Telegram `send_telegram`, never raises |
 
 ### Frontend
 - `index.html`: UI with inline CSS, form fields, live log viewer
@@ -96,7 +100,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 - `PEXELS_API_KEY` — stock video API
 - `IMAGEMAGICK_BINARY` — leave empty to auto-detect from PATH
 
-Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`
+Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`, `AUTOPILOT_*`, `OUTPUT_RETENTION_DAYS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TZ` (see `docs/autopilot.md`)
 
 ## Conventions
 

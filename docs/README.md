@@ -9,6 +9,7 @@ This folder is the single source of truth for setup, configuration, and troubles
 - [Configuration](configuration.md)
 - [Architecture](architecture.md)
 - [Docker](docker.md)
+- [Autopilot](autopilot.md)
 - [Testing](testing.md)
 - [Troubleshooting](troubleshooting.md)
 

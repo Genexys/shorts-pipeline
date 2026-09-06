@@ -36,6 +36,28 @@ Files (both git-ignored, both live in `Backend/`):
 - `client_secret.json`: OAuth client of type "Desktop app" from Google Cloud Console (YouTube Data API v3 enabled, consent screen published "In production", scope `youtube.upload`).
 - `youtube_token.json`: created once by `uv run python Backend/youtube_auth.py` on a machine with a browser. The worker refreshes the access token automatically and never opens a browser.
 
+## Autopilot
+
+See `docs/autopilot.md` for behaviour. All variables are read once at startup.
+
+| Variable | Description | Default |
+|---|---|---|
+| `AUTOPILOT_ENABLED` | `false` pauses job creation; notifications keep working. | `true` |
+| `AUTOPILOT_NICHE` | Channel niche in free text. Required when enabled; the process exits with code 1 without it. | none |
+| `AUTOPILOT_VIDEOS_PER_DAY` | Maximum jobs per local day, 1..6. | `2` |
+| `AUTOPILOT_WINDOW` | `HH:MM-HH:MM` in `TZ`, start before end, same day. | `09:00-21:00` |
+| `AUTOPILOT_MODEL` | Ollama model for topics and scripts. | `OLLAMA_MODEL` |
+| `AUTOPILOT_VOICE` | TikTok TTS voice. | `en_us_001` |
+| `AUTOPILOT_PARAGRAPHS` | Paragraphs in the script. | `1` |
+| `AUTOPILOT_SUBTITLES_POSITION` | Same values as the UI. | `center,center` |
+| `AUTOPILOT_COLOR` | Subtitle colour. | `#FFFF00` |
+| `AUTOPILOT_USE_MUSIC` | Mix a random MP3 from `Songs/`. | `false` |
+| `AUTOPILOT_CUSTOM_PROMPT` | Custom script prompt. | empty |
+| `OUTPUT_RETENTION_DAYS` | Days to keep `output/*.mp4`. | `7` |
+| `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
+| `TELEGRAM_CHAT_ID` | Chat that receives notifications. | empty |
+| `TZ` | Timezone for the window and the daily counter. | `UTC` |
+
 ## Notes
 
 - Ollama models shown in the frontend are fetched from backend endpoint `/api/models`, which queries `OLLAMA_BASE_URL/api/tags`.
