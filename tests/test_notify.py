@@ -36,11 +36,12 @@ def test_send_telegram_reads_env(monkeypatch):
     monkeypatch.setattr(
         notify.requests,
         "post",
-        lambda url, json=None, timeout=None: captured.update(url=url) or _FakeResponse(),
+        lambda url, json=None, timeout=None: captured.update(url=url, json=json) or _FakeResponse(),
     )
 
     assert notify.send_telegram("hi") is True
     assert captured["url"] == "https://api.telegram.org/botENVTOKEN/sendMessage"
+    assert captured["json"]["chat_id"] == "7"
 
 
 def test_send_telegram_returns_false_when_disabled(monkeypatch, capsys):
@@ -63,6 +64,28 @@ def test_send_telegram_never_raises(monkeypatch):
         notify.requests, "post", lambda url, json=None, timeout=None: _FakeResponse(401)
     )
     assert notify.send_telegram("x", token="T", chat_id="1") is False
+
+
+def test_send_telegram_scrubs_token_from_logs(monkeypatch):
+    captured_logs: list = []
+
+    def fake_log(message, level):
+        captured_logs.append(message)
+
+    token = "SECRET_TOKEN_12345"
+    monkeypatch.setattr(notify, "log", fake_log)
+
+    def failing_post(url, json=None, timeout=None):
+        raise requests.HTTPError(
+            f"401 Client Error: Unauthorized for url: https://api.telegram.org/bot{token}/sendMessage"
+        )
+
+    monkeypatch.setattr(notify.requests, "post", failing_post)
+
+    assert notify.send_telegram("test", token=token, chat_id="1") is False
+    assert len(captured_logs) == 1
+    assert token not in captured_logs[0]
+    assert "401" in captured_logs[0]
 
 
 def test_send_telegram_truncates_long_text(monkeypatch):

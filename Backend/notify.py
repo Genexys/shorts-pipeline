@@ -30,5 +30,6 @@ def send_telegram(
         response.raise_for_status()
         return True
     except Exception as err:
-        log(f"[-] Telegram notification failed: {err}", "warning")
+        detail = str(err).replace(token, "<token>")
+        log(f"[-] Telegram notification failed: {detail}", "warning")
         return False
