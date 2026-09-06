@@ -22,8 +22,16 @@ RETRIABLE_EXCEPTIONS = (httplib2.HttpLib2Error, IOError, httplib2.ServerNotFound
 RETRIABLE_STATUS_CODES = (500, 502, 503, 504)
 
 BASE_DIR = Path(__file__).resolve().parent
-CLIENT_SECRETS_FILE = BASE_DIR / "client_secret.json"
-TOKEN_FILE = BASE_DIR / "youtube_token.json"
+
+
+def _path_from_env(name: str, default: Path) -> Path:
+    """Absolute or relative path from env; empty/blank keeps the default."""
+    raw = os.getenv(name, "").strip()
+    return Path(raw).expanduser() if raw else default
+
+
+CLIENT_SECRETS_FILE = _path_from_env("YOUTUBE_CLIENT_SECRETS_FILE", BASE_DIR / "client_secret.json")
+TOKEN_FILE = _path_from_env("YOUTUBE_TOKEN_FILE", BASE_DIR / "youtube_token.json")
 
 # Upload-only scope: enough for videos.insert and nothing else.
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
@@ -72,7 +80,8 @@ def get_authenticated_service() -> Resource:
     if credentials is None:
         raise YouTubeAuthError(
             "No valid YouTube credentials. Run Backend/youtube_auth.py on a machine "
-            "with a browser and copy Backend/youtube_token.json to the server."
+            f"with a browser and copy the token file to {TOKEN_FILE} "
+            "(see docs/deploy.md)."
         )
     return build(
         YOUTUBE_API_SERVICE_NAME,
