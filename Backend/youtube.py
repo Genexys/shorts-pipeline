@@ -1,3 +1,4 @@
+import os
 import random
 import time
 from pathlib import Path
@@ -6,7 +7,7 @@ from typing import List, Optional, Tuple
 import httplib2
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
+from googleapiclient.discovery import Resource, build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
@@ -16,6 +17,7 @@ from logstream import log
 httplib2.RETRIES = 1
 
 MAX_RETRIES = 10
+MAX_UPLOAD_BACKOFF_SECONDS = 60
 RETRIABLE_EXCEPTIONS = (httplib2.HttpLib2Error, IOError, httplib2.ServerNotFoundError)
 RETRIABLE_STATUS_CODES = (500, 502, 503, 504)
 
@@ -56,6 +58,7 @@ def load_credentials(token_file: Path = TOKEN_FILE) -> Optional[Credentials]:
             return None
         try:
             token_file.write_text(credentials.to_json())
+            os.chmod(token_file, 0o600)
         except OSError as err:
             log(f"[!] Could not persist refreshed YouTube token: {err}", "warning")
         return credentials
@@ -63,7 +66,7 @@ def load_credentials(token_file: Path = TOKEN_FILE) -> Optional[Credentials]:
     return None
 
 
-def get_authenticated_service():
+def get_authenticated_service() -> Resource:
     """Build the YouTube API client from the saved token. Never interactive."""
     credentials = load_credentials()
     if credentials is None:
@@ -138,7 +141,7 @@ def resumable_upload(insert_request) -> dict:
             retry += 1
             if retry > MAX_RETRIES:
                 raise RuntimeError("YouTube upload failed after retries.")
-            sleep_seconds = random.random() * (2**retry)
+            sleep_seconds = min(random.random() * (2**retry), MAX_UPLOAD_BACKOFF_SECONDS)
             log(f" => Sleeping {sleep_seconds:.1f} seconds and then retrying...", "info")
             time.sleep(sleep_seconds)
     return response

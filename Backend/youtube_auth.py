@@ -6,6 +6,7 @@ Writes Backend/youtube_token.json, which the worker (and the server) use
 without any further interaction.
 """
 
+import os
 import sys
 
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -24,6 +25,7 @@ def main() -> int:
     flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS_FILE), SCOPES)
     credentials = flow.run_local_server(port=0, access_type="offline", prompt="consent")
     TOKEN_FILE.write_text(credentials.to_json())
+    os.chmod(TOKEN_FILE, 0o600)
     print(f"Saved credentials to {TOKEN_FILE}")
     if not credentials.refresh_token:
         print("WARNING: no refresh token received. Revoke app access at "

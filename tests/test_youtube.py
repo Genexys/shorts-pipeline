@@ -1,4 +1,5 @@
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,7 @@ def test_load_credentials_refreshes_expired_token_and_rewrites_file(monkeypatch,
     assert credentials is fake
     assert fake.refreshed is True
     assert json.loads(token_file.read_text()) == {"token": "new"}
+    assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
 
 
 def test_load_credentials_returns_none_when_refresh_fails(monkeypatch, tmp_path: Path):
@@ -102,3 +104,82 @@ def test_upload_video_returns_video_id(monkeypatch):
 
 def test_scopes_only_upload():
     assert youtube.SCOPES == ["https://www.googleapis.com/auth/youtube.upload"]
+
+
+class _FakeInsertRequest:
+    def __init__(self, response: dict):
+        self._response = response
+
+    def next_chunk(self):
+        return None, self._response
+
+
+class _FakeVideosResource:
+    def __init__(self):
+        self.insert_kwargs: dict = {}
+
+    def insert(self, **kwargs):
+        self.insert_kwargs = kwargs
+        return _FakeInsertRequest({"id": "fake-video-id"})
+
+
+class _FakeYouTube:
+    def __init__(self):
+        self._videos = _FakeVideosResource()
+
+    def videos(self):
+        return self._videos
+
+
+def test_initialize_upload_builds_expected_request_body(monkeypatch, tmp_path: Path):
+    video_file = tmp_path / "v.mp4"
+    video_file.write_bytes(b"not really a video")
+    fake_youtube = _FakeYouTube()
+
+    response = youtube.initialize_upload(
+        fake_youtube,
+        {
+            "file": str(video_file),
+            "title": "My Title",
+            "description": "My Description",
+            "category": "28",
+            "tags": [],
+            "privacyStatus": "private",
+        },
+    )
+
+    assert response == {"id": "fake-video-id"}
+    kwargs = fake_youtube._videos.insert_kwargs
+    assert kwargs["part"] == "snippet,status"
+
+    body = kwargs["body"]
+    assert body["snippet"]["title"] == "My Title"
+    assert body["snippet"]["description"] == "My Description"
+    assert body["snippet"]["tags"] is None
+    assert body["snippet"]["categoryId"] == "28"
+    assert isinstance(body["snippet"]["categoryId"], str)
+    assert body["status"]["privacyStatus"] == "private"
+
+    media_body = kwargs["media_body"]
+    assert isinstance(media_body, youtube.MediaFileUpload)
+
+
+def test_initialize_upload_keeps_non_empty_tags(tmp_path: Path):
+    video_file = tmp_path / "v.mp4"
+    video_file.write_bytes(b"not really a video")
+    fake_youtube = _FakeYouTube()
+
+    youtube.initialize_upload(
+        fake_youtube,
+        {
+            "file": str(video_file),
+            "title": "T",
+            "description": "D",
+            "category": "28",
+            "tags": ["a", "b"],
+            "privacyStatus": "public",
+        },
+    )
+
+    body = fake_youtube._videos.insert_kwargs["body"]
+    assert body["snippet"]["tags"] == ["a", "b"]
