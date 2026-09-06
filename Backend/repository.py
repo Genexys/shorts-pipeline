@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy import and_, select, text
 from sqlalchemy.orm import Session
 
-from models import GenerationEvent, GenerationJob
+from models import Artifact, GenerationEvent, GenerationJob
 
 
 def utcnow() -> datetime:
@@ -217,3 +217,31 @@ def recover_running_jobs(session: Session) -> list[str]:
         else:
             mark_failed(session, job.id, "worker restarted")
     return touched
+
+
+def add_artifact(
+    session: Session,
+    job_id: str,
+    artifact_type: str,
+    path: str,
+    metadata: Optional[dict] = None,
+) -> Artifact:
+    artifact = Artifact(
+        job_id=job_id,
+        artifact_type=artifact_type,
+        path=path,
+        metadata_json=metadata,
+    )
+    session.add(artifact)
+    session.commit()
+    session.refresh(artifact)
+    return artifact
+
+
+def list_artifacts(session: Session, job_id: str) -> list[Artifact]:
+    stmt = (
+        select(Artifact)
+        .where(Artifact.job_id == job_id)
+        .order_by(Artifact.id.asc())
+    )
+    return list(session.scalars(stmt).all())

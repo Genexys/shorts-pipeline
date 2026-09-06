@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from db import SessionLocal, init_db
 from pipeline import PipelineCancelled, run_generation_pipeline
 from repository import (
+    add_artifact,
     append_event,
     claim_next_queued_job,
     get_job,
@@ -47,13 +48,31 @@ def process_next_job() -> bool:
     clean_dir(str(SUBTITLES_DIR))
 
     try:
-        result_path = run_generation_pipeline(
-            data=job.payload,
+        result = run_generation_pipeline(
+            data={**job.payload, "jobId": job_id},
             is_cancelled=lambda: _job_cancelled(job_id),
             on_log=lambda message, level: _log_event(job_id, message, level),
         )
         with SessionLocal() as session:
-            mark_completed(session, job_id, result_path)
+            mark_completed(session, job_id, result.video_path)
+            add_artifact(
+                session,
+                job_id,
+                "video",
+                result.archived_path,
+                {"title": result.title, "uploadError": result.upload_error},
+            )
+            if result.youtube_video_id:
+                add_artifact(
+                    session,
+                    job_id,
+                    "youtube_video",
+                    f"https://youtu.be/{result.youtube_video_id}",
+                    {
+                        "videoId": result.youtube_video_id,
+                        "privacyStatus": result.privacy_status,
+                    },
+                )
     except PipelineCancelled as err:
         with SessionLocal() as session:
             mark_cancelled(session, job_id, str(err))

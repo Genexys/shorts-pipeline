@@ -1,8 +1,10 @@
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
+from typing import Optional
+from uuid import uuid4
 
-from apiclient.errors import HttpError
 from moviepy import (
     AudioFileClip,
     CompositeAudioClip,
@@ -10,26 +12,34 @@ from moviepy import (
     afx,
     concatenate_audioclips,
 )
-from uuid import uuid4
 
 from gpt import generate_metadata, generate_script, get_search_terms
 from logstream import log
 from search import search_for_stock_videos
 from tiktokvoice import tts
 from utils import (
-    BASE_DIR,
+    OUTPUT_DIR,
     PROJECT_ROOT,
-    SONGS_DIR,
     SUBTITLES_DIR,
     TEMP_DIR,
     choose_random_song,
 )
 from video import combine_videos, generate_subtitles, generate_video, save_video
-from youtube import upload_video
+from youtube import resolve_privacy_status, upload_video
 
 
 class PipelineCancelled(Exception):
     pass
+
+
+@dataclass
+class PipelineResult:
+    video_path: str            # "output.mp4" relative to PROJECT_ROOT
+    archived_path: str         # "output/<job_id>.mp4" relative to PROJECT_ROOT
+    title: str
+    youtube_video_id: Optional[str]
+    upload_error: Optional[str]
+    privacy_status: str
 
 
 def run_generation_pipeline(
@@ -37,7 +47,7 @@ def run_generation_pipeline(
     is_cancelled,
     on_log,
     amount_of_stock_videos: int = 5,
-) -> str:
+) -> PipelineResult:
     def emit(message: str, level: str = "info") -> None:
         log(message, level)
         if on_log:
@@ -54,6 +64,7 @@ def run_generation_pipeline(
     text_color = data.get("color")
     use_music = data.get("useMusic", False)
     automate_youtube_upload = data.get("automateYoutubeUpload", False)
+    job_id = str(data.get("jobId") or uuid4())
 
     emit("[Video to be generated]", "info")
     emit("   Subject: " + data["videoSubject"], "info")
@@ -190,47 +201,6 @@ def run_generation_pipeline(
     emit("   Keywords:", "info")
     emit(f"  {', '.join(keywords)}", "info")
 
-    if automate_youtube_upload:
-        client_secrets_file = str((BASE_DIR / "client_secret.json").resolve())
-        skip_yt_upload = False
-        if not os.path.exists(client_secrets_file):
-            skip_yt_upload = True
-            emit(
-                "[-] Client secrets file missing. YouTube upload will be skipped.",
-                "warning",
-            )
-            emit(
-                "[-] Please download the client_secret.json from Google Cloud Platform and store this inside the /Backend directory.",
-                "error",
-            )
-
-        if not skip_yt_upload:
-            video_category_id = "28"
-            privacy_status = "private"
-            video_metadata = {
-                "video_path": str((TEMP_DIR / final_video_path).resolve()),
-                "title": title,
-                "description": description,
-                "category": video_category_id,
-                "keywords": ",".join(keywords),
-                "privacyStatus": privacy_status,
-            }
-
-            try:
-                video_response = upload_video(
-                    video_path=video_metadata["video_path"],
-                    title=video_metadata["title"],
-                    description=video_metadata["description"],
-                    category=video_metadata["category"],
-                    keywords=video_metadata["keywords"],
-                    privacy_status=video_metadata["privacyStatus"],
-                )
-                emit(f"Uploaded video ID: {video_response.get('id')}", "success")
-            except HttpError as err:
-                emit(
-                    f"An HTTP error {err.resp.status} occurred:\n{err.content}", "error"
-                )
-
     final_output_path = str(PROJECT_ROOT / final_video_path)
     rendered_video_path = str(TEMP_DIR / final_video_path)
     render_threads = n_threads or (os.cpu_count() or 2)
@@ -345,6 +315,43 @@ def run_generation_pipeline(
     if not use_music:
         shutil.copy2(rendered_video_path, final_output_path)
 
-    emit(f"[+] Video generated: {final_video_path}!", "success")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    archived_path = f"output/{job_id}.mp4"
+    shutil.copy2(final_output_path, str(PROJECT_ROOT / archived_path))
 
-    return final_video_path
+    emit(f"[+] Video generated: {final_video_path} (archived as {archived_path})", "success")
+
+    privacy_status, privacy_warning = resolve_privacy_status(
+        os.getenv("YOUTUBE_PRIVACY_STATUS")
+    )
+    category_id = (os.getenv("YOUTUBE_CATEGORY_ID") or "28").strip() or "28"
+    youtube_video_id: Optional[str] = None
+    upload_error: Optional[str] = None
+
+    if automate_youtube_upload:
+        guard_cancelled()
+        if privacy_warning:
+            emit(f"[!] {privacy_warning}", "warning")
+        emit(f"[+] Uploading to YouTube as {privacy_status}...", "info")
+        try:
+            youtube_video_id = upload_video(
+                video_path=str(PROJECT_ROOT / archived_path),
+                title=title,
+                description=description,
+                category=category_id,
+                tags=keywords,
+                privacy_status=privacy_status,
+            )
+            emit(f"[+] Uploaded: https://youtu.be/{youtube_video_id}", "success")
+        except Exception as err:
+            upload_error = str(err)
+            emit(f"[!] YouTube upload skipped: {upload_error}", "warning")
+
+    return PipelineResult(
+        video_path=final_video_path,
+        archived_path=archived_path,
+        title=title,
+        youtube_video_id=youtube_video_id,
+        upload_error=upload_error,
+        privacy_status=privacy_status,
+    )

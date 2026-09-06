@@ -56,8 +56,9 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
   → video.py: combine_videos() → concatenate/crop to 9:16
   → video.py: generate_video() → burn subtitles via ImageMagick, merge audio
   → (optional) mix background music from Songs/ at 10% volume
-  → (optional) youtube.py: OAuth2 upload
-  → output.mp4
+  → copy to output.mp4 and output/<job_id>.mp4
+  → (optional) youtube.py: upload via saved token; failure is non-fatal (upload_error)
+  → PipelineResult → worker stores Artifact rows (video, youtube_video)
 ```
 
 ### Frontend ↔ Backend Communication
@@ -74,7 +75,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 | `video.py` | Video processing: combine clips, burn subtitles, merge audio |
 | `search.py` | Pexels stock video search and download |
 | `tiktokvoice.py` | TikTok TTS API (60+ voices, 300-char chunking, threaded) |
-| `youtube.py` | YouTube upload via Google API with OAuth2 |
+| `youtube.py` | YouTube upload via google-auth-oauthlib token file (Backend/youtube_token.json); youtube_auth.py creates it once |
 | `utils.py` | Path constants, env validation, ImageMagick detection |
 | `pipeline.py` | Reusable generation pipeline used by worker |
 
@@ -87,6 +88,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 - `subtitles/`: generated .srt files (cleared each generation)
 - `Songs/`: user-uploaded background music MP3s
 - `fonts/`: subtitle font (`bold_font.ttf`)
+- `output/`: archived videos `<job_id>.mp4`
 
 ## Required Environment Variables
 
@@ -94,7 +96,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 - `PEXELS_API_KEY` — stock video API
 - `IMAGEMAGICK_BINARY` — leave empty to auto-detect from PATH
 
-Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`
+Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`
 
 ## Conventions
 

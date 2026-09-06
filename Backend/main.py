@@ -8,7 +8,13 @@ from sqlalchemy import and_, case, select
 from db import SessionLocal, init_db
 from gpt import list_ollama_models
 from logstream import log
-from repository import create_job, get_job, list_job_events, request_cancel
+from repository import (
+    create_job,
+    get_job,
+    list_artifacts,
+    list_job_events,
+    request_cancel,
+)
 from utils import ENV_FILE, SONGS_DIR, check_env_vars, clean_dir
 
 
@@ -85,6 +91,17 @@ def get_job_status(job_id: str):
                     "completedAt": job.completed_at.isoformat()
                     if job.completed_at
                     else None,
+                    "artifacts": [
+                        {
+                            "type": artifact.artifact_type,
+                            "path": artifact.path,
+                            "metadata": artifact.metadata_json,
+                            "createdAt": artifact.created_at.isoformat()
+                            if artifact.created_at
+                            else None,
+                        }
+                        for artifact in list_artifacts(session, job_id)
+                    ],
                 },
             }
         )

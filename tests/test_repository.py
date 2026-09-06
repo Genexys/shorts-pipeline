@@ -1,7 +1,9 @@
 from repository import (
+    add_artifact,
     claim_next_queued_job,
     create_job,
     get_job,
+    list_artifacts,
     list_job_events,
     mark_failed,
     mark_completed,
@@ -128,3 +130,16 @@ def test_recover_running_jobs_cancels_when_cancel_requested(session):
     recover_running_jobs(session)
 
     assert get_job(session, job.id).status == "cancelled"
+
+
+def test_add_artifact_and_list_artifacts_in_insert_order(session):
+    job = create_job(session, payload={"videoSubject": "artifacts"})
+
+    add_artifact(session, job.id, "video", "output/x.mp4", {"title": "T"})
+    add_artifact(session, job.id, "youtube_video", "https://youtu.be/abc", {"videoId": "abc"})
+
+    artifacts = list_artifacts(session, job.id)
+    assert [a.artifact_type for a in artifacts] == ["video", "youtube_video"]
+    assert artifacts[0].metadata_json == {"title": "T"}
+    assert artifacts[1].path == "https://youtu.be/abc"
+    assert list_artifacts(session, "missing") == []

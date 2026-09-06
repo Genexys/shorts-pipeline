@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from repository import append_event, create_job, get_job, list_job_events
+from repository import add_artifact, append_event, create_job, get_job, list_job_events
 
 
 os.environ.setdefault("PEXELS_API_KEY", "test-key")
@@ -127,3 +127,23 @@ def test_cancel_latest_running_job_cancels_active_job(client, session_factory):
         assert newer is not None
         cancelled_count = int(older.cancel_requested) + int(newer.cancel_requested)
         assert cancelled_count == 1
+
+
+def test_job_status_includes_artifacts(client, session_factory):
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "artifacts"})
+        add_artifact(session, job.id, "youtube_video", "https://youtu.be/abc", {"videoId": "abc"})
+
+    response = client.get(f"/api/jobs/{job.id}")
+
+    assert response.status_code == 200
+    artifacts = response.get_json()["job"]["artifacts"]
+    assert artifacts == [
+        {
+            "type": "youtube_video",
+            "path": "https://youtu.be/abc",
+            "metadata": {"videoId": "abc"},
+            "createdAt": artifacts[0]["createdAt"],
+        }
+    ]
+    assert artifacts[0]["createdAt"]
