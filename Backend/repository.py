@@ -205,7 +205,13 @@ def requeue_for_retry(session: Session, job_id: str, error_message: str) -> None
 
 
 def recover_running_jobs(session: Session) -> list[str]:
-    """Called once at worker startup. Any job still 'running' was interrupted."""
+    """Called once at worker startup. Any job still 'running' was interrupted.
+
+    Also clears unclaimable cancelled rows: a job left `queued` with
+    `cancel_requested=True` (for example from a cancel that raced a worker
+    crash) can never be claimed by `claim_next_queued_job`, so it is resolved
+    to `cancelled` here too.
+    """
     stmt = select(GenerationJob).where(GenerationJob.status == "running")
     touched: list[str] = []
     for job in list(session.scalars(stmt).all()):
@@ -216,6 +222,17 @@ def recover_running_jobs(session: Session) -> list[str]:
             requeue_for_retry(session, job.id, "worker restarted")
         else:
             mark_failed(session, job.id, "worker restarted")
+
+    stuck_stmt = select(GenerationJob).where(
+        and_(
+            GenerationJob.status == "queued",
+            GenerationJob.cancel_requested.is_(True),
+        )
+    )
+    for job in list(session.scalars(stuck_stmt).all()):
+        touched.append(job.id)
+        mark_cancelled(session, job.id, "Cancelled before execution.")
+
     return touched
 
 
@@ -225,6 +242,7 @@ def add_artifact(
     artifact_type: str,
     path: str,
     metadata: Optional[dict] = None,
+    commit: bool = True,
 ) -> Artifact:
     artifact = Artifact(
         job_id=job_id,
@@ -233,6 +251,9 @@ def add_artifact(
         metadata_json=metadata,
     )
     session.add(artifact)
+    if not commit:
+        session.flush()
+        return artifact
     session.commit()
     session.refresh(artifact)
     return artifact

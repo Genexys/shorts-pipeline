@@ -7,6 +7,13 @@ def _disable_cleanup(monkeypatch):
     monkeypatch.setattr(worker, "clean_dir", lambda _: None)
 
 
+def _no_sleep(monkeypatch) -> list[int]:
+    """Patch worker._sleep so retry-branch tests never actually sleep."""
+    sleeps: list[int] = []
+    monkeypatch.setattr(worker, "_sleep", lambda seconds: sleeps.append(seconds))
+    return sleeps
+
+
 def test_process_next_job_returns_false_when_queue_is_empty(
     monkeypatch, session_factory
 ):
@@ -63,6 +70,45 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             "videoId": "vid123",
             "privacyStatus": "private",
         }
+
+
+def test_process_next_job_marks_failed_when_bookkeeping_raises(
+    monkeypatch, session_factory
+):
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "bookkeeping down"})
+
+    monkeypatch.setattr(worker, "SessionLocal", session_factory)
+    _disable_cleanup(monkeypatch)
+    _no_sleep(monkeypatch)
+
+    def fake_pipeline(data, is_cancelled, on_log):
+        return PipelineResult(
+            video_path="output.mp4",
+            archived_path=f"output/{data['jobId']}.mp4",
+            title="Great title",
+            youtube_video_id=None,
+            upload_error=None,
+            privacy_status="private",
+        )
+
+    monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
+
+    def failing_add_artifact(*_args, **_kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(worker, "add_artifact", failing_add_artifact)
+
+    assert worker.process_next_job() is True
+
+    with session_factory() as session:
+        updated_job = get_job(session, job.id)
+        assert updated_job is not None
+        assert updated_job.status == "failed"
+        assert updated_job.attempt_count == 1
+        assert updated_job.error_message is not None
+        assert updated_job.error_message.startswith("bookkeeping failed:")
+        assert list_artifacts(session, job.id) == []
 
 
 def test_process_next_job_records_upload_error_without_youtube_artifact(
@@ -127,6 +173,7 @@ def test_process_next_job_marks_failed_on_pipeline_error(monkeypatch, session_fa
 
     monkeypatch.setattr(worker, "SessionLocal", session_factory)
     _disable_cleanup(monkeypatch)
+    _no_sleep(monkeypatch)
 
     def fake_pipeline(*_args, **_kwargs):
         raise RuntimeError("pipeline exploded")
@@ -192,6 +239,7 @@ def test_process_next_job_requeues_when_attempts_remain(monkeypatch, session_fac
 
     monkeypatch.setattr(worker, "SessionLocal", session_factory)
     _disable_cleanup(monkeypatch)
+    sleeps = _no_sleep(monkeypatch)
 
     def fake_pipeline(*_args, **_kwargs):
         raise RuntimeError("tts unavailable")
@@ -204,6 +252,7 @@ def test_process_next_job_requeues_when_attempts_remain(monkeypatch, session_fac
         assert first.status == "queued"
         assert first.attempt_count == 1
         assert list_job_events(session, job.id)[-1].event_type == "retry"
+    assert sleeps == [worker.RETRY_DELAY_SECONDS]
 
     assert worker.process_next_job() is True
     with session_factory() as session:
@@ -211,3 +260,35 @@ def test_process_next_job_requeues_when_attempts_remain(monkeypatch, session_fac
         assert second.status == "failed"
         assert second.attempt_count == 2
         assert second.error_message == "tts unavailable"
+    assert sleeps == [worker.RETRY_DELAY_SECONDS]
+
+
+def test_process_next_job_cancels_instead_of_requeue_when_cancel_races_failure(
+    monkeypatch, session_factory
+):
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "cancel race"}, max_attempts=2)
+
+    monkeypatch.setattr(worker, "SessionLocal", session_factory)
+    _disable_cleanup(monkeypatch)
+    sleeps = _no_sleep(monkeypatch)
+
+    def fake_pipeline(*_args, **_kwargs):
+        with session_factory() as session:
+            racing_job = get_job(session, job.id)
+            racing_job.cancel_requested = True
+            session.commit()
+        raise RuntimeError("boom during cancel race")
+
+    monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
+
+    assert worker.process_next_job() is True
+    with session_factory() as session:
+        updated = get_job(session, job.id)
+        assert updated.status == "cancelled"
+        assert updated.attempt_count == 1
+        assert list_job_events(session, job.id)[-1].event_type == "cancelled"
+    assert sleeps == []
+
+    # Nothing claimable: the job is cancelled, not stuck in queued.
+    assert worker.process_next_job() is False

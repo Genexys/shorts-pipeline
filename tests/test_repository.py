@@ -132,6 +132,22 @@ def test_recover_running_jobs_cancels_when_cancel_requested(session):
     assert get_job(session, job.id).status == "cancelled"
 
 
+def test_recover_running_jobs_cancels_unclaimable_queued_jobs(session):
+    stuck = create_job(session, payload={"videoSubject": "stuck"})
+    stuck.status = "queued"
+    stuck.cancel_requested = True
+    session.commit()
+    normal = create_job(session, payload={"videoSubject": "normal"})
+
+    touched = recover_running_jobs(session)
+
+    assert stuck.id in touched
+    assert get_job(session, stuck.id).status == "cancelled"
+    assert list_job_events(session, stuck.id)[-1].event_type == "cancelled"
+    assert get_job(session, normal.id).status == "queued"
+    assert normal.id not in touched
+
+
 def test_add_artifact_and_list_artifacts_in_insert_order(session):
     job = create_job(session, payload={"videoSubject": "artifacts"})
 
