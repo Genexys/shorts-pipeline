@@ -3,10 +3,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
 
 import autopilot
 from autopilot import Autopilot, build_notifier, build_payload, build_topic_prompt
 from autopilot_config import AutopilotConfig
+from models import GenerationJob
 from repository import (
     add_artifact,
     add_topic,
@@ -360,6 +362,62 @@ def test_run_tick_isolates_step_failures(pilot, monkeypatch, capsys):
 
     assert created == [NOON]
     assert "db down" in capsys.readouterr().out
+
+
+def test_run_tick_end_to_end_queues_job_then_reports(session_factory, tmp_path, notifications):
+    def generate(prompt: str, ai_model: str) -> str:
+        return json.dumps({"subject": "Why do octopuses have three hearts"})
+
+    pilot = Autopilot(
+        config=_config(),
+        session_factory=session_factory,
+        notify=lambda text: notifications.append(text) or True,
+        generate=generate,
+        output_dir=tmp_path / "output",
+    )
+
+    pilot.run_tick(NOON)
+
+    with session_factory() as session:
+        jobs = session.scalars(select(GenerationJob)).all()
+        assert len(jobs) == 1
+        assert jobs[0].payload["videoSubject"] == "Why do octopuses have three hearts"
+        job_id = jobs[0].id
+        topics = list_topics(session, None, 10)
+        assert len(topics) == 1
+        assert topics[0].status == "queued"
+
+    with session_factory() as session:
+        mark_completed(session, job_id, "output.mp4")
+
+    pilot.run_tick(NOON + timedelta(minutes=1))
+
+    with session_factory() as session:
+        topics = list_topics(session, None, 10)
+        assert len(topics) == 1
+        assert topics[0].status == "done"
+    assert len(notifications) == 1
+    assert notifications[0].startswith("✅")
+
+
+def test_run_tick_disabled_creates_nothing(session_factory, tmp_path, notifications):
+    def generate(prompt: str, ai_model: str) -> str:
+        raise AssertionError("generate should not be called when autopilot is disabled")
+
+    pilot = Autopilot(
+        config=_config(AUTOPILOT_ENABLED=False),
+        session_factory=session_factory,
+        notify=lambda text: notifications.append(text) or True,
+        generate=generate,
+        output_dir=tmp_path / "output",
+    )
+
+    pilot.run_tick(NOON)
+
+    with session_factory() as session:
+        assert list_topics(session, None, 10) == []
+        assert session.scalars(select(GenerationJob)).all() == []
+    assert notifications == []
 
 
 def test_main_exits_1_on_config_error(monkeypatch):
