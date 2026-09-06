@@ -23,6 +23,7 @@ dependencies = [
     "google-auth-oauthlib==1.4.1",
     "sqlalchemy==2.0.36",
     "psycopg[binary]==3.2.3",
+    "tzdata",
 ]
 
 [dependency-groups]
