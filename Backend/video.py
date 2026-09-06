@@ -41,7 +41,7 @@ def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
     video_id = uuid.uuid4()
     video_path = destination / f"{video_id}.mp4"
     with open(video_path, "wb") as f:
-        f.write(requests.get(video_url).content)
+        f.write(requests.get(video_url, timeout=60).content)
 
     return str(video_path)
 
