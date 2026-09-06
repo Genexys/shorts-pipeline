@@ -3,8 +3,10 @@
 Run:  uv run python Backend/autopilot.py
 """
 
+import functools
 import os
 import sys
+import textwrap
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +23,7 @@ from models import Topic
 from notify import send_telegram
 from repository import (
     add_topic,
+    as_utc,
     count_topics_used_today,
     get_job,
     has_active_jobs,
@@ -43,6 +46,7 @@ RECENT_TOPICS_LIMIT = 50
 TOPIC_MIN_WORDS = 4
 TOPIC_MAX_WORDS = 12
 ERROR_TEXT_LIMIT = 500
+STALL_WARNING_SECONDS = 3 * 3600
 
 
 def build_payload(config: AutopilotConfig, subject: str) -> dict:
@@ -61,24 +65,42 @@ def build_payload(config: AutopilotConfig, subject: str) -> dict:
     }
 
 
+def build_notifier(config: AutopilotConfig) -> Callable[[str], bool]:
+    return functools.partial(
+        send_telegram, token=config.telegram_bot_token, chat_id=config.telegram_chat_id
+    )
+
+
 def build_topic_prompt(niche: str, recent: list[str]) -> str:
+    # Substitution happens after dedent/strip (via .format, not an f-string): recent
+    # subjects are unindented, and interpolating them before dedent would drag the
+    # whole block's common-indent calculation down to zero, leaving every other line
+    # still indented.
     recent_block = "\n".join(f"- {subject}" for subject in recent) or "- (none yet)"
-    return f"""
-    You pick topics for short vertical YouTube videos (YouTube Shorts).
+    template = textwrap.dedent(
+        """
+        You pick topics for short vertical YouTube videos (YouTube Shorts).
 
-    Channel niche: {niche}
+        Channel niche: {niche}
 
-    Propose ONE new video topic. Requirements:
-    - Written in English.
-    - Between {TOPIC_MIN_WORDS} and {TOPIC_MAX_WORDS} words.
-    - A concrete fact, question or claim, not a broad category.
-    - Must not repeat or rephrase any of the topics already used below.
+        Propose ONE new video topic. Requirements:
+        - Written in English.
+        - Between {min_words} and {max_words} words.
+        - A concrete fact, question or claim, not a broad category.
+        - Must not repeat or rephrase any of the topics already used below.
 
-    Topics already used (do not repeat, do not paraphrase):
-    {recent_block}
+        Topics already used (do not repeat, do not paraphrase):
+        {recent_block}
 
-    Return ONLY a JSON object: {{"subject": "..."}}
-    """
+        Return ONLY a JSON object: {{"subject": "..."}}
+        """
+    ).strip()
+    return template.format(
+        niche=niche,
+        min_words=TOPIC_MIN_WORDS,
+        max_words=TOPIC_MAX_WORDS,
+        recent_block=recent_block,
+    )
 
 
 class Autopilot:
@@ -98,6 +120,7 @@ class Autopilot:
         self.failed_topic_ticks = 0
         self.topic_failure_notified = False
         self.last_cleanup_at: Optional[datetime] = None
+        self.stall_notified: set[int] = set()
 
     # -- messages ------------------------------------------------------------
 
@@ -113,6 +136,7 @@ class Autopilot:
     def run_tick(self, now: datetime) -> None:
         for step in (
             lambda: self.finish_completed_topics(),
+            lambda: self.warn_stalled_topics(now),
             lambda: self.maybe_create_job(now),
             lambda: self.cleanup_output(now),
         ):
@@ -129,8 +153,9 @@ class Autopilot:
             for topic in topics_awaiting_result(session):
                 job = get_job(session, topic.job_id) if topic.job_id else None
                 if job is None:
+                    job_ref = topic.job_id or "unknown"
                     mark_topic_finished(session, topic.id, "failed")
-                    self.notify(f"❌ {topic.subject}\njob {topic.job_id} not found\njob {topic.job_id}, attempts 0")
+                    self.notify(f"❌ {topic.subject}\njob {job_ref} not found\njob {job_ref}, attempts 0")
                     finished += 1
                     continue
                 if job.status == "completed":
@@ -162,6 +187,27 @@ class Autopilot:
                 second_line = artifact.path
         return f"✅ {title}\n{second_line}\njob {job_id}"
 
+    def warn_stalled_topics(self, now: datetime) -> int:
+        """Notify once per topic when its job has been queued/running for too long."""
+        warned = 0
+        with self.session_factory() as session:
+            for topic in topics_awaiting_result(session):
+                if topic.id in self.stall_notified or topic.job_id is None:
+                    continue
+                job = get_job(session, topic.job_id)
+                if job is None or job.status not in ("queued", "running"):
+                    continue
+                used_at = as_utc(topic.used_at)
+                if used_at is None or (now - used_at).total_seconds() < STALL_WARNING_SECONDS:
+                    continue
+                hours = int((now - used_at).total_seconds() // 3600)
+                self.stall_notified.add(topic.id)
+                self.notify(
+                    f"⚠️ {topic.subject}\njob {job.id} {job.status} for {hours}h, worker may be stuck"
+                )
+                warned += 1
+        return warned
+
     # -- step 2 --------------------------------------------------------------
 
     def maybe_create_job(self, now: datetime) -> Optional[str]:
@@ -170,6 +216,8 @@ class Autopilot:
             last_used = last_topic_used_at(session)
             if not slot_available(now, self.config, used_today, last_used):
                 return None
+            # Not atomic against a concurrent POST /api/generate: the worker only runs
+            # one job at a time, so a race here costs one extra queued job, not a crash.
             if has_active_jobs(session):
                 log("[*] Autopilot: a job is already queued or running, waiting.", "info")
                 return None
@@ -263,7 +311,7 @@ def main() -> int:
         print(f"[autopilot] configuration error: {err}")
         return 1
 
-    pilot = Autopilot(config, SessionLocal)
+    pilot = Autopilot(config, SessionLocal, notify=build_notifier(config))
     log(f"[+] {pilot.start_message()}", "success")
     pilot.notify(pilot.start_message())
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import autopilot
-from autopilot import Autopilot, build_payload, build_topic_prompt
+from autopilot import Autopilot, build_notifier, build_payload, build_topic_prompt
 from autopilot_config import AutopilotConfig
 from repository import (
     add_artifact,
@@ -249,6 +249,82 @@ def test_finish_completed_topics_reports_failure_and_cancel(pilot, session_facto
     with session_factory() as session:
         statuses = sorted(t.status for t in list_topics(session, None, 10))
         assert statuses == ["failed", "failed"]
+
+
+def test_finish_completed_topics_marks_vanished_job_failed(pilot, session_factory, notifications):
+    with session_factory() as session:
+        topic = add_topic(session, "Vanishing job topic", None, "manual")
+        job = queue_topic_job(session, topic, {"videoSubject": "Vanishing job topic"})
+        topic_id = topic.id
+        job = get_job(session, job.id)
+        session.delete(job)
+        session.commit()
+
+    assert pilot.finish_completed_topics() == 1
+
+    assert len(notifications) == 1
+    assert "not found" in notifications[0]
+    with session_factory() as session:
+        topic = list_topics(session, None, 10)[0]
+        assert topic.id == topic_id
+        assert topic.status == "failed"
+
+
+def test_warn_stalled_topics_notifies_once(pilot, session_factory, notifications):
+    with session_factory() as session:
+        topic = add_topic(session, "Stalled topic", None, "manual")
+        job = queue_topic_job(
+            session, topic, {"videoSubject": "Stalled topic"}, now=NOON - timedelta(hours=4)
+        )
+        job_id = job.id
+
+    assert pilot.warn_stalled_topics(NOON) == 1
+    assert len(notifications) == 1
+    assert "⚠️" in notifications[0]
+    assert "Stalled topic" in notifications[0]
+    assert job_id in notifications[0]
+
+    assert pilot.warn_stalled_topics(NOON) == 0
+    assert len(notifications) == 1
+
+
+def test_warn_stalled_topics_ignores_recent_and_finished_jobs(pilot, session_factory, notifications):
+    with session_factory() as session:
+        recent_topic = add_topic(session, "Recent topic", None, "manual")
+        queue_topic_job(
+            session,
+            recent_topic,
+            {"videoSubject": "Recent topic"},
+            now=NOON - timedelta(hours=1),
+        )
+
+        old_topic = add_topic(session, "Old finished topic", None, "manual")
+        old_job = queue_topic_job(
+            session,
+            old_topic,
+            {"videoSubject": "Old finished topic"},
+            now=NOON - timedelta(hours=5),
+        )
+        mark_completed(session, old_job.id, "output.mp4")
+
+    assert pilot.warn_stalled_topics(NOON) == 0
+    assert notifications == []
+
+
+def test_build_notifier_passes_config_credentials(monkeypatch):
+    calls = []
+
+    def recorder(text, token=None, chat_id=None):
+        calls.append((text, token, chat_id))
+        return True
+
+    monkeypatch.setattr(autopilot, "send_telegram", recorder)
+    config = _config(TELEGRAM_BOT_TOKEN="T", TELEGRAM_CHAT_ID="7")
+
+    notifier = build_notifier(config)
+
+    assert notifier("hi") is True
+    assert calls == [("hi", "T", "7")]
 
 
 def test_cleanup_output_deletes_old_files_hourly(pilot, tmp_path):

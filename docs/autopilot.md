@@ -2,7 +2,7 @@
 
 `Backend/autopilot.py` runs next to the API and the worker. Every minute it:
 
-1. Checks topics whose job finished: `completed` marks the topic `done`, `failed` or `cancelled` marks it `failed`, and sends a Telegram message.
+1. Checks topics whose job finished: `completed` marks the topic `done`, `failed` or `cancelled` marks it `failed`, and sends a Telegram message; and warns once when a job has been queued or running for more than 3 hours.
 2. Decides whether to queue a new job (see below) using a manually added topic first, otherwise a topic invented by Ollama for `AUTOPILOT_NICHE`.
 3. Once an hour deletes `output/*.mp4` older than `OUTPUT_RETENTION_DAYS`.
 
@@ -51,6 +51,7 @@ Messages:
 - `✅ <title>` + YouTube link (or `upload skipped: <reason>`) + job id
 - `❌ <subject>` + error + job id and attempts
 - `⚠️ <subject> cancelled` + job id
+- `⚠️ <subject>` + `job <id> queued for <N>h, worker may be stuck` — once per topic after 3 hours without a result
 - one warning after 10 consecutive minutes without a usable topic from Ollama
 
 If the token or chat id is empty, messages are printed to the log with a `[telegram disabled]` prefix.

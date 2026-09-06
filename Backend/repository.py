@@ -286,7 +286,7 @@ def normalize_subject(subject: str) -> str:
     return re.sub(r"\s+", " ", kept).strip()
 
 
-def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+def as_utc(value: Optional[datetime]) -> Optional[datetime]:
     """SQLite returns naive datetimes; they were stored as UTC."""
     if value is None:
         return None
@@ -378,7 +378,7 @@ def count_topics_used_today(session: Session, now: datetime, tz: tzinfo) -> int:
     return sum(
         1
         for used_at in used_values
-        if (converted := _as_utc(used_at)) is not None and converted >= day_start_utc
+        if (converted := as_utc(used_at)) is not None and converted >= day_start_utc
     )
 
 
@@ -389,13 +389,13 @@ def last_topic_used_at(session: Session) -> Optional[datetime]:
         .order_by(Topic.used_at.desc())
         .limit(1)
     )
-    return _as_utc(session.scalars(stmt).first())
+    return as_utc(session.scalars(stmt).first())
 
 
 def topics_awaiting_result(session: Session) -> list[Topic]:
     stmt = (
         select(Topic)
-        .where(and_(Topic.status == "queued", Topic.job_id.is_not(None)))
+        .where(Topic.status == "queued")
         .order_by(Topic.id.asc())
     )
     return list(session.scalars(stmt).all())

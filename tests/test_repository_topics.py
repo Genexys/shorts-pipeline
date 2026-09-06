@@ -114,6 +114,17 @@ def test_last_topic_used_at_is_utc_aware(session):
     assert abs((datetime.now(timezone.utc) - last).total_seconds()) < 60
 
 
+def test_topics_awaiting_result_includes_queued_without_job(session):
+    stranded = add_topic(session, "vanished job topic", None, "manual")
+    stranded.status = "queued"
+    session.commit()
+    add_topic(session, "still planned", None, "manual")
+
+    result = topics_awaiting_result(session)
+
+    assert [t.id for t in result] == [stranded.id]
+
+
 def test_has_active_jobs(session):
     assert has_active_jobs(session) is False
     job = create_job(session, payload={"videoSubject": "ui job"})
