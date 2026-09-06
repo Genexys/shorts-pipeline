@@ -32,11 +32,13 @@ sudo usermod -aG docker $USER && newgrp docker
 docker compose version
 git clone <your fork url> MoneyPrinter && cd MoneyPrinter
 cp .env.example .env
-nano .env        # TIKTOK_SESSION_ID, PEXELS_API_KEY, OLLAMA_MODEL, AUTOPILOT_NICHE, TELEGRAM_*, TZ
+nano .env        # TIKTOK_SESSION_ID, PEXELS_API_KEY, OLLAMA_MODEL, AUTOPILOT_NICHE, TELEGRAM_*, TZ, POSTGRES_PASSWORD
 mkdir -p secrets output Songs
 ```
 
 Recommended `.env` values for a 16 GB server: `OLLAMA_MODEL="llama3.1:8b"`, `AUTOPILOT_VIDEOS_PER_DAY="2"`, `AUTOPILOT_WINDOW="09:00-21:00"`, `TZ="Europe/Berlin"` (or your zone).
+
+Set `POSTGRES_PASSWORD` to a random alphanumeric value; it is interpolated into `DATABASE_URL`, so `@`, `:`, `/` and `#` would break the URL.
 
 ## 4. Copy the secrets from your laptop
 
@@ -44,7 +46,7 @@ Recommended `.env` values for a 16 GB server: `OLLAMA_MODEL="llama3.1:8b"`, `AUT
 scp Backend/client_secret.json Backend/youtube_token.json <user>@<vps>:MoneyPrinter/secrets/
 ```
 
-The worker reads them from `/app/secrets/` (read-only mount). Nothing else on the server needs them.
+The worker reads them from `/app/secrets/` and writes the refreshed access token back into `youtube_token.json`. Nothing else on the server needs them.
 
 ## 5. Start
 

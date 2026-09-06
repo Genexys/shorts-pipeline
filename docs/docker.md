@@ -14,6 +14,8 @@
 
 `api`, `worker` and `autopilot` start only after Postgres is healthy and `ollama-init` has finished; `worker` and `autopilot` also wait until the API answers `GET /api/topics`, which guarantees the schema exists.
 
+`OLLAMA_KEEP_ALIVE=2m` unloads the model between the script and the metadata calls, which frees RAM during rendering but means the model is read from disk again for the metadata step; raise `OLLAMA_TIMEOUT` if that step times out.
+
 ## Prerequisites
 
 - Docker Engine with the compose plugin (`docker compose version` prints v2.x).
@@ -23,7 +25,7 @@
 ## First start
 
 ```bash
-cp .env.example .env            # edit: TIKTOK_SESSION_ID, PEXELS_API_KEY, AUTOPILOT_NICHE, TELEGRAM_*, TZ
+cp .env.example .env            # edit: TIKTOK_SESSION_ID, PEXELS_API_KEY, AUTOPILOT_NICHE, TELEGRAM_*, TZ, POSTGRES_PASSWORD
 mkdir -p secrets output Songs
 # copy client_secret.json and youtube_token.json into secrets/ (see docs/deploy.md)
 docker compose up -d --build
@@ -52,7 +54,7 @@ curl -X POST http://localhost:8080/api/topics -H "Content-Type: application/json
 
 | Path | Mounted into | Purpose |
 |---|---|---|
-| `./secrets/` | `worker` (read-only) | `client_secret.json`, `youtube_token.json` |
+| `./secrets/` | `worker` | `client_secret.json`, `youtube_token.json`; the refreshed access token is written back here |
 | `./output/` | `worker`, `autopilot` | `<job_id>.mp4` archives, pruned after `OUTPUT_RETENTION_DAYS` |
 | `./Songs/` | `api`, `worker` | background music uploaded via the UI |
 | `postgres_data` | `postgres` | database |
@@ -65,7 +67,7 @@ curl -X POST http://localhost:8080/api/topics -H "Content-Type: application/json
 ```bash
 docker compose ps                                  # status and health
 docker compose logs -f --tail=100 worker           # follow one service
-docker compose exec postgres psql -U moneyprinter  # inspect the database
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'  # inspect the database
 git pull && docker compose up -d --build           # update
 docker compose down                                # stop (volumes are kept)
 ```
@@ -81,3 +83,4 @@ Change the model: edit `OLLAMA_MODEL` in `.env`, then `docker compose up -d` (ol
 - `autopilot` restarts in a loop with `configuration error`: `AUTOPILOT_NICHE` is empty or `AUTOPILOT_WINDOW` is invalid.
 - Upload skipped with `No valid YouTube credentials`: `secrets/youtube_token.json` is missing or invalid; recreate it on a machine with a browser (docs/deploy.md).
 - Files in `output/` are owned by root: containers run as root; `sudo chown -R $USER output` if you need to edit them.
+- `worker` or `autopilot` restart a few times right after a host reboot: `restart: always` ignores `depends_on`, so they can start before Postgres answers; they settle within a minute.

@@ -90,7 +90,7 @@ services:
     volumes:
       - ./output:/app/output
       - ./Songs:/app/Songs
-      - ./secrets:/app/secrets:ro
+      - ./secrets:/app/secrets
     depends_on:
       api:
         condition: service_healthy
