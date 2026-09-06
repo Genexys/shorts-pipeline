@@ -81,25 +81,42 @@ def test_tts_writes_decoded_audio_file(monkeypatch, tmp_path: Path):
 
 
 def test_tts_joins_chunks_for_long_text(monkeypatch, tmp_path: Path):
-    seen: list[str] = []
+    # Each part gets its own distinct byte, keyed by its position in the
+    # split (not by call/completion order, since chunks are generated on
+    # separate threads), so this test can actually detect chunks being
+    # joined out of order or a stale/padding decode bug.
+    long_text = " ".join(f"word{i}" for i in range(200))  # unique words, > TEXT_BYTE_LIMIT
+    parts = tiktokvoice.split_string(long_text, 299)
+    assert len(parts) >= 2
+    index_by_part = {part: index for index, part in enumerate(parts)}
+    assert len(index_by_part) == len(parts)  # every part is distinct
 
     def fake_generate(text: str, voice: str) -> str:
-        seen.append(text)
-        return base64.b64encode(text[:1].encode()).decode()
+        return base64.b64encode(bytes([65 + index_by_part[text]])).decode()
 
     monkeypatch.setattr(tiktokvoice, "generate_audio", fake_generate)
-    long_text = " ".join(["word"] * 120)  # 599 chars > TEXT_BYTE_LIMIT
     target = tmp_path / "long.mp3"
 
     tiktokvoice.tts(long_text, "en_us_001", filename=str(target))
 
-    assert len(seen) >= 2
-    assert target.read_bytes() == b"w" * len(seen)
+    assert target.read_bytes() == bytes(range(65, 65 + len(parts)))
 
 
 def test_tts_rejects_unknown_voice(tmp_path: Path):
     with pytest.raises(TTSError, match="not available"):
         tiktokvoice.tts("hello", "xx_999", filename=str(tmp_path / "x.mp3"))
+
+
+def test_tts_rejects_empty_text_without_calling_network(monkeypatch, tmp_path: Path):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        tiktokvoice.requests, "post", lambda *args, **kwargs: calls.append(args)
+    )
+
+    with pytest.raises(TTSError, match="empty"):
+        tiktokvoice.tts("   ", "en_us_001", filename=str(tmp_path / "empty.mp3"))
+
+    assert calls == []
 
 
 def test_tts_propagates_chunk_failure(monkeypatch, tmp_path: Path):

@@ -104,6 +104,12 @@ def test_requeue_for_retry_sets_queued_and_retry_event(session):
     assert events[-1].message == "tts down"
 
 
+def test_requeue_for_retry_with_unknown_job_id_is_a_no_op(session):
+    requeue_for_retry(session, "does-not-exist", error_message="ignored")
+
+    assert get_job(session, "does-not-exist") is None
+
+
 def test_recover_running_jobs_requeues_or_fails(session):
     retryable = create_job(session, payload={"videoSubject": "a"}, max_attempts=2)
     exhausted = create_job(session, payload={"videoSubject": "b"}, max_attempts=1)

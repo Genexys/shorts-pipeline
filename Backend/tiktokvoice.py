@@ -101,12 +101,6 @@ def split_string(string: str, chunk_size: int) -> List[str]:
     return result
 
 
-def save_audio_file(base64_data: str, filename: str = "output.mp3") -> None:
-    audio_bytes = base64.b64decode(base64_data)
-    with open(filename, "wb") as file:
-        file.write(audio_bytes)
-
-
 def _request_audio(endpoint: str, text: str, voice: str) -> str:
     response = requests.post(
         endpoint,
@@ -142,7 +136,7 @@ def generate_audio(text: str, voice: str) -> str:
                     "warning",
                 )
                 if attempt_number < total_attempts:
-                    _sleep(BACKOFF_SECONDS[attempt])
+                    _sleep(BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS) - 1)])
     raise TTSError(f"TTS failed after {total_attempts} attempts. Last error: {last_error}")
 
 
