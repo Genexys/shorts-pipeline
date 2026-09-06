@@ -29,8 +29,23 @@ load_dotenv(ENV_FILE)
 check_env_vars()
 init_db()
 
+DEFAULT_CORS_ORIGINS: tuple[str, ...] = (
+    "http://localhost:8001",
+    "http://127.0.0.1:8001",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+
+
+def cors_origins(raw: str | None = None) -> list[str]:
+    """Comma-separated CORS_ORIGINS from the environment; empty or unset keeps the defaults."""
+    value = os.getenv("CORS_ORIGINS", "") if raw is None else raw
+    origins = [item.strip() for item in value.split(",") if item.strip()]
+    return origins or list(DEFAULT_CORS_ORIGINS)
+
+
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=cors_origins())
 
 HOST = "0.0.0.0"
 PORT = 8080
@@ -280,4 +295,4 @@ def get_topics() -> ResponseReturnValue:
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host=HOST, port=PORT, threaded=True)
+    app.run(host=HOST, port=PORT, threaded=True)
