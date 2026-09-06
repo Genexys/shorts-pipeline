@@ -367,7 +367,13 @@ def _iter_balanced_brace_spans(text: str):
 
 
 def extract_json_object(response: str) -> Optional[dict]:
-    """Parse a JSON object from an LLM response, tolerating surrounding text."""
+    """Parse a JSON object from an LLM response, tolerating surrounding text.
+
+    Tries the whole response as JSON first, then falls back to a bounded,
+    string-aware balanced-brace scan. There is no regex fallback: if a
+    span from the first '{' to the last '}' were valid JSON, it would be
+    balanced, so the scan's first candidate would already have found it.
+    """
     try:
         parsed = json.loads(response)
     except (json.JSONDecodeError, TypeError):
@@ -380,15 +386,6 @@ def extract_json_object(response: str) -> Optional[dict]:
             parsed = json.loads(candidate)
         except (json.JSONDecodeError, TypeError):
             continue
-        if isinstance(parsed, dict):
-            return parsed
-
-    match = re.search(r"\{[\s\S]*\}", response)
-    if match:
-        try:
-            parsed = json.loads(match.group())
-        except (json.JSONDecodeError, TypeError):
-            parsed = None
         if isinstance(parsed, dict):
             return parsed
 

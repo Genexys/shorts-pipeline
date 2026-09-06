@@ -1,3 +1,5 @@
+import time
+
 import gpt
 from gpt import extract_json_object, generate_metadata, validate_metadata
 
@@ -38,7 +40,12 @@ def test_extract_json_object_skips_non_dict_fragment_and_finds_next_object():
 
 
 def test_extract_json_object_gives_up_on_pathological_input():
-    assert extract_json_object("{" * 10000) is None
+    start = time.perf_counter()
+    result = extract_json_object("{" * 50000)
+    elapsed = time.perf_counter() - start
+
+    assert result is None
+    assert elapsed < 1.0
 
     text = "{" * 100 + '{"title": "T", "description": "D", "tags": []}'
     assert extract_json_object(text) is None
