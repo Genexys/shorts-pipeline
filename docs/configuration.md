@@ -30,6 +30,8 @@ Use `.env.example` as your template.
 |---|---|---|
 | `YOUTUBE_PRIVACY_STATUS` | Privacy of uploaded videos: `private`, `unlisted` or `public`. Invalid values fall back to `private` with a warning. | `private` |
 | `YOUTUBE_CATEGORY_ID` | YouTube category id for uploads (`28` = Science & Technology). | `28` |
+| `YOUTUBE_CLIENT_SECRETS_FILE` | Path to the OAuth client JSON. | `Backend/client_secret.json` |
+| `YOUTUBE_TOKEN_FILE` | Path to the saved OAuth token. | `Backend/youtube_token.json` |
 
 Files (both git-ignored, both live in `Backend/`):
 
@@ -69,3 +71,4 @@ ollama pull llama3.1:8b
 
 - If ImageMagick is not discovered automatically, set `IMAGEMAGICK_BINARY` explicitly.
 - New architecture uses a database-backed job queue. In Docker, use Postgres via `DATABASE_URL`.
+- Under Docker Compose, `OLLAMA_BASE_URL`, `DATABASE_URL`, `IMAGEMAGICK_BINARY`, `YOUTUBE_CLIENT_SECRETS_FILE` and `YOUTUBE_TOKEN_FILE` are set by `docker-compose.yml`.

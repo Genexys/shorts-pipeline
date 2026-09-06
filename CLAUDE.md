@@ -26,8 +26,11 @@ python3 -m http.server 3000 --directory Frontend           # frontend on :3000
 
 ### Run (Docker)
 ```bash
-docker compose up --build   # frontend :8001, backend :8080, postgres :5432
+mkdir -p secrets output Songs      # secrets/: client_secret.json + youtube_token.json
+docker compose up -d --build       # postgres, ollama (+model pull), api :8080, worker, autopilot, frontend :8001
+docker compose logs -f autopilot worker
 ```
+Ports bind to 127.0.0.1 only; on a server use `ssh -L 8080:127.0.0.1:8080 -L 8001:127.0.0.1:8001`. See `docs/docker.md` and `docs/deploy.md`.
 
 ### Verify
 ```bash
@@ -100,7 +103,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 - `PEXELS_API_KEY` — stock video API
 - `IMAGEMAGICK_BINARY` — leave empty to auto-detect from PATH
 
-Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`, `AUTOPILOT_*`, `OUTPUT_RETENTION_DAYS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TZ` (see `docs/autopilot.md`)
+Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`, `YOUTUBE_CLIENT_SECRETS_FILE`, `YOUTUBE_TOKEN_FILE`, `AUTOPILOT_*`, `OUTPUT_RETENTION_DAYS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TZ` (see `docs/autopilot.md`)
 
 ## Conventions
 
