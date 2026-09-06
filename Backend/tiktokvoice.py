@@ -7,12 +7,13 @@
 # --- MODIFIED VERSION --- #
 
 import base64
-import requests
 import threading
+import time
+from typing import List, Optional
 
-from typing import List
+import requests
+
 from logstream import log
-from playsound import playsound
 
 
 VOICES = [
@@ -68,140 +69,120 @@ VOICES = [
 
 ENDPOINTS = [
     "https://tiktok-tts.weilnet.workers.dev/api/generation",
-    "https://tiktoktts.com/api/tiktok-tts",
+    "https://ottsy.weilbyte.dev/api/generation",
 ]
-current_endpoint = 0
+REQUEST_TIMEOUT = 30
+MAX_ATTEMPTS_PER_ENDPOINT = 3
+BACKOFF_SECONDS = (2, 4, 8)
 # in one conversion, the text can have a maximum length of 300 characters
 TEXT_BYTE_LIMIT = 300
 
+_sleep = time.sleep
 
-# create a list by splitting a string, every element has n chars
+
+class TTSError(RuntimeError):
+    """Raised when no TTS endpoint could produce audio."""
+
+
 def split_string(string: str, chunk_size: int) -> List[str]:
+    """Split text into chunks of at most chunk_size characters on word boundaries."""
     words = string.split()
-    result = []
+    result: List[str] = []
     current_chunk = ""
     for word in words:
-        if (
-            len(current_chunk) + len(word) + 1 <= chunk_size
-        ):  # Check if adding the word exceeds the chunk size
+        if len(current_chunk) + len(word) + 1 <= chunk_size:
             current_chunk += f" {word}"
         else:
-            if current_chunk:  # Append the current chunk if not empty
+            if current_chunk:
                 result.append(current_chunk.strip())
             current_chunk = word
-    if current_chunk:  # Append the last chunk if not empty
+    if current_chunk:
         result.append(current_chunk.strip())
     return result
 
 
-# checking if the website that provides the service is available
-def get_api_response() -> requests.Response:
-    url = f'{ENDPOINTS[current_endpoint].split("/a")[0]}'
-    response = requests.get(url)
-    return response
-
-
-# saving the audio file
 def save_audio_file(base64_data: str, filename: str = "output.mp3") -> None:
     audio_bytes = base64.b64decode(base64_data)
     with open(filename, "wb") as file:
         file.write(audio_bytes)
 
 
-# send POST request to get the audio data
-def generate_audio(text: str, voice: str) -> bytes:
-    url = f"{ENDPOINTS[current_endpoint]}"
-    headers = {"Content-Type": "application/json"}
-    data = {"text": text, "voice": voice}
-    response = requests.post(url, headers=headers, json=data)
-    return response.content
+def _request_audio(endpoint: str, text: str, voice: str) -> str:
+    response = requests.post(
+        endpoint,
+        headers={"Content-Type": "application/json"},
+        json={"text": text, "voice": voice},
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, str) or not data:
+        error = payload.get("error") if isinstance(payload, dict) else payload
+        raise TTSError(f"no audio in response: {error}")
+    if "base64," in data:
+        data = data.split("base64,", 1)[1]
+    return data
 
 
-# creates an text to speech audio file
-def tts(
-    text: str,
-    voice: str = "none",
-    filename: str = "output.mp3",
-    play_sound: bool = False,
-) -> None:
-    # checking if the website is available
-    global current_endpoint
-
-    if get_api_response().status_code == 200:
-        log("[+] TikTok TTS Service available!", "success")
-    else:
-        current_endpoint = (current_endpoint + 1) % 2
-        if get_api_response().status_code == 200:
-            log("[+] TTS Service available!", "success")
-        else:
-            log("[-] TTS Service not available and probably temporarily rate limited, try again later...", "error")
-            return
-
-    # checking if arguments are valid
-    if voice == "none":
-        log("[-] Please specify a voice", "error")
-        return
-
-    if voice not in VOICES:
-        log("[-] Voice not available", "error")
-        return
-
-    if not text:
-        log("[-] Please specify a text", "error")
-        return
-
-    # creating the audio file
-    try:
-        if len(text) < TEXT_BYTE_LIMIT:
-            audio = generate_audio((text), voice)
-            if current_endpoint == 0:
-                audio_base64_data = str(audio).split('"')[5]
-            else:
-                audio_base64_data = str(audio).split('"')[3].split(",")[1]
-
-            if audio_base64_data == "error":
-                log("[-] This voice is unavailable right now", "error")
-                return
-
-        else:
-            # Split longer text into smaller parts
-            text_parts = split_string(text, 299)
-            audio_base64_data = [None] * len(text_parts)
-
-            # Define a thread function to generate audio for each text part
-            def generate_audio_thread(text_part, index):
-                audio = generate_audio(text_part, voice)
-                if current_endpoint == 0:
-                    base64_data = str(audio).split('"')[5]
-                else:
-                    base64_data = str(audio).split('"')[3].split(",")[1]
-
-                if audio_base64_data == "error":
-                    log("[-] This voice is unavailable right now", "error")
-                    return "error"
-
-                audio_base64_data[index] = base64_data
-
-            threads = []
-            for index, text_part in enumerate(text_parts):
-                # Create and start a new thread for each text part
-                thread = threading.Thread(
-                    target=generate_audio_thread, args=(text_part, index)
+def generate_audio(text: str, voice: str) -> str:
+    """Return base64 audio for text, trying every endpoint with backoff."""
+    last_error = "no TTS endpoints configured"
+    total_attempts = len(ENDPOINTS) * MAX_ATTEMPTS_PER_ENDPOINT
+    attempt_number = 0
+    for endpoint in ENDPOINTS:
+        for attempt in range(MAX_ATTEMPTS_PER_ENDPOINT):
+            attempt_number += 1
+            try:
+                return _request_audio(endpoint, text, voice)
+            except Exception as err:
+                last_error = f"{endpoint}: {err}"
+                log(
+                    f"[-] TTS attempt {attempt + 1}/{MAX_ATTEMPTS_PER_ENDPOINT} failed: {last_error}",
+                    "warning",
                 )
-                thread.start()
-                threads.append(thread)
+                if attempt_number < total_attempts:
+                    _sleep(BACKOFF_SECONDS[attempt])
+    raise TTSError(f"TTS failed after {total_attempts} attempts. Last error: {last_error}")
 
-            # Wait for all threads to complete
-            for thread in threads:
-                thread.join()
 
-            # Concatenate the base64 data in the correct order
-            audio_base64_data = "".join(audio_base64_data)
+def tts(text: str, voice: str = "none", filename: str = "output.mp3") -> None:
+    """Create an MP3 file for text. Raises TTSError on any failure."""
+    if voice == "none" or voice not in VOICES:
+        raise TTSError(f"Voice '{voice}' is not available.")
+    if not text or not text.strip():
+        raise TTSError("Text for TTS is empty.")
 
-        save_audio_file(audio_base64_data, filename)
-        log(f"[+] Audio file saved successfully as '{filename}'", "success")
-        if play_sound:
-            playsound(filename)
+    if len(text) < TEXT_BYTE_LIMIT:
+        parts = [text]
+    else:
+        parts = split_string(text, 299)
 
-    except Exception as e:
-        log(f"[-] An error occurred during TTS: {e}", "error")
+    chunks: List[Optional[str]] = [None] * len(parts)
+    errors: List[str] = []
+
+    def generate_chunk(index: int, part: str) -> None:
+        try:
+            chunks[index] = generate_audio(part, voice)
+        except Exception as err:
+            errors.append(str(err))
+
+    threads = [
+        threading.Thread(target=generate_chunk, args=(index, part))
+        for index, part in enumerate(parts)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    if errors or any(chunk is None for chunk in chunks):
+        raise TTSError(errors[0] if errors else "TTS returned no audio.")
+
+    # Decode each chunk individually before concatenating: base64 padding
+    # inside a joined string is not valid base64, so each part must be
+    # decoded on its own and the raw bytes concatenated.
+    audio_bytes = b"".join(base64.b64decode(chunk) for chunk in chunks if chunk)
+    with open(filename, "wb") as file:
+        file.write(audio_bytes)
+    log(f"[+] Audio file saved successfully as '{filename}'", "success")
