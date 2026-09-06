@@ -24,6 +24,18 @@ Use `.env.example` as your template.
 | `POSTGRES_PASSWORD` | Database password for Docker Postgres service. | `moneyprinter` |
 | `DATABASE_URL` | SQLAlchemy DSN used by API and worker (`postgresql+psycopg://...` or `sqlite:///...`). | `sqlite:///moneyprinter.db` |
 
+## YouTube upload
+
+| Variable | Description | Default |
+|---|---|---|
+| `YOUTUBE_PRIVACY_STATUS` | Privacy of uploaded videos: `private`, `unlisted` or `public`. Invalid values fall back to `private` with a warning. | `private` |
+| `YOUTUBE_CATEGORY_ID` | YouTube category id for uploads (`28` = Science & Technology). | `28` |
+
+Files (both git-ignored, both live in `Backend/`):
+
+- `client_secret.json`: OAuth client of type "Desktop app" from Google Cloud Console (YouTube Data API v3 enabled, consent screen published "In production", scope `youtube.upload`).
+- `youtube_token.json`: created once by `uv run python Backend/youtube_auth.py` on a machine with a browser. The worker refreshes the access token automatically and never opens a browser.
+
 ## Notes
 
 - Ollama models shown in the frontend are fetched from backend endpoint `/api/models`, which queries `OLLAMA_BASE_URL/api/tags`.

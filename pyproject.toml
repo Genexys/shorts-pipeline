@@ -20,7 +20,7 @@ dependencies = [
     "assemblyai",
     "brotli",
     "google-api-python-client",
-    "oauth2client",
+    "google-auth-oauthlib",
     "sqlalchemy==2.0.36",
     "psycopg[binary]==3.2.3",
 ]
