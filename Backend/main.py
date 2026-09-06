@@ -8,11 +8,14 @@ from sqlalchemy import and_, case, select
 from db import SessionLocal, init_db
 from gpt import list_ollama_models
 from logstream import log
+from models import Topic
 from repository import (
+    add_topic,
     create_job,
     get_job,
     list_artifacts,
     list_job_events,
+    list_topics,
     request_cancel,
 )
 from utils import ENV_FILE, SONGS_DIR, check_env_vars, clean_dir
@@ -199,6 +202,61 @@ def cancel_latest_running_job():
             "jobId": latest_job.id,
         }
     )
+
+
+TOPIC_STATUSES = ("planned", "queued", "done", "failed")
+
+
+def _topic_to_json(topic: Topic) -> dict:
+    return {
+        "id": topic.id,
+        "subject": topic.subject,
+        "niche": topic.niche,
+        "source": topic.source,
+        "status": topic.status,
+        "jobId": topic.job_id,
+        "createdAt": topic.created_at.isoformat() if topic.created_at else None,
+        "usedAt": topic.used_at.isoformat() if topic.used_at else None,
+        "completedAt": topic.completed_at.isoformat() if topic.completed_at else None,
+    }
+
+
+@app.route("/api/topics", methods=["POST"])
+def create_topic():
+    data = request.get_json(silent=True) or {}
+    subject = data.get("subject")
+    if not isinstance(subject, str) or not subject.strip():
+        return jsonify({"status": "error", "message": "subject is required."}), 400
+
+    with SessionLocal() as session:
+        topic = add_topic(session, subject, niche=None, source="manual")
+        if topic is None:
+            return jsonify({"status": "error", "message": "Topic already exists."}), 409
+        body = _topic_to_json(topic)
+
+    return jsonify({"status": "success", "topic": body}), 201
+
+
+@app.route("/api/topics", methods=["GET"])
+def get_topics():
+    status = request.args.get("status")
+    if status and status not in TOPIC_STATUSES:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": f"status must be one of {', '.join(TOPIC_STATUSES)}.",
+                }
+            ),
+            400,
+        )
+    limit = request.args.get("limit", default=50, type=int)
+    limit = max(1, min(limit, 500))
+
+    with SessionLocal() as session:
+        topics = [_topic_to_json(topic) for topic in list_topics(session, status, limit)]
+
+    return jsonify({"status": "success", "topics": topics})
 
 
 if __name__ == "__main__":
