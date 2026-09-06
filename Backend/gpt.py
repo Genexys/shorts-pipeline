@@ -319,19 +319,69 @@ TAGS_MAX_TOTAL_CHARS = 400
 TAGS_MAX_COUNT = 15
 
 
+def _iter_balanced_brace_spans(text: str):
+    """Yield substrings from each '{' to its matching '}', ignoring braces
+    that appear inside double-quoted JSON string values."""
+    n = len(text)
+    for i in range(n):
+        if text[i] != "{":
+            continue
+        depth = 0
+        in_string = False
+        escaped = False
+        end = None
+        j = i
+        while j < n:
+            ch = text[j]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                j += 1
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+            j += 1
+        if end is not None:
+            yield text[i : end + 1]
+
+
 def extract_json_object(response: str) -> Optional[dict]:
     """Parse a JSON object from an LLM response, tolerating surrounding text."""
-    candidates = [response]
-    match = re.search(r"\{[\s\S]*\}", response)
-    if match:
-        candidates.append(match.group())
-    for candidate in candidates:
+    try:
+        parsed = json.loads(response)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+
+    for candidate in _iter_balanced_brace_spans(response):
         try:
             parsed = json.loads(candidate)
         except (json.JSONDecodeError, TypeError):
             continue
         if isinstance(parsed, dict):
             return parsed
+
+    match = re.search(r"\{[\s\S]*\}", response)
+    if match:
+        try:
+            parsed = json.loads(match.group())
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+
     return None
 
 

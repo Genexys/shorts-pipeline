@@ -16,6 +16,25 @@ def test_extract_json_object_returns_none_for_garbage():
     assert extract_json_object('["a", "b"]') is None
 
 
+def test_extract_json_object_ignores_stray_brace_after_object():
+    text = 'Here is the JSON: {"title": "A", "description": "B", "tags": ["c"]} (note: braces like } are fine)'
+    assert extract_json_object(text) == {"title": "A", "description": "B", "tags": ["c"]}
+
+
+def test_extract_json_object_handles_braces_inside_string_value():
+    text = '{"title": "Use {curly} braces", "description": "x", "tags": []}'
+    assert extract_json_object(text) == {
+        "title": "Use {curly} braces",
+        "description": "x",
+        "tags": [],
+    }
+
+
+def test_extract_json_object_skips_non_dict_fragment_and_finds_next_object():
+    text = '{not json} {"title": "T", "description": "D", "tags": []}'
+    assert extract_json_object(text) == {"title": "T", "description": "D", "tags": []}
+
+
 def test_validate_metadata_cleans_markdown_and_truncates_title():
     long_title = "**Why** the #sky is \"blue\" " + "word " * 40
     title, _, _ = validate_metadata({"title": long_title, "description": "d"}, "sky")
