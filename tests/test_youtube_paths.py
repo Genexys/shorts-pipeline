@@ -1,61 +1,76 @@
-import importlib
+import os
+import subprocess
+import sys
 from pathlib import Path
-
-import pytest
 
 import youtube
 
-
-@pytest.fixture
-def reload_youtube(monkeypatch):
-    """Reload youtube.py with the current env, and restore defaults afterwards."""
-
-    def _reload():
-        return importlib.reload(youtube)
-
-    yield _reload
-    monkeypatch.delenv("YOUTUBE_CLIENT_SECRETS_FILE", raising=False)
-    monkeypatch.delenv("YOUTUBE_TOKEN_FILE", raising=False)
-    importlib.reload(youtube)
+BACKEND_DIR = Path(youtube.__file__).resolve().parent
+_ENV_KEYS = ("YOUTUBE_CLIENT_SECRETS_FILE", "YOUTUBE_TOKEN_FILE")
 
 
-def test_secret_paths_default_to_backend_dir(monkeypatch, reload_youtube):
-    monkeypatch.delenv("YOUTUBE_CLIENT_SECRETS_FILE", raising=False)
-    monkeypatch.delenv("YOUTUBE_TOKEN_FILE", raising=False)
-
-    module = reload_youtube()
-
-    assert module.CLIENT_SECRETS_FILE == module.BASE_DIR / "client_secret.json"
-    assert module.TOKEN_FILE == module.BASE_DIR / "youtube_token.json"
+def test_path_from_env_defaults_when_unset(monkeypatch):
+    monkeypatch.delenv("X_PATH_FOR_TEST", raising=False)
+    assert youtube._path_from_env("X_PATH_FOR_TEST", Path("/d")) == Path("/d")
 
 
-def test_empty_env_keeps_defaults(monkeypatch, reload_youtube):
-    monkeypatch.setenv("YOUTUBE_CLIENT_SECRETS_FILE", "")
-    monkeypatch.setenv("YOUTUBE_TOKEN_FILE", "   ")
-
-    module = reload_youtube()
-
-    assert module.CLIENT_SECRETS_FILE == module.BASE_DIR / "client_secret.json"
-    assert module.TOKEN_FILE == module.BASE_DIR / "youtube_token.json"
+def test_path_from_env_blank_keeps_default(monkeypatch):
+    monkeypatch.setenv("X_PATH_FOR_TEST", "   ")
+    assert youtube._path_from_env("X_PATH_FOR_TEST", Path("/d")) == Path("/d")
 
 
-def test_secret_paths_from_env(monkeypatch, tmp_path, reload_youtube):
-    monkeypatch.setenv("YOUTUBE_CLIENT_SECRETS_FILE", str(tmp_path / "cs.json"))
-    monkeypatch.setenv("YOUTUBE_TOKEN_FILE", str(tmp_path / "tok.json"))
-
-    module = reload_youtube()
-
-    assert module.CLIENT_SECRETS_FILE == Path(tmp_path / "cs.json")
-    assert module.TOKEN_FILE == Path(tmp_path / "tok.json")
-    # load_credentials() must use the overridden default, not the old one
-    assert module.load_credentials() is None
+def test_path_from_env_expands_user(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("X_PATH_FOR_TEST", "~/tok.json")
+    assert youtube._path_from_env("X_PATH_FOR_TEST", Path("/d")) == tmp_path / "tok.json"
 
 
-def test_auth_error_names_token_path(monkeypatch, tmp_path, reload_youtube):
-    monkeypatch.setenv("YOUTUBE_TOKEN_FILE", str(tmp_path / "missing.json"))
-    module = reload_youtube()
+def _run_in_fresh_interpreter(code: str, overrides: dict[str, str]) -> str:
+    """Import youtube.py in a new process so module-level constants see exactly `overrides`."""
+    env = {key: value for key, value in os.environ.items() if key not in _ENV_KEYS}
+    env.update(overrides)
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=BACKEND_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
 
-    with pytest.raises(module.YouTubeAuthError, match="youtube_auth.py") as info:
-        module.get_authenticated_service()
 
-    assert str(tmp_path / "missing.json") in str(info.value)
+def test_secret_paths_default_to_backend_dir():
+    out = _run_in_fresh_interpreter(
+        "import youtube; print(youtube.CLIENT_SECRETS_FILE); print(youtube.TOKEN_FILE)", {}
+    )
+    assert out.splitlines() == [
+        str(BACKEND_DIR / "client_secret.json"),
+        str(BACKEND_DIR / "youtube_token.json"),
+    ]
+
+
+def test_secret_paths_from_env(tmp_path):
+    out = _run_in_fresh_interpreter(
+        "import youtube; print(youtube.CLIENT_SECRETS_FILE); print(youtube.TOKEN_FILE); "
+        "print(youtube.load_credentials())",
+        {
+            "YOUTUBE_CLIENT_SECRETS_FILE": str(tmp_path / "cs.json"),
+            "YOUTUBE_TOKEN_FILE": str(tmp_path / "tok.json"),
+        },
+    )
+    assert out.splitlines() == [str(tmp_path / "cs.json"), str(tmp_path / "tok.json"), "None"]
+
+
+def test_auth_error_names_token_path(tmp_path):
+    missing = tmp_path / "missing.json"
+    out = _run_in_fresh_interpreter(
+        "import youtube\n"
+        "try:\n"
+        "    youtube.get_authenticated_service()\n"
+        "except youtube.YouTubeAuthError as exc:\n"
+        "    print(exc)\n",
+        {"YOUTUBE_TOKEN_FILE": str(missing)},
+    )
+    assert "youtube_auth.py" in out
+    assert str(missing) in out

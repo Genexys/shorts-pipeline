@@ -9,9 +9,16 @@ without any further interaction.
 import os
 import sys
 
+from dotenv import load_dotenv
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-from youtube import CLIENT_SECRETS_FILE, SCOPES, TOKEN_FILE
+from utils import ENV_FILE
+
+# Must run before importing youtube: YOUTUBE_CLIENT_SECRETS_FILE/YOUTUBE_TOKEN_FILE are
+# resolved at youtube.py's import time, so .env has to be loaded first for overrides to apply.
+load_dotenv(ENV_FILE)
+
+from youtube import CLIENT_SECRETS_FILE, SCOPES, TOKEN_FILE  # noqa: E402
 
 
 def main() -> int:
