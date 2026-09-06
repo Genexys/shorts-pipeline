@@ -22,17 +22,26 @@ def test_extract_json_object_ignores_stray_brace_after_object():
 
 
 def test_extract_json_object_handles_braces_inside_string_value():
-    text = '{"title": "Use {curly} braces", "description": "x", "tags": []}'
-    assert extract_json_object(text) == {
+    text = 'Result: {"title": "Use {curly} braces", "description": "x", "tags": []} done'
+    result = extract_json_object(text)
+    assert result == {
         "title": "Use {curly} braces",
         "description": "x",
         "tags": [],
     }
+    assert result["title"] == "Use {curly} braces"
 
 
 def test_extract_json_object_skips_non_dict_fragment_and_finds_next_object():
     text = '{not json} {"title": "T", "description": "D", "tags": []}'
     assert extract_json_object(text) == {"title": "T", "description": "D", "tags": []}
+
+
+def test_extract_json_object_gives_up_on_pathological_input():
+    assert extract_json_object("{" * 10000) is None
+
+    text = "{" * 100 + '{"title": "T", "description": "D", "tags": []}'
+    assert extract_json_object(text) is None
 
 
 def test_validate_metadata_cleans_markdown_and_truncates_title():

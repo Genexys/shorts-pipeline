@@ -317,15 +317,25 @@ DESCRIPTION_MAX_CHARS = 4500
 TAG_MAX_CHARS = 30
 TAGS_MAX_TOTAL_CHARS = 400
 TAGS_MAX_COUNT = 15
+MAX_JSON_CANDIDATES = 32
 
 
 def _iter_balanced_brace_spans(text: str):
     """Yield substrings from each '{' to its matching '}', ignoring braces
-    that appear inside double-quoted JSON string values."""
+    that appear inside double-quoted JSON string values.
+
+    Stops after MAX_JSON_CANDIDATES start positions so a pathological or
+    unbounded LLM response (e.g. many unmatched '{' characters) cannot make
+    this scan quadratic in the length of the text.
+    """
     n = len(text)
+    attempts = 0
     for i in range(n):
         if text[i] != "{":
             continue
+        if attempts >= MAX_JSON_CANDIDATES:
+            break
+        attempts += 1
         depth = 0
         in_string = False
         escaped = False
