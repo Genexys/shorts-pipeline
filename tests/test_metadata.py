@@ -61,6 +61,21 @@ def test_validate_metadata_cleans_markdown_and_truncates_title():
     assert title.startswith("Why the sky is blue")
 
 
+def test_validate_metadata_strips_angle_brackets_from_title_and_description():
+    title, description, _ = validate_metadata(
+        {
+            "title": 'Why 3 < 5 "matters" #now',
+            "description": "Intro <bold> text",
+        },
+        "s",
+    )
+
+    assert "<" not in title and ">" not in title
+    assert title == "Why 3 5 matters now"
+    assert "<" not in description and ">" not in description
+    assert description == "Intro bold text"
+
+
 def test_validate_metadata_takes_first_line_of_title():
     title, _, _ = validate_metadata({"title": "First line\nSecond line"}, "s")
     assert title == "First line"
@@ -99,6 +114,26 @@ def test_validate_metadata_respects_total_tag_length():
     raw_tags = ["x" * 30] * 20
     _, _, tags = validate_metadata({"tags": raw_tags}, "s")
     assert len(tags) == 1  # duplicates removed, single 30-char tag
+
+
+def test_validate_metadata_packs_shorter_tag_after_oversized_one():
+    # An oversized tag is skipped, not a stop sign: a shorter tag after it
+    # should still be packed into the budget.
+    raw_tags = ["a" * 40, "short"]
+    _, _, tags = validate_metadata({"tags": raw_tags}, "s")
+    assert "short" in tags
+
+
+def test_validate_metadata_packs_shorter_tag_after_budget_overflow(monkeypatch):
+    # A tag that individually fits TAG_MAX_CHARS but would blow the
+    # total-length budget must not stop shorter tags after it from being
+    # packed in (continue, not break).
+    import gpt as gpt_module
+
+    monkeypatch.setattr(gpt_module, "TAGS_MAX_TOTAL_CHARS", 10)
+    raw_tags = ["x" * 20, "short"]
+    _, _, tags = validate_metadata({"tags": raw_tags}, "s")
+    assert "short" in tags
 
 
 def test_generate_metadata_makes_single_call_and_validates(monkeypatch):

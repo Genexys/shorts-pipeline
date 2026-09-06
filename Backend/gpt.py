@@ -417,7 +417,7 @@ def validate_metadata(
 
     title_value = data.get("title")
     title = title_value if isinstance(title_value, str) else ""
-    title = re.sub(r'[*#"]', "", title).strip()
+    title = re.sub(r'[*#"<>]', "", title).strip()
     title = title.splitlines()[0].strip() if title else ""
     title = re.sub(r"\s+", " ", title)
     title = _truncate_at_word(title, TITLE_MAX_CHARS)
@@ -426,6 +426,7 @@ def validate_metadata(
 
     description_value = data.get("description")
     description = description_value.strip() if isinstance(description_value, str) else ""
+    description = re.sub(r"[<>]", "", description)
     description = description[:DESCRIPTION_MAX_CHARS]
     if not description:
         description = fallback
@@ -442,7 +443,7 @@ def validate_metadata(
             if not tag or len(tag) > TAG_MAX_CHARS or tag.lower() in seen:
                 continue
             if len(tags) >= TAGS_MAX_COUNT or total_length + len(tag) > TAGS_MAX_TOTAL_CHARS:
-                break
+                continue
             tags.append(tag)
             seen.add(tag.lower())
             total_length += len(tag)
@@ -478,11 +479,11 @@ def generate_metadata(
     """
 
     response = generate_response(prompt, ai_model)
-    log(response, "info")
 
     raw = extract_json_object(response)
     if raw is None:
         log("[*] Metadata response was not valid JSON. Using subject as fallback.", "warning")
+        log(response[:500], "info")
 
     title, description, tags = validate_metadata(raw, video_subject)
     log(f"[+] Metadata: title='{title}', {len(tags)} tags", "success")
