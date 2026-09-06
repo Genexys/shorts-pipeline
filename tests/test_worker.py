@@ -135,3 +135,30 @@ def test_log_event_helper_persists_log_event(monkeypatch, session_factory):
         assert events[-1].event_type == "log"
         assert events[-1].level == "warning"
         assert events[-1].message == "hello event"
+
+
+def test_process_next_job_requeues_when_attempts_remain(monkeypatch, session_factory):
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "retry me"}, max_attempts=2)
+
+    monkeypatch.setattr(worker, "SessionLocal", session_factory)
+    _disable_cleanup(monkeypatch)
+
+    def fake_pipeline(*_args, **_kwargs):
+        raise RuntimeError("tts unavailable")
+
+    monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
+
+    assert worker.process_next_job() is True
+    with session_factory() as session:
+        first = get_job(session, job.id)
+        assert first.status == "queued"
+        assert first.attempt_count == 1
+        assert list_job_events(session, job.id)[-1].event_type == "retry"
+
+    assert worker.process_next_job() is True
+    with session_factory() as session:
+        second = get_job(session, job.id)
+        assert second.status == "failed"
+        assert second.attempt_count == 2
+        assert second.error_message == "tts unavailable"

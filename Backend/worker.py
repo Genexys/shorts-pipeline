@@ -11,6 +11,8 @@ from repository import (
     mark_cancelled,
     mark_completed,
     mark_failed,
+    recover_running_jobs,
+    requeue_for_retry,
 )
 from utils import ENV_FILE, SUBTITLES_DIR, TEMP_DIR, check_env_vars, clean_dir
 
@@ -57,7 +59,11 @@ def process_next_job() -> bool:
             mark_cancelled(session, job_id, str(err))
     except Exception as err:
         with SessionLocal() as session:
-            mark_failed(session, job_id, str(err))
+            current = get_job(session, job_id)
+            if current and (current.attempt_count or 0) < current.max_attempts:
+                requeue_for_retry(session, job_id, str(err))
+            else:
+                mark_failed(session, job_id, str(err))
 
     return True
 
@@ -66,6 +72,11 @@ def main() -> None:
     load_dotenv(ENV_FILE)
     check_env_vars()
     init_db()
+
+    with SessionLocal() as session:
+        recovered = recover_running_jobs(session)
+    if recovered:
+        print(f"[worker] recovered {len(recovered)} interrupted job(s)")
 
     while True:
         processed = process_next_job()

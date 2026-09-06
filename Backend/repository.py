@@ -183,3 +183,37 @@ def mark_failed(session: Session, job_id: str, error_message: str) -> None:
     job.updated_at = utcnow()
     append_event(session, job.id, "error", "error", error_message)
     session.commit()
+
+
+def requeue_for_retry(session: Session, job_id: str, error_message: str) -> None:
+    job = get_job(session, job_id)
+    if not job:
+        return
+    job.status = "queued"
+    job.error_message = error_message
+    job.started_at = None
+    job.updated_at = utcnow()
+    append_event(
+        session,
+        job.id,
+        "retry",
+        "warning",
+        error_message,
+        {"attempt": job.attempt_count, "maxAttempts": job.max_attempts},
+    )
+    session.commit()
+
+
+def recover_running_jobs(session: Session) -> list[str]:
+    """Called once at worker startup. Any job still 'running' was interrupted."""
+    stmt = select(GenerationJob).where(GenerationJob.status == "running")
+    touched: list[str] = []
+    for job in list(session.scalars(stmt).all()):
+        touched.append(job.id)
+        if job.cancel_requested:
+            mark_cancelled(session, job.id, "Cancelled while worker restarted.")
+        elif (job.attempt_count or 0) < job.max_attempts:
+            requeue_for_retry(session, job.id, "worker restarted")
+        else:
+            mark_failed(session, job.id, "worker restarted")
+    return touched
