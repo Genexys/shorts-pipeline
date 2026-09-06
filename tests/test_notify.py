@@ -44,12 +44,14 @@ def test_send_telegram_reads_env(monkeypatch):
     assert captured["json"]["chat_id"] == "7"
 
 
-def test_send_telegram_returns_false_when_disabled(monkeypatch, capsys):
+def test_send_telegram_returns_false_when_disabled(monkeypatch):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    captured_logs: list = []
+    monkeypatch.setattr(notify, "log", lambda message, level: captured_logs.append(message))
 
     assert notify.send_telegram("no config") is False
-    assert "[telegram disabled] no config" in capsys.readouterr().out
+    assert captured_logs == ["[telegram disabled] no config"]
 
 
 def test_send_telegram_never_raises(monkeypatch):

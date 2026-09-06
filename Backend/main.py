@@ -1,7 +1,9 @@
 import os
+import re
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+from flask.typing import ResponseReturnValue
 from flask_cors import CORS
 from sqlalchemy import and_, case, select
 
@@ -11,6 +13,7 @@ from logstream import log
 from models import Topic
 from repository import (
     add_topic,
+    as_utc,
     create_job,
     get_job,
     list_artifacts,
@@ -208,6 +211,9 @@ def cancel_latest_running_job():
 TOPIC_STATUSES = ("planned", "queued", "done", "failed")
 
 
+TOPIC_SUBJECT_MAX_LENGTH = 255
+
+
 def _topic_to_json(topic: Topic) -> dict:
     return {
         "id": topic.id,
@@ -216,20 +222,31 @@ def _topic_to_json(topic: Topic) -> dict:
         "source": topic.source,
         "status": topic.status,
         "jobId": topic.job_id,
-        "createdAt": topic.created_at.isoformat() if topic.created_at else None,
-        "usedAt": topic.used_at.isoformat() if topic.used_at else None,
-        "completedAt": topic.completed_at.isoformat() if topic.completed_at else None,
+        "createdAt": as_utc(topic.created_at).isoformat() if topic.created_at else None,
+        "usedAt": as_utc(topic.used_at).isoformat() if topic.used_at else None,
+        "completedAt": as_utc(topic.completed_at).isoformat() if topic.completed_at else None,
     }
 
 
 @app.route("/api/topics", methods=["POST"])
-def create_topic():
+def create_topic() -> ResponseReturnValue:
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         data = {}
     subject = data.get("subject")
     if not isinstance(subject, str) or not subject.strip() or not normalize_subject(subject):
         return jsonify({"status": "error", "message": "subject is required."}), 400
+    cleaned = re.sub(r"\s+", " ", subject).strip()
+    if len(cleaned) > TOPIC_SUBJECT_MAX_LENGTH:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": f"subject must be at most {TOPIC_SUBJECT_MAX_LENGTH} characters.",
+                }
+            ),
+            400,
+        )
 
     with SessionLocal() as session:
         topic = add_topic(session, subject, niche=None, source="manual")
@@ -241,7 +258,7 @@ def create_topic():
 
 
 @app.route("/api/topics", methods=["GET"])
-def get_topics():
+def get_topics() -> ResponseReturnValue:
     status = request.args.get("status")
     if status and status not in TOPIC_STATUSES:
         return (

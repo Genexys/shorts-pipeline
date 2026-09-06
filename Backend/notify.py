@@ -18,7 +18,7 @@ def send_telegram(
     message = text[:TELEGRAM_MAX_TEXT]
 
     if not token or not chat_id:
-        print(f"[telegram disabled] {message}")
+        log(f"[telegram disabled] {message}", "info")
         return False
 
     try:

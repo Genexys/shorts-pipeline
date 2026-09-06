@@ -31,6 +31,7 @@ def test_post_topic_creates_planned_manual_topic(client):
     assert topic["source"] == "manual"
     assert topic["jobId"] is None
     assert topic["createdAt"]
+    assert topic["createdAt"].endswith("+00:00")
 
 
 def test_post_topic_duplicate_returns_409(client):
@@ -50,6 +51,16 @@ def test_post_topic_rejects_empty_subject(client, body):
 
     assert response.status_code == 400
     assert response.get_json() == {"status": "error", "message": "subject is required."}
+
+
+def test_post_topic_rejects_overlong_subject(client):
+    response = client.post("/api/topics", json={"subject": "a " * 200})
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "status": "error",
+        "message": "subject must be at most 255 characters.",
+    }
 
 
 def test_post_topic_rejects_non_dict_json_body(client):
