@@ -42,12 +42,21 @@ def test_post_topic_duplicate_returns_409(client):
     assert response.get_json() == {"status": "error", "message": "Topic already exists."}
 
 
-@pytest.mark.parametrize("body", [{}, {"subject": ""}, {"subject": "   "}, {"subject": 5}])
+@pytest.mark.parametrize(
+    "body", [{}, {"subject": ""}, {"subject": "   "}, {"subject": 5}, {"subject": "???"}]
+)
 def test_post_topic_rejects_empty_subject(client, body):
     response = client.post("/api/topics", json=body)
 
     assert response.status_code == 400
     assert response.get_json() == {"status": "error", "message": "subject is required."}
+
+
+def test_post_topic_rejects_non_dict_json_body(client):
+    response = client.post("/api/topics", json=["subject"])
+
+    assert response.status_code == 400
+    assert response.get_json()["status"] == "error"
 
 
 def test_get_topics_filters_and_orders(client, session_factory):
@@ -78,3 +87,22 @@ def test_get_topics_rejects_unknown_status(client):
 
     assert response.status_code == 400
     assert response.get_json()["status"] == "error"
+
+
+def test_get_topics_clamps_limit_bounds(client, session_factory):
+    with session_factory() as session:
+        add_topic(session, "topic one", None, "manual")
+        add_topic(session, "topic two", None, "manual")
+
+    zero_response = client.get("/api/topics?limit=0")
+    huge_response = client.get("/api/topics?limit=9999")
+    bogus_response = client.get("/api/topics?limit=abc")
+
+    assert zero_response.status_code == 200
+    assert len(zero_response.get_json()["topics"]) <= 1
+
+    assert huge_response.status_code == 200
+    assert len(huge_response.get_json()["topics"]) == 2
+
+    assert bogus_response.status_code == 200
+    assert len(bogus_response.get_json()["topics"]) == 2

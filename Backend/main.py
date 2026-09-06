@@ -16,6 +16,7 @@ from repository import (
     list_artifacts,
     list_job_events,
     list_topics,
+    normalize_subject,
     request_cancel,
 )
 from utils import ENV_FILE, SONGS_DIR, check_env_vars, clean_dir
@@ -224,8 +225,10 @@ def _topic_to_json(topic: Topic) -> dict:
 @app.route("/api/topics", methods=["POST"])
 def create_topic():
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     subject = data.get("subject")
-    if not isinstance(subject, str) or not subject.strip():
+    if not isinstance(subject, str) or not subject.strip() or not normalize_subject(subject):
         return jsonify({"status": "error", "message": "subject is required."}), 400
 
     with SessionLocal() as session:
