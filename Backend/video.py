@@ -36,10 +36,10 @@ FRAME_EPSILON = 1 / 120
 # across one library, two tracks matched to the same integrated loudness still
 # needed gains 4.6 dB apart to sound equally present, and the full spread was
 # 10 dB. So each track is measured in the voice band and normalized to this
-# target, derived from a mix that was judged right by ear.
+# target, settled by ear across three renders at -26, -30 and -33 dB.
 VOICE_BAND_LOW_HZ = 300
 VOICE_BAND_HIGH_HZ = 3000
-MUSIC_VOICEBAND_TARGET_LUFS = -30.0
+MUSIC_VOICEBAND_TARGET_LUFS = -33.0
 
 # Used when the measurement pass fails, so a bed is still laid rather than the
 # job silently losing its music.
