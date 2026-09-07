@@ -13,6 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 TEMP_DIR = PROJECT_ROOT / "temp"
 SUBTITLES_DIR = PROJECT_ROOT / "subtitles"
+OUTPUT_DIR = PROJECT_ROOT / "output"
 SONGS_DIR = PROJECT_ROOT / "Songs"
 FONTS_DIR = PROJECT_ROOT / "fonts"
 ENV_FILE = PROJECT_ROOT / ".env"

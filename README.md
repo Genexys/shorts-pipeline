@@ -59,15 +59,6 @@ IMAGEMAGICK_BINARY="C:\\Program Files\\ImageMagick-7.1.0-Q16\\magick.exe"
 
 Don't forget to use double backslashes (`\\`) in the path, instead of one.
 
-### I can't install `playsound`: Wheel failed to build
-
-If you're having trouble installing `playsound`, you can try installing it using the following command:
-
-```bash
-uv pip install -U wheel
-uv pip install -U playsound
-```
-
 If you were not able to find your solution, check [Troubleshooting](docs/troubleshooting.md), ask in Discord, or create an issue.
 
 ## Donate 🎁

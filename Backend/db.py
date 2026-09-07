@@ -37,6 +37,6 @@ SessionLocal = sessionmaker(
 
 
 def init_db() -> None:
-    from models import Artifact, GenerationEvent, GenerationJob, Project, Script  # noqa: F401
+    from models import Artifact, GenerationEvent, GenerationJob, Project, Script, Topic  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

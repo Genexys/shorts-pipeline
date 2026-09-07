@@ -1,217 +1,180 @@
 import os
-import sys
-import time
 import random
-import httplib2
+import time
 from pathlib import Path
+from typing import List, Optional, Tuple
+
+import httplib2
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import Resource, build
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaFileUpload
 
 from logstream import log
-from oauth2client.file import Storage
-from apiclient.discovery import build
-from apiclient.errors import HttpError
-from apiclient.http import MediaFileUpload
-from oauth2client.tools import argparser, run_flow
-from oauth2client.client import flow_from_clientsecrets
 
-# Explicitly tell the underlying HTTP transport library not to retry, since
-# we are handling retry logic ourselves.
+# Retries are handled below, not by the transport.
 httplib2.RETRIES = 1
 
-# Maximum number of times to retry before giving up.
 MAX_RETRIES = 10
-
-# Always retry when these exceptions are raised.
+MAX_UPLOAD_BACKOFF_SECONDS = 60
 RETRIABLE_EXCEPTIONS = (httplib2.HttpLib2Error, IOError, httplib2.ServerNotFoundError)
+RETRIABLE_STATUS_CODES = (500, 502, 503, 504)
 
-# Always retry when an apiclient.errors.HttpError with one of these status
-# codes is raised.
-RETRIABLE_STATUS_CODES = [500, 502, 503, 504]
-
-# The CLIENT_SECRETS_FILE variable specifies the name of a file that contains
-# the OAuth 2.0 information for this application, including its client_id and
-# client_secret.
 BASE_DIR = Path(__file__).resolve().parent
-CLIENT_SECRETS_FILE = str((BASE_DIR / "client_secret.json").resolve())
 
-# This OAuth 2.0 access scope allows an application to upload files to the
-# authenticated user's YouTube channel, but doesn't allow other types of access.
-# YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
-SCOPES = [
-    "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube",
-    "https://www.googleapis.com/auth/youtubepartner",
-]
+
+def _path_from_env(name: str, default: Path) -> Path:
+    """Absolute or relative path from env; empty/blank keeps the default."""
+    raw = os.getenv(name, "").strip()
+    return Path(raw).expanduser() if raw else default
+
+
+CLIENT_SECRETS_FILE = _path_from_env("YOUTUBE_CLIENT_SECRETS_FILE", BASE_DIR / "client_secret.json")
+TOKEN_FILE = _path_from_env("YOUTUBE_TOKEN_FILE", BASE_DIR / "youtube_token.json")
+
+# Upload-only scope: enough for videos.insert and nothing else.
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
-
-# This variable defines a message to display if the CLIENT_SECRETS_FILE is
-# missing.
-MISSING_CLIENT_SECRETS_MESSAGE = f"""
-WARNING: Please configure OAuth 2.0
-
-To make this sample run you will need to populate the client_secrets.json file
-found at:
-  
-{os.path.abspath(os.path.join(os.path.dirname(__file__), CLIENT_SECRETS_FILE))}
-
-with information from the API Console
-https://console.cloud.google.com/
-
-For more information about the client_secrets.json file format, please visit:
-https://developers.google.com/api-client-library/python/guide/aaa_client_secrets
-"""
 
 VALID_PRIVACY_STATUSES = ("public", "private", "unlisted")
 
 
-def get_authenticated_service():
-    """
-    This method retrieves the YouTube service.
+class YouTubeAuthError(RuntimeError):
+    """Raised when no usable YouTube credentials are available."""
 
-    Returns:
-        any: The authenticated YouTube service.
-    """
-    flow = flow_from_clientsecrets(
-        CLIENT_SECRETS_FILE, scope=SCOPES, message=MISSING_CLIENT_SECRETS_MESSAGE
-    )
 
-    oauth_store = BASE_DIR / f"{Path(sys.argv[0]).name}-oauth2.json"
-    storage = Storage(str(oauth_store))
-    credentials = storage.get()
+def load_credentials(token_file: Path = TOKEN_FILE) -> Optional[Credentials]:
+    """Load saved credentials, refreshing the access token if it expired."""
+    if not token_file.exists():
+        return None
+    try:
+        credentials = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+    except (ValueError, OSError, KeyError) as err:
+        log(f"[-] Could not read YouTube token file {token_file}: {err}", "error")
+        return None
 
-    if credentials is None or credentials.invalid:
-        flags = argparser.parse_args()
-        credentials = run_flow(flow, storage, flags)
+    if credentials.valid:
+        return credentials
 
+    if credentials.expired and credentials.refresh_token:
+        try:
+            credentials.refresh(Request())
+        except Exception as err:
+            log(f"[-] Could not refresh YouTube credentials: {err}", "error")
+            return None
+        try:
+            token_file.write_text(credentials.to_json())
+            os.chmod(token_file, 0o600)
+        except OSError as err:
+            log(f"[!] Could not persist refreshed YouTube token: {err}", "warning")
+        return credentials
+
+    return None
+
+
+def get_authenticated_service() -> Resource:
+    """Build the YouTube API client from the saved token. Never interactive."""
+    credentials = load_credentials()
+    if credentials is None:
+        raise YouTubeAuthError(
+            "No valid YouTube credentials. Run Backend/youtube_auth.py on a machine "
+            f"with a browser and copy the token file to {TOKEN_FILE} "
+            "(see docs/deploy.md)."
+        )
     return build(
         YOUTUBE_API_SERVICE_NAME,
         YOUTUBE_API_VERSION,
-        http=credentials.authorize(httplib2.Http()),
+        credentials=credentials,
+        cache_discovery=False,
     )
 
 
-def initialize_upload(youtube: any, options: dict):
-    """
-    This method uploads a video to YouTube.
+def resolve_privacy_status(raw: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Return (privacy_status, warning). Unknown values fall back to 'private'."""
+    value = (raw or "").strip().lower()
+    if not value:
+        return "private", None
+    if value in VALID_PRIVACY_STATUSES:
+        return value, None
+    return "private", f"Invalid YOUTUBE_PRIVACY_STATUS '{raw}'. Falling back to 'private'."
 
-    Args:
-        youtube (any): The authenticated YouTube service.
-        options (dict): The options to upload the video with.
 
-    Returns:
-        response: The response from the upload process.
-    """
-
-    tags = None
-    if options["keywords"]:
-        tags = options["keywords"].split(",")
-
+def initialize_upload(youtube, options: dict) -> dict:
     body = {
         "snippet": {
             "title": options["title"],
             "description": options["description"],
-            "tags": tags,
+            "tags": options["tags"] or None,
             "categoryId": options["category"],
         },
         "status": {
             "privacyStatus": options["privacyStatus"],
-            "madeForKids": False,  # Video is not made for kids
-            "selfDeclaredMadeForKids": False,  # You declare that the video is not made for kids
+            "madeForKids": False,
+            "selfDeclaredMadeForKids": False,
         },
     }
 
-    # Call the API's videos.insert method to create and upload the video.
     insert_request = youtube.videos().insert(
         part=",".join(body.keys()),
         body=body,
         media_body=MediaFileUpload(options["file"], chunksize=-1, resumable=True),
     )
-
     return resumable_upload(insert_request)
 
 
-def resumable_upload(insert_request: MediaFileUpload):
-    """
-    This method implements an exponential backoff strategy to resume a
-    failed upload.
-
-    Args:
-        insert_request (MediaFileUpload): The request to insert the video.
-
-    Returns:
-        response: The response from the upload process.
-    """
+def resumable_upload(insert_request) -> dict:
     response = None
-    error = None
     retry = 0
     while response is None:
+        error = None
         try:
             log(" => Uploading file...", "info")
-            status, response = insert_request.next_chunk()
-            if "id" in response:
+            _status, response = insert_request.next_chunk()
+            if response is not None and "id" in response:
                 log(f"Video id '{response['id']}' was successfully uploaded.", "success")
                 return response
-        except HttpError as e:
-            if e.resp.status in RETRIABLE_STATUS_CODES:
-                error = f"A retriable HTTP error {e.resp.status} occurred:\n{e.content}"
+            if response is not None:
+                raise RuntimeError(f"Unexpected upload response: {response}")
+        except HttpError as err:
+            if err.resp.status in RETRIABLE_STATUS_CODES:
+                error = f"A retriable HTTP error {err.resp.status} occurred:\n{err.content}"
             else:
                 raise
-        except RETRIABLE_EXCEPTIONS as e:
-            error = f"A retriable error occurred: {e}"
+        except RETRIABLE_EXCEPTIONS as err:
+            error = f"A retriable error occurred: {err}"
 
         if error is not None:
             log(error, "error")
             retry += 1
             if retry > MAX_RETRIES:
-                raise Exception("No longer attempting to retry.")
-
-            max_sleep = 2**retry
-            sleep_seconds = random.random() * max_sleep
-            log(f" => Sleeping {sleep_seconds} seconds and then retrying...", "info")
+                raise RuntimeError("YouTube upload failed after retries.")
+            sleep_seconds = min(random.random() * (2**retry), MAX_UPLOAD_BACKOFF_SECONDS)
+            log(f" => Sleeping {sleep_seconds:.1f} seconds and then retrying...", "info")
             time.sleep(sleep_seconds)
+    return response
 
 
-def upload_video(video_path, title, description, category, keywords, privacy_status):
-    try:
-        # Get the authenticated YouTube service
-        youtube = get_authenticated_service()
-
-        # Retrieve and print the channel ID for the authenticated user
-        channels_response = youtube.channels().list(mine=True, part="id").execute()
-        for channel in channels_response["items"]:
-            log(f" => Channel ID: {channel['id']}", "info")
-
-        # Initialize the upload process
-        video_response = initialize_upload(
-            youtube,
-            {
-                "file": video_path,  # The path to the video file
-                "title": title,
-                "description": description,
-                "category": category,
-                "keywords": keywords,
-                "privacyStatus": privacy_status,
-            },
-        )
-        return video_response  # Return the response from the upload process
-    except HttpError as e:
-        log(f"[-] An HTTP error {e.resp.status} occurred:\n{e.content}", "error")
-        if e.resp.status in [401, 403]:
-            # Here you could refresh the credentials and retry the upload
-            youtube = (
-                get_authenticated_service()
-            )  # This will prompt for re-authentication if necessary
-            video_response = initialize_upload(
-                youtube,
-                {
-                    "file": video_path,
-                    "title": title,
-                    "description": description,
-                    "category": category,
-                    "keywords": keywords,
-                    "privacyStatus": privacy_status,
-                },
-            )
-            return video_response
-        else:
-            raise e
+def upload_video(
+    video_path: str,
+    title: str,
+    description: str,
+    category: str,
+    tags: List[str],
+    privacy_status: str,
+) -> str:
+    """Upload a video and return its YouTube id. Raises on any failure."""
+    youtube = get_authenticated_service()
+    response = initialize_upload(
+        youtube,
+        {
+            "file": video_path,
+            "title": title,
+            "description": description,
+            "category": category,
+            "tags": list(tags),
+            "privacyStatus": privacy_status,
+        },
+    )
+    return str(response["id"])

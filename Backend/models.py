@@ -112,3 +112,33 @@ class Artifact(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Topic(Base):
+    __tablename__ = "topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    normalized: Mapped[str] = mapped_column(
+        String(255), nullable=False, unique=True, index=True
+    )
+    niche: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="ollama")
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="planned", index=True
+    )
+    job_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("generation_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

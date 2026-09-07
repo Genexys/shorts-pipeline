@@ -312,40 +312,179 @@ def get_search_terms(
     return search_terms
 
 
+TITLE_MAX_CHARS = 100
+DESCRIPTION_MAX_CHARS = 4500
+TAG_MAX_CHARS = 30
+TAGS_MAX_TOTAL_CHARS = 400
+TAGS_MAX_COUNT = 15
+MAX_JSON_CANDIDATES = 32
+
+
+def _iter_balanced_brace_spans(text: str):
+    """Yield substrings from each '{' to its matching '}', ignoring braces
+    that appear inside double-quoted JSON string values.
+
+    Stops after MAX_JSON_CANDIDATES start positions so a pathological or
+    unbounded LLM response (e.g. many unmatched '{' characters) cannot make
+    this scan quadratic in the length of the text.
+    """
+    n = len(text)
+    attempts = 0
+    for i in range(n):
+        if text[i] != "{":
+            continue
+        if attempts >= MAX_JSON_CANDIDATES:
+            break
+        attempts += 1
+        depth = 0
+        in_string = False
+        escaped = False
+        end = None
+        j = i
+        while j < n:
+            ch = text[j]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                j += 1
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+            j += 1
+        if end is not None:
+            yield text[i : end + 1]
+
+
+def extract_json_object(response: str) -> Optional[dict]:
+    """Parse a JSON object from an LLM response, tolerating surrounding text.
+
+    Tries the whole response as JSON first, then falls back to a bounded,
+    string-aware balanced-brace scan. There is no regex fallback: if a
+    span from the first '{' to the last '}' were valid JSON, it would be
+    balanced, so the scan's first candidate would already have found it.
+    """
+    try:
+        parsed = json.loads(response)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+
+    for candidate in _iter_balanced_brace_spans(response):
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+
+    return None
+
+
+def _truncate_at_word(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if " " in cut:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip()
+
+
+def _capitalized(subject: str) -> str:
+    cleaned = re.sub(r"\s+", " ", subject).strip()
+    if not cleaned:
+        return "Untitled video"
+    return cleaned[:1].upper() + cleaned[1:]
+
+
+def validate_metadata(
+    raw: Optional[dict], subject: str
+) -> Tuple[str, str, List[str]]:
+    """Normalize LLM metadata to YouTube limits. Pure function."""
+    data = raw if isinstance(raw, dict) else {}
+    fallback = _capitalized(subject)
+
+    title_value = data.get("title")
+    title = title_value if isinstance(title_value, str) else ""
+    title = re.sub(r'[*#"<>]', "", title).strip()
+    title = title.splitlines()[0].strip() if title else ""
+    title = re.sub(r"\s+", " ", title)
+    title = _truncate_at_word(title, TITLE_MAX_CHARS)
+    if len(title) < 3:
+        title = _truncate_at_word(fallback, TITLE_MAX_CHARS)
+
+    description_value = data.get("description")
+    description = description_value.strip() if isinstance(description_value, str) else ""
+    description = re.sub(r"[<>]", "", description)
+    description = description[:DESCRIPTION_MAX_CHARS]
+    if not description:
+        description = fallback
+
+    tags: List[str] = []
+    seen: set[str] = set()
+    total_length = 0
+    tags_value = data.get("tags")
+    if isinstance(tags_value, list):
+        for item in tags_value:
+            if not isinstance(item, str):
+                continue
+            tag = re.sub(r"\s+", " ", item.replace(",", " ")).strip()
+            if not tag or len(tag) > TAG_MAX_CHARS or tag.lower() in seen:
+                continue
+            if len(tags) >= TAGS_MAX_COUNT or total_length + len(tag) > TAGS_MAX_TOTAL_CHARS:
+                continue
+            tags.append(tag)
+            seen.add(tag.lower())
+            total_length += len(tag)
+
+    return title, description, tags
+
+
 def generate_metadata(
     video_subject: str, script: str, ai_model: str
 ) -> Tuple[str, str, List[str]]:
     """
-    Generate metadata for a YouTube video, including the title, description, and keywords.
-
-    Args:
-        video_subject (str): The subject of the video.
-        script (str): The script of the video.
-        ai_model (str): The AI model to use for generation.
+    Generate YouTube title, description and tags with a single JSON request.
 
     Returns:
-        Tuple[str, str, List[str]]: The title, description, and keywords for the video.
+        Tuple[str, str, List[str]]: validated (title, description, tags).
+    """
+    prompt = f"""
+    You write metadata for a short vertical YouTube video (YouTube Shorts).
+
+    Subject: {video_subject}
+
+    Script:
+    {script}
+
+    Return ONLY a JSON object with exactly these keys:
+    {{"title": "...", "description": "...", "tags": ["...", "..."]}}
+
+    Rules:
+    - title: catchy, at most 70 characters, plain text, no hashtags, no quotes, no emojis.
+    - description: 2-3 sentences that summarize the video, plain text.
+    - tags: 5 to 10 short keywords, each 1-3 words, no commas inside a tag.
+    - Do not add any text before or after the JSON object.
     """
 
-    # Build prompt for title
-    title_prompt = f"""  
-    Generate a catchy and SEO-friendly title for a YouTube shorts video about {video_subject}.  
-    """
+    response = generate_response(prompt, ai_model)
 
-    # Generate title
-    title = generate_response(title_prompt, ai_model).strip()
+    raw = extract_json_object(response)
+    if raw is None:
+        log("[*] Metadata response was not valid JSON. Using subject as fallback.", "warning")
+        log(response[:500], "info")
 
-    # Build prompt for description
-    description_prompt = f"""  
-    Write a brief and engaging description for a YouTube shorts video about {video_subject}.  
-    The video is based on the following script:  
-    {script}  
-    """
-
-    # Generate description
-    description = generate_response(description_prompt, ai_model).strip()
-
-    # Generate keywords
-    keywords = get_search_terms(video_subject, 6, script, ai_model)
-
-    return title, description, keywords
+    title, description, tags = validate_metadata(raw, video_subject)
+    log(f"[+] Metadata: title='{title}', {len(tags)} tags", "success")
+    return title, description, tags

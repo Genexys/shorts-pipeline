@@ -1,11 +1,16 @@
 from repository import (
+    add_artifact,
     claim_next_queued_job,
     create_job,
+    get_job,
+    list_artifacts,
     list_job_events,
     mark_failed,
     mark_completed,
     mark_cancelled,
+    recover_running_jobs,
     request_cancel,
+    requeue_for_retry,
 )
 
 
@@ -81,3 +86,82 @@ def test_mark_cancelled_sets_status_and_writes_cancelled_event(session):
     events = list_job_events(session, job.id)
     assert events[-1].event_type == "cancelled"
     assert events[-1].message == "cancelled in worker"
+
+
+def test_requeue_for_retry_sets_queued_and_retry_event(session):
+    job = create_job(session, payload={"videoSubject": "retry"}, max_attempts=2)
+    claim_next_queued_job(session)
+
+    requeue_for_retry(session, job.id, error_message="tts down")
+
+    updated = get_job(session, job.id)
+    assert updated.status == "queued"
+    assert updated.attempt_count == 1
+    assert updated.error_message == "tts down"
+    events = list_job_events(session, job.id)
+    assert events[-1].event_type == "retry"
+    assert events[-1].level == "warning"
+    assert events[-1].message == "tts down"
+
+
+def test_requeue_for_retry_with_unknown_job_id_is_a_no_op(session):
+    requeue_for_retry(session, "does-not-exist", error_message="ignored")
+
+    assert get_job(session, "does-not-exist") is None
+
+
+def test_recover_running_jobs_requeues_or_fails(session):
+    retryable = create_job(session, payload={"videoSubject": "a"}, max_attempts=2)
+    exhausted = create_job(session, payload={"videoSubject": "b"}, max_attempts=1)
+    claim_next_queued_job(session)
+    claim_next_queued_job(session)
+    assert get_job(session, retryable.id).status == "running"
+    assert get_job(session, exhausted.id).status == "running"
+
+    touched = recover_running_jobs(session)
+
+    assert set(touched) == {retryable.id, exhausted.id}
+    assert get_job(session, retryable.id).status == "queued"
+    assert get_job(session, exhausted.id).status == "failed"
+    assert get_job(session, exhausted.id).error_message == "worker restarted"
+    assert list_job_events(session, retryable.id)[-1].event_type == "retry"
+    assert list_job_events(session, exhausted.id)[-1].event_type == "error"
+
+
+def test_recover_running_jobs_cancels_when_cancel_requested(session):
+    job = create_job(session, payload={"videoSubject": "c"}, max_attempts=2)
+    claim_next_queued_job(session)
+    request_cancel(session, job.id)
+
+    recover_running_jobs(session)
+
+    assert get_job(session, job.id).status == "cancelled"
+
+
+def test_recover_running_jobs_cancels_unclaimable_queued_jobs(session):
+    stuck = create_job(session, payload={"videoSubject": "stuck"})
+    stuck.status = "queued"
+    stuck.cancel_requested = True
+    session.commit()
+    normal = create_job(session, payload={"videoSubject": "normal"})
+
+    touched = recover_running_jobs(session)
+
+    assert stuck.id in touched
+    assert get_job(session, stuck.id).status == "cancelled"
+    assert list_job_events(session, stuck.id)[-1].event_type == "cancelled"
+    assert get_job(session, normal.id).status == "queued"
+    assert normal.id not in touched
+
+
+def test_add_artifact_and_list_artifacts_in_insert_order(session):
+    job = create_job(session, payload={"videoSubject": "artifacts"})
+
+    add_artifact(session, job.id, "video", "output/x.mp4", {"title": "T"})
+    add_artifact(session, job.id, "youtube_video", "https://youtu.be/abc", {"videoId": "abc"})
+
+    artifacts = list_artifacts(session, job.id)
+    assert [a.artifact_type for a in artifacts] == ["video", "youtube_video"]
+    assert artifacts[0].metadata_json == {"title": "T"}
+    assert artifacts[1].path == "https://youtu.be/abc"
+    assert list_artifacts(session, "missing") == []

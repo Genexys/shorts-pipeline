@@ -20,13 +20,17 @@ ollama pull llama3.1:8b     # pull default model
 ```bash
 uv run python Backend/main.py                              # API on :8080
 uv run python Backend/worker.py                            # queue worker
+uv run python Backend/autopilot.py                         # scheduled topic → job creator
 python3 -m http.server 3000 --directory Frontend           # frontend on :3000
 ```
 
 ### Run (Docker)
 ```bash
-docker compose up --build   # frontend :8001, backend :8080, postgres :5432
+mkdir -p secrets output Songs      # secrets/: client_secret.json + youtube_token.json
+docker compose up -d --build       # postgres, ollama (+model pull), api :8080, worker, autopilot, frontend :8001
+docker compose logs -f autopilot worker
 ```
+Ports bind to 127.0.0.1 only; on a server use `ssh -L 8080:127.0.0.1:8080 -L 8001:127.0.0.1:8001`. See `docs/docker.md` and `docs/deploy.md`. On a Mac, Ollama inside Docker is too slow to finish a job; use the native-Ollama override described in the "Local runs on a Mac" section of docs/docker.md.
 
 ### Verify
 ```bash
@@ -56,12 +60,13 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
   → video.py: combine_videos() → concatenate/crop to 9:16
   → video.py: generate_video() → burn subtitles via ImageMagick, merge audio
   → (optional) mix background music from Songs/ at 10% volume
-  → (optional) youtube.py: OAuth2 upload
-  → output.mp4
+  → copy to output.mp4 and output/<job_id>.mp4
+  → (optional) youtube.py: upload via saved token; failure is non-fatal (upload_error)
+  → PipelineResult → worker stores Artifact rows (video, youtube_video)
 ```
 
 ### Frontend ↔ Backend Communication
-- **REST**: JSON payloads to Flask endpoints (`/api/generate`, `/api/jobs/:id`, `/api/jobs/:id/events`, `/api/jobs/:id/cancel`, `/api/models`, `/api/upload-songs`)
+- **REST**: JSON payloads to Flask endpoints (`/api/generate`, `/api/jobs/:id`, `/api/jobs/:id/events`, `/api/jobs/:id/cancel`, `/api/models`, `/api/upload-songs`, `/api/topics`)
 - **Polling**: frontend polls job status and persisted generation events.
 
 ### Key Backend Modules
@@ -74,9 +79,12 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 | `video.py` | Video processing: combine clips, burn subtitles, merge audio |
 | `search.py` | Pexels stock video search and download |
 | `tiktokvoice.py` | TikTok TTS API (60+ voices, 300-char chunking, threaded) |
-| `youtube.py` | YouTube upload via Google API with OAuth2 |
+| `youtube.py` | YouTube upload via google-auth-oauthlib token file (Backend/youtube_token.json); youtube_auth.py creates it once |
 | `utils.py` | Path constants, env validation, ImageMagick detection |
 | `pipeline.py` | Reusable generation pipeline used by worker |
+| `autopilot.py` | Scheduled loop: topic generation, job queuing, Telegram reports, output cleanup |
+| `autopilot_config.py` | `AutopilotConfig.from_env()` and pure `slot_available` rule |
+| `notify.py` | Telegram `send_telegram`, never raises |
 
 ### Frontend
 - `index.html`: UI with inline CSS, form fields, live log viewer
@@ -87,6 +95,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 - `subtitles/`: generated .srt files (cleared each generation)
 - `Songs/`: user-uploaded background music MP3s
 - `fonts/`: subtitle font (`bold_font.ttf`)
+- `output/`: archived videos `<job_id>.mp4`
 
 ## Required Environment Variables
 
@@ -94,7 +103,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 - `PEXELS_API_KEY` — stock video API
 - `IMAGEMAGICK_BINARY` — leave empty to auto-detect from PATH
 
-Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`
+Optional: `CORS_ORIGINS`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`, `YOUTUBE_CLIENT_SECRETS_FILE`, `YOUTUBE_TOKEN_FILE`, `AUTOPILOT_*`, `OUTPUT_RETENTION_DAYS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TZ` (see `docs/autopilot.md`)
 
 ## Conventions
 
@@ -102,5 +111,5 @@ Optional: `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_UR
 - **JS**: `camelCase`, centralized API calls via `apiRequest()`
 - **API responses**: `{"status": "success|error", ...}` with proper HTTP codes
 - **Long-running work**: database-backed queue and separate worker process
-- **Concurrency**: multiple jobs can be queued; worker processes them safely via DB locking
+- **Concurrency**: multiple jobs can be queued, but run exactly one `worker.py` process at a time. `recover_running_jobs` requeues (or fails) *every* `running` job at startup, and each job clears `temp/`/`subtitles/` before it runs — both are destructive if a second worker is processing a different job concurrently.
 - Update `docs/` when setup, env vars, or runtime behavior changes

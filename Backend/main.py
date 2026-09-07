@@ -1,14 +1,27 @@
 import os
+import re
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+from flask.typing import ResponseReturnValue
 from flask_cors import CORS
 from sqlalchemy import and_, case, select
 
 from db import SessionLocal, init_db
 from gpt import list_ollama_models
 from logstream import log
-from repository import create_job, get_job, list_job_events, request_cancel
+from models import Topic
+from repository import (
+    add_topic,
+    as_utc,
+    create_job,
+    get_job,
+    list_artifacts,
+    list_job_events,
+    list_topics,
+    normalize_subject,
+    request_cancel,
+)
 from utils import ENV_FILE, SONGS_DIR, check_env_vars, clean_dir
 
 
@@ -16,8 +29,23 @@ load_dotenv(ENV_FILE)
 check_env_vars()
 init_db()
 
+DEFAULT_CORS_ORIGINS: tuple[str, ...] = (
+    "http://localhost:8001",
+    "http://127.0.0.1:8001",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+
+
+def cors_origins(raw: str | None = None) -> list[str]:
+    """Comma-separated CORS_ORIGINS from the environment; empty or unset keeps the defaults."""
+    value = os.getenv("CORS_ORIGINS", "") if raw is None else raw
+    origins = [item.strip() for item in value.split(",") if item.strip()]
+    return origins or list(DEFAULT_CORS_ORIGINS)
+
+
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=cors_origins())
 
 HOST = "0.0.0.0"
 PORT = 8080
@@ -85,6 +113,17 @@ def get_job_status(job_id: str):
                     "completedAt": job.completed_at.isoformat()
                     if job.completed_at
                     else None,
+                    "artifacts": [
+                        {
+                            "type": artifact.artifact_type,
+                            "path": artifact.path,
+                            "metadata": artifact.metadata_json,
+                            "createdAt": artifact.created_at.isoformat()
+                            if artifact.created_at
+                            else None,
+                        }
+                        for artifact in list_artifacts(session, job_id)
+                    ],
                 },
             }
         )
@@ -184,5 +223,76 @@ def cancel_latest_running_job():
     )
 
 
+TOPIC_STATUSES = ("planned", "queued", "done", "failed")
+
+
+TOPIC_SUBJECT_MAX_LENGTH = 255
+
+
+def _topic_to_json(topic: Topic) -> dict:
+    return {
+        "id": topic.id,
+        "subject": topic.subject,
+        "niche": topic.niche,
+        "source": topic.source,
+        "status": topic.status,
+        "jobId": topic.job_id,
+        "createdAt": as_utc(topic.created_at).isoformat() if topic.created_at else None,
+        "usedAt": as_utc(topic.used_at).isoformat() if topic.used_at else None,
+        "completedAt": as_utc(topic.completed_at).isoformat() if topic.completed_at else None,
+    }
+
+
+@app.route("/api/topics", methods=["POST"])
+def create_topic() -> ResponseReturnValue:
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    subject = data.get("subject")
+    if not isinstance(subject, str) or not subject.strip() or not normalize_subject(subject):
+        return jsonify({"status": "error", "message": "subject is required."}), 400
+    cleaned = re.sub(r"\s+", " ", subject).strip()
+    if len(cleaned) > TOPIC_SUBJECT_MAX_LENGTH:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": f"subject must be at most {TOPIC_SUBJECT_MAX_LENGTH} characters.",
+                }
+            ),
+            400,
+        )
+
+    with SessionLocal() as session:
+        topic = add_topic(session, subject, niche=None, source="manual")
+        if topic is None:
+            return jsonify({"status": "error", "message": "Topic already exists."}), 409
+        body = _topic_to_json(topic)
+
+    return jsonify({"status": "success", "topic": body}), 201
+
+
+@app.route("/api/topics", methods=["GET"])
+def get_topics() -> ResponseReturnValue:
+    status = request.args.get("status")
+    if status and status not in TOPIC_STATUSES:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": f"status must be one of {', '.join(TOPIC_STATUSES)}.",
+                }
+            ),
+            400,
+        )
+    limit = request.args.get("limit", default=50, type=int)
+    limit = max(1, min(limit, 500))
+
+    with SessionLocal() as session:
+        topics = [_topic_to_json(topic) for topic in list_topics(session, status, limit)]
+
+    return jsonify({"status": "success", "topics": topics})
+
+
 if __name__ == "__main__":
-    app.run(debug=True, host=HOST, port=PORT, threaded=True)
+    app.run(host=HOST, port=PORT, threaded=True)
