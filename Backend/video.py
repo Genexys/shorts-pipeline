@@ -834,6 +834,44 @@ def build_music_filter(duration: float, gain_db: float = MUSIC_FALLBACK_GAIN_DB)
     )
 
 
+def normalize_audio(video_path: str, output_path: str) -> str:
+    """Brings a finished video to the delivery loudness without touching the picture.
+
+    Loudness normalization used to live inside the music mix, so a video
+    without music shipped at whatever level the TTS happened to produce —
+    measured at -17.8 LUFS against the -14 YouTube normalizes to, i.e. audibly
+    quieter than everything around it.
+
+    Args:
+        video_path (str): The rendered video.
+        output_path (str): Where to write the normalized copy.
+
+    Returns:
+        str: `output_path`.
+
+    Raises:
+        subprocess.CalledProcessError: If ffmpeg fails.
+    """
+    command = [
+        _ffmpeg_binary(),
+        "-y",
+        "-i",
+        video_path,
+        "-af",
+        f"loudnorm=I={LOUDNESS_TARGET_LUFS}:TP={LOUDNESS_TRUE_PEAK_DB}:"
+        f"LRA={LOUDNESS_RANGE}",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        output_path,
+    ]
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    log("[+] Audio loudness normalized.", "success")
+    return output_path
+
 def mix_background_music(
     video_path: str,
     song_path: str,

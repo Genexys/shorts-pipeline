@@ -81,7 +81,11 @@ def process_next_job() -> bool:
                     job_id,
                     "video",
                     result.archived_path,
-                    {"title": result.title, "uploadError": result.upload_error},
+                    {
+                        "title": result.title,
+                        "uploadError": result.upload_error,
+                        "format": result.format_name,
+                    },
                     commit=False,
                 )
                 if result.youtube_video_id:

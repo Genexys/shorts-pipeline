@@ -7,8 +7,9 @@ from uuid import uuid4
 
 from moviepy import AudioFileClip, concatenate_audioclips
 
-from formats import SHORT
+from formats import LONG, resolve_format
 from gpt import (
+    generate_long_script,
     generate_metadata,
     generate_script,
     get_search_terms,
@@ -29,6 +30,7 @@ from video import (
     generate_subtitles,
     generate_video,
     mix_background_music,
+    normalize_audio,
     save_video,
 )
 from youtube import resolve_language, resolve_privacy_status, upload_video
@@ -46,6 +48,8 @@ class PipelineResult:
     youtube_video_id: Optional[str]
     upload_error: Optional[str]
     privacy_status: str
+    format_name: str
+    subtitles_path: str
 
 
 def run_generation_pipeline(
@@ -62,6 +66,7 @@ def run_generation_pipeline(
         if is_cancelled and is_cancelled():
             raise PipelineCancelled("Video generation was cancelled.")
 
+    fmt = resolve_format(data.get("format"))
     paragraph_number = int(data.get("paragraphNumber", 1))
     ai_model = data.get("aiModel")
     n_threads = data.get("threads")
@@ -74,6 +79,7 @@ def run_generation_pipeline(
     emit("[Video to be generated]", "info")
     emit("   Subject: " + data["videoSubject"], "info")
     emit("   AI Model: " + str(ai_model), "info")
+    emit(f"   Format: {fmt.name} ({fmt.width}x{fmt.height})", "info")
     emit("   Custom Prompt: " + data["customPrompt"], "info")
 
     guard_cancelled()
@@ -82,17 +88,26 @@ def run_generation_pipeline(
     # so Shorts and long form do not share a narrator.
     voice = data.get("voice", "")
     if not voice:
-        voice = SHORT.voice
+        voice = fmt.voice
         emit(f'[!] No voice was selected. Using "{voice}"', "warning")
     voice_prefix = voice[:2]
 
-    script = generate_script(
-        data["videoSubject"],
-        paragraph_number,
-        ai_model,
-        voice,
-        data["customPrompt"],
-    )
+    if fmt is LONG:
+        script = generate_long_script(
+            data["videoSubject"],
+            fmt.target_words,
+            ai_model,
+            voice,
+            data["customPrompt"],
+        )
+    else:
+        script = generate_script(
+            data["videoSubject"],
+            paragraph_number,
+            ai_model,
+            voice,
+            data["customPrompt"],
+        )
 
     if not script:
         raise RuntimeError(
@@ -100,7 +115,7 @@ def run_generation_pipeline(
         )
 
     search_terms = get_search_terms(
-        data["videoSubject"], SHORT.search_term_count, script, ai_model
+        data["videoSubject"], fmt.search_term_count, script, ai_model
     )
 
     video_urls = []
@@ -118,7 +133,7 @@ def run_generation_pipeline(
                 continue
             video_urls.append(url)
             taken += 1
-            if taken >= SHORT.clips_per_term:
+            if taken >= fmt.clips_per_term:
                 break
 
     if not video_urls:
@@ -148,7 +163,7 @@ def run_generation_pipeline(
         sentences,
         make_path=lambda: str(TEMP_DIR / f"{uuid4()}.mp3"),
         tiktok_voice=voice,
-        elevenlabs_voice_id=SHORT.elevenlabs_voice_id,
+        elevenlabs_voice_id=fmt.elevenlabs_voice_id,
         on_log=emit,
     )
     emit(f"[+] Narrated with {provider}", "info")
@@ -170,7 +185,7 @@ def run_generation_pipeline(
             sentences=sentences,
             audio_clips=paths,
             voice=voice_prefix,
-            max_chars=SHORT.subtitle_max_chars,
+            max_chars=fmt.subtitle_max_chars,
         )
     except Exception as err:
         emit(f"[-] Error generating subtitles: {err}", "error")
@@ -183,10 +198,8 @@ def run_generation_pipeline(
 
     temp_audio = AudioFileClip(tts_path)
     try:
-        # The format still resolves to SHORT for every payload; reading it from
-        # the request is a later step.
         combined_video_path = combine_videos(
-            video_paths, temp_audio.duration, n_threads or 2, SHORT
+            video_paths, temp_audio.duration, n_threads or 2, fmt
         )
     finally:
         temp_audio.close()
@@ -199,7 +212,7 @@ def run_generation_pipeline(
             n_threads or 2,
             subtitles_position,
             text_color or "#FFFF00",
-            SHORT,
+            fmt,
         )
     except Exception as err:
         raise RuntimeError(
@@ -260,7 +273,16 @@ def run_generation_pipeline(
             use_music = False
 
     if not use_music:
-        shutil.copy2(rendered_video_path, final_output_path)
+        # Still normalize: without this the video ships at whatever level the
+        # TTS produced, which measured 4 dB under what YouTube normalizes to.
+        try:
+            normalize_audio(rendered_video_path, final_output_path)
+        except Exception as err:
+            emit(
+                f"[!] Could not normalize loudness ({err}). Using the render as is.",
+                "warning",
+            )
+            shutil.copy2(rendered_video_path, final_output_path)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     archived_path = f"{OUTPUT_DIR.name}/{job_id}.mp4"
@@ -302,4 +324,6 @@ def run_generation_pipeline(
         youtube_video_id=youtube_video_id,
         upload_error=upload_error,
         privacy_status=privacy_status,
+        format_name=fmt.name,
+        subtitles_path=subtitles_path,
     )

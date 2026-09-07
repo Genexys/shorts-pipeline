@@ -44,6 +44,8 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             youtube_video_id="vid123",
             upload_error=None,
             privacy_status="private",
+            format_name="short",
+            subtitles_path="subtitles/x.srt",
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -64,7 +66,11 @@ def test_process_next_job_marks_completed_and_records_artifacts(
 
         artifacts = {a.artifact_type: a for a in list_artifacts(session, job.id)}
         assert artifacts["video"].path == f"output/{job.id}.mp4"
-        assert artifacts["video"].metadata_json == {"title": "Great title", "uploadError": None}
+        assert artifacts["video"].metadata_json == {
+            "title": "Great title",
+            "uploadError": None,
+            "format": "short",
+        }
         assert artifacts["youtube_video"].path == "https://youtu.be/vid123"
         assert artifacts["youtube_video"].metadata_json == {
             "videoId": "vid123",
@@ -90,6 +96,8 @@ def test_process_next_job_marks_failed_when_bookkeeping_raises(
             youtube_video_id=None,
             upload_error=None,
             privacy_status="private",
+            format_name="short",
+            subtitles_path="subtitles/x.srt",
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -128,6 +136,8 @@ def test_process_next_job_records_upload_error_without_youtube_artifact(
             youtube_video_id=None,
             upload_error="No valid YouTube credentials",
             privacy_status="private",
+            format_name="short",
+            subtitles_path="subtitles/x.srt",
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -139,6 +149,9 @@ def test_process_next_job_records_upload_error_without_youtube_artifact(
         artifacts = list_artifacts(session, job.id)
         assert [a.artifact_type for a in artifacts] == ["video"]
         assert artifacts[0].metadata_json["uploadError"] == "No valid YouTube credentials"
+        # The weekly long-form budget will count these, so the format must be
+        # recorded whether the upload succeeded or not.
+        assert artifacts[0].metadata_json["format"] == "short"
 
 
 def test_process_next_job_marks_cancelled_on_pipeline_cancelled(

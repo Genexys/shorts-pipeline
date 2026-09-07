@@ -147,3 +147,34 @@ def test_job_status_includes_artifacts(client, session_factory):
         }
     ]
     assert artifacts[0]["createdAt"]
+
+
+def test_generate_accepts_a_known_format(client):
+    response = client.post(
+        "/api/generate", json={"videoSubject": "subject", "format": "long"}
+    )
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "success"
+
+
+def test_generate_rejects_an_unknown_format(client):
+    # Defaulting instead would silently produce a Short when a long video was
+    # asked for, and the only symptom would be the wrong aspect ratio.
+    response = client.post(
+        "/api/generate", json={"videoSubject": "subject", "format": "longform"}
+    )
+    assert response.status_code == 400
+    assert "format must be one of" in response.get_json()["message"]
+
+
+def test_generate_still_works_without_a_format(client):
+    response = client.post("/api/generate", json={"videoSubject": "subject"})
+    assert response.status_code == 200
+
+
+def test_generate_stores_the_requested_format_in_the_payload(client):
+    job_id = client.post(
+        "/api/generate", json={"videoSubject": "subject", "format": "long"}
+    ).get_json()["jobId"]
+    job = client.get(f"/api/jobs/{job_id}").get_json()["job"]
+    assert job["state"] == "queued"

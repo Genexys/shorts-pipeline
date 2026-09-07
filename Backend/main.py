@@ -8,6 +8,7 @@ from flask_cors import CORS
 from sqlalchemy import and_, case, select
 
 from db import SessionLocal, init_db
+from formats import FORMATS
 from gpt import list_ollama_models
 from logstream import log
 from models import Topic
@@ -79,6 +80,20 @@ def generate():
     data = request.get_json() or {}
     if not data.get("videoSubject"):
         return jsonify({"status": "error", "message": "videoSubject is required."}), 400
+
+    # Rejected rather than defaulted: a typo would otherwise silently produce a
+    # Short when a long video was asked for.
+    requested_format = data.get("format")
+    if requested_format is not None and requested_format not in FORMATS:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": f"format must be one of {', '.join(sorted(FORMATS))}.",
+                }
+            ),
+            400,
+        )
 
     with SessionLocal() as session:
         job = create_job(session, payload=data)
