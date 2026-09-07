@@ -255,7 +255,11 @@ def combine_videos(
             threads=threads,
             fps=30,
             codec="libx264",
-            preset="medium",
+            # Intermediate file: generate_video() re-encodes it, so compressing it
+            # well here is wasted CPU. A low CRF keeps this pass visually lossless
+            # so the final encode inherits no artifacts from it.
+            preset="ultrafast",
+            ffmpeg_params=["-crf", "18"],
             audio=False,
         )
     finally:
