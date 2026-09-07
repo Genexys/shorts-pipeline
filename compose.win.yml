@@ -1,0 +1,43 @@
+# Windows override: NVIDIA GPU for Ollama and for hardware video encoding.
+#
+# Usage (Windows + WSL2 + Docker Desktop with the NVIDIA runtime):
+#
+#     docker compose -f docker-compose.yml -f compose.win.yml up -d --build
+#
+# This file is tracked on purpose: the Windows host gets the repo by
+# `git clone`, so an ignored override would never arrive there.
+# compose.mac.yml is ignored instead — it is a workaround for a machine
+# that cannot do hardware encoding at all.
+
+services:
+  ollama:
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  worker:
+    environment:
+      # MoviePy defaults to the imageio-ffmpeg binary, which is built
+      # WITHOUT nvenc — moviepy/config.py falls back to "ffmpeg-imageio"
+      # unless FFMPEG_BINARY is set. Point it at Debian's ffmpeg, which
+      # the image already installs and which does carry h264_nvenc.
+      # Without this line the GPU reservation below is a silent no-op.
+      FFMPEG_BINARY: /usr/bin/ffmpeg
+      # "video" is what exposes the encoder. The default capability set
+      # grants compute only, so nvenc stays invisible without it.
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]
