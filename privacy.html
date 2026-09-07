@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoneyPrinter — Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem; }
+  h1 { font-size: 1.8rem; margin-bottom: .25rem; }
+  .sub { opacity: .7; margin-top: 0; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  ul { padding-left: 1.2rem; }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid rgba(128,128,128,.35); opacity: .75; font-size: .9rem; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<h1>Privacy Policy</h1>
+<p class="sub">MoneyPrinter &middot; last updated 7 September 2026</p>
+
+<h2>Summary</h2>
+<p>MoneyPrinter is a personal, self-hosted automation tool operated by a single person for their own
+YouTube channel. It has no other users, collects nothing from visitors, and shares no information with
+anyone.</p>
+
+<h2>Information the application accesses</h2>
+<p>When the operator signs in with Google, the application requests exactly one permission,
+<code>https://www.googleapis.com/auth/youtube.upload</code>. That permission allows one action: uploading
+a video file to the channel of the account that granted it. The application does not read the account's
+videos, comments, subscribers, analytics, profile or email, and it holds no other Google permission.</p>
+
+<h2>How the credential is stored</h2>
+<ul>
+  <li>The OAuth token is written to a file on the operator's own computer or server and is readable only
+      by the operating-system account that runs the application.</li>
+  <li>It is never uploaded to any third-party service, never included in the published source code, and
+      never sent anywhere except to Google's own API endpoints.</li>
+  <li>Access can be withdrawn at any time at
+      <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>, which
+      immediately makes the stored token useless.</li>
+</ul>
+
+<h2>Information collected from other people</h2>
+<p>None. This website is a set of static pages with no forms, no accounts, no cookies, no analytics and
+no advertising. The application itself has no sign-up, accepts no submissions from the public, and
+processes no personal data belonging to anyone other than its operator.</p>
+
+<h2>Other services the application uses</h2>
+<p>To build a video the application contacts stock-footage and text-to-speech providers and runs a
+language model locally. These requests carry the topic text for the video being produced. They carry no
+Google account data, no credential and no personal information.</p>
+
+<h2>Limited use</h2>
+<p>MoneyPrinter's use and transfer of information received from Google APIs to any other app will adhere
+to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services
+User Data Policy</a>, including the Limited Use requirements.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes, the revised version replaces this page and the date above is updated.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy can be raised at
+<a href="https://github.com/Genexys/MoneyPrinter/issues">github.com/Genexys/MoneyPrinter/issues</a>.</p>
+
+<footer><a href="index.html">Back to MoneyPrinter</a></footer>
+</body>
+</html>
