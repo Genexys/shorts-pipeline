@@ -49,10 +49,13 @@ ERROR_TEXT_LIMIT = 500
 STALL_WARNING_SECONDS = 3 * 3600
 
 
-def build_payload(config: AutopilotConfig, subject: str) -> dict:
+def build_payload(
+    config: AutopilotConfig, subject: str, format_name: str = "short"
+) -> dict:
     """Same shape as Frontend/app.js sends, plus upload flag and thread count."""
     return {
         "videoSubject": subject,
+        "format": format_name,
         "aiModel": config.model,
         "voice": config.voice,
         "paragraphNumber": config.paragraphs,

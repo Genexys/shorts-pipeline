@@ -58,6 +58,9 @@ def test_build_payload_matches_frontend_shape():
 
     assert payload == {
         "videoSubject": "Why the ocean is salty",
+        # The API treats format as optional and defaults to short, so the
+        # frontend need not send it; autopilot is explicit about what it wants.
+        "format": "short",
         "aiModel": "llama3.1:8b",
         "voice": "en_us_001",
         "paragraphNumber": 1,
@@ -427,3 +430,12 @@ def test_main_exits_1_on_config_error(monkeypatch):
     monkeypatch.setattr(autopilot, "init_db", lambda: None)
 
     assert autopilot.main() == 1
+
+
+def test_build_payload_can_ask_for_long_form():
+    assert build_payload(_config(), "subject", "long")["format"] == "long"
+
+
+def test_build_payload_defaults_to_short():
+    # Nothing schedules long form yet; the default must keep today's behaviour.
+    assert build_payload(_config(), "subject")["format"] == "short"

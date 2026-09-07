@@ -12,6 +12,7 @@ from pathlib import Path
 # AudioFileClip is still what the pipeline hands to generate_subtitles.
 from moviepy import AudioFileClip
 from dotenv import load_dotenv
+from formats import SHORT, VideoFormat
 from logstream import log
 from search import PEXELS_TIMEOUT
 from utils import ENV_FILE, TEMP_DIR, SUBTITLES_DIR, FONTS_DIR
@@ -160,7 +161,11 @@ def __generate_subtitles_locally(
 
 
 def generate_subtitles(
-    audio_path: str, sentences: List[str], audio_clips: List[AudioFileClip], voice: str
+    audio_path: str,
+    sentences: List[str],
+    audio_clips: List[AudioFileClip],
+    voice: str,
+    max_chars: int = SHORT.subtitle_max_chars,
 ) -> str:
     """
     Generates subtitles from a given audio file and returns the path to the subtitles.
@@ -169,14 +174,16 @@ def generate_subtitles(
         audio_path (str): The path to the audio file to generate subtitles from.
         sentences (List[str]): all the sentences said out loud in the audio clips
         audio_clips (List[AudioFileClip]): all the individual audio clips which will make up the final audio track
+        max_chars (int): Characters per subtitle cue after re-wrapping.
 
     Returns:
         str: The path to the generated subtitles.
     """
 
-    def equalize_subtitles(srt_path: str, max_chars: int = 10) -> None:
-        # Equalize subtitles
-        srt_equalizer.equalize_srt_file(srt_path, srt_path, max_chars)
+    def equalize_subtitles(srt_path: str, width: int) -> None:
+        # Re-wrap the cues. Shorts want one word at a time; longer videos want
+        # readable lines.
+        srt_equalizer.equalize_srt_file(srt_path, srt_path, width)
 
     # Save subtitles
     SUBTITLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -196,32 +203,71 @@ def generate_subtitles(
         file.write(subtitles)
 
     # Equalize subtitles
-    equalize_subtitles(str(subtitles_path))
+    equalize_subtitles(str(subtitles_path), max_chars)
 
     log("[+] Subtitles generated.", "success")
 
     return str(subtitles_path)
 
 
-ASPECT_9_16 = 9 / 16
+# Shot rhythm. Every shot used to run exactly the same length, which reads as
+# machine-cut however varied the footage is. These multiply the nominal shot
+# length and average to 1.0, so the shot count and total duration are unchanged.
+SHOT_RHYTHM = (1.0, 0.8, 1.2)
+
+# Shorter than this and a shot reads as a flicker rather than a cut.
+MIN_SHOT_SECONDS = 0.9
+# A shot this much shorter than its neighbours reads as a mistake even when it
+# is seconds long: two seconds among ten-second shots is as jarring as a
+# quarter-second among three-second ones.
+SHORT_SHOT_FRACTION = 0.5
+
+# Slow camera moves, cycled per shot so neighbours never move the same way.
+# Static stock footage cut together is what the monetization policy calls an
+# image slideshow; a drift across the frame reads as a deliberate edit.
+# Values are per-frame zoom steps at 30 fps, kept small enough to be felt
+# rather than seen.
+MOTION_ZOOM_STEP = 0.0008
+MOTION_MAX_ZOOM = 1.14
+# Pans hold a fixed slight zoom, which is the headroom they slide across.
+MOTION_PAN_ZOOM = 1.10
+MOTION_STYLES = ("push_in", "pull_out", "pan_right", "pan_left")
 
 # ASS alignment values (numpad layout) for the UI's vertical positions.
 SUBTITLE_ALIGNMENT = {"top": 8, "center": 5, "bottom": 2}
 SUBTITLE_TOP_MARGIN_PX = 80
 SUBTITLE_SIDE_MARGIN_PX = 60
-VIDEO_WIDTH = 1080
-VIDEO_HEIGHT = 1920
 SUBTITLE_FONT_NAME = "The Bold Font"
-# Chosen by measuring glyph height against the previous MoviePy render:
-# at 100 the caps came out 64 px against its 72 px, an 11% shrink.
-SUBTITLE_FONT_SIZE = 112
 SUBTITLE_OUTLINE = 5
 
+
+def _fit_rhythm(
+    rhythm: Tuple[float, ...], required: float, max_clip_duration: float
+) -> Tuple[float, ...]:
+    """Compresses the rhythm so its longest beat still fits under the cap.
+
+    Without this the cap truncates the long beats while the short ones stay,
+    so the average shot comes out under `required` and the run needs one more
+    shot than there are clips — which means footage repeats. Compressing
+    toward 1.0 keeps the variation as wide as the cap allows and the average
+    at exactly 1.0.
+    """
+    if not rhythm or required <= 0:
+        return rhythm
+    longest = max(rhythm)
+    if longest <= 1.0:
+        return rhythm
+    head_room = max_clip_duration / required
+    if longest <= head_room:
+        return rhythm
+    scale = max(0.0, (head_room - 1.0) / (longest - 1.0))
+    return tuple(1.0 + (beat - 1.0) * scale for beat in rhythm)
 
 def plan_clip_segments(
     sources: List[Tuple[str, float]],
     max_duration: float,
     max_clip_duration: float,
+    rhythm: Tuple[float, ...] = SHOT_RHYTHM,
 ) -> List[Tuple[str, float]]:
     """Chooses which clip to show for how long, cycling until the audio is covered.
 
@@ -231,6 +277,8 @@ def plan_clip_segments(
         sources: (path, source duration) pairs, in the order they should cycle.
         max_duration: Total duration to fill, normally the voiceover length.
         max_clip_duration: Longest single segment.
+        rhythm: Multipliers cycled over the shots so they are not all the same
+            length. Must average 1.0 or the shot count drifts.
 
     Returns:
         (path, segment duration) pairs whose durations sum to max_duration.
@@ -243,6 +291,7 @@ def plan_clip_segments(
         raise ValueError("No source videos were provided for concatenation.")
 
     required = max_duration / len(sources)
+    rhythm = _fit_rhythm(rhythm, required, max_clip_duration)
     segments: List[Tuple[str, float]] = []
     total = 0.0
 
@@ -255,7 +304,8 @@ def plan_clip_segments(
             usable = source_duration - FRAME_EPSILON
             if usable <= 0:
                 continue
-            target = min(required, max_clip_duration, remaining, usable)
+            beat = rhythm[len(segments) % len(rhythm)] if rhythm else 1.0
+            target = min(required * beat, max_clip_duration, remaining, usable)
             if target <= 0:
                 continue
             segments.append((path, target))
@@ -264,36 +314,127 @@ def plan_clip_segments(
         if not progressed:
             raise RuntimeError("Could not reach target duration from source videos.")
 
-    return segments
+    return _absorb_trailing_sliver(
+        segments, sources, required, max_clip_duration
+    )
 
 
-def build_concat_filter(segment_count: int) -> str:
-    """Crops each segment to 9:16, scales it to 1080x1920, then concatenates.
+def _absorb_trailing_sliver(
+    segments: List[Tuple[str, float]],
+    sources: List[Tuple[str, float]],
+    required: float = 0.0,
+    max_clip_duration: float = float("inf"),
+) -> List[Tuple[str, float]]:
+    """Folds a too-short final shot into the one before it.
 
-    The crop is written as an expression so one filter handles both cases:
-    footage narrower than 9:16 is cut top and bottom, anything wider is cut at
-    the sides. Both stay centred.
+    The rhythm cycle rarely divides the clip count evenly, so the last partial
+    cycle leaves a remainder. As its own shot that remainder is both visually
+    wrong and one shot too many, which pulls in an extra clip and makes the
+    footage repeat.
+
+    Only folds when the earlier shot can take the extra time without passing
+    the per-shot cap or running past its own source; otherwise the short shot
+    stays, which beats either.
     """
+    if len(segments) < 2:
+        return segments
+
+    threshold = max(MIN_SHOT_SECONDS, required * SHORT_SHOT_FRACTION)
+    last_path, last_duration = segments[-1]
+    if last_duration >= threshold:
+        return segments
+
+    previous_path, previous_duration = segments[-2]
+    merged = previous_duration + last_duration
+    usable = dict(sources).get(previous_path, 0.0) - FRAME_EPSILON
+    if merged > usable or merged > max_clip_duration:
+        return segments
+
+    return segments[:-2] + [(previous_path, previous_duration + last_duration)]
+
+
+def build_motion_filter(style: str, fmt: VideoFormat, frames: int) -> str:
+    """A slow camera move over one shot, as a zoompan expression.
+
+    Everything is expressed against `on`, the output frame counter, not against
+    zoompan's own `zoom` accumulator. With d=1 — which is what makes zoompan
+    advance one output frame per input frame instead of holding a still —
+    `zoom` restarts at 1 for every input frame, so an expression like
+    zoom+0.0008 never grows and the filter silently does nothing.
+
+    Args:
+        style (str): One of MOTION_STYLES.
+        fmt (VideoFormat): Output shape.
+        frames (int): Length of this shot in frames, so the move finishes with it.
+
+    Returns:
+        str: A zoompan filter string.
+    """
+    span = max(frames, 1)
+    # Reach the same amount of movement whatever the shot length, so short
+    # shots are not left looking static.
+    step = (MOTION_MAX_ZOOM - 1.0) / span
+    centre_x = "iw/2-(iw/zoom/2)"
+    centre_y = "ih/2-(ih/zoom/2)"
+
+    if style == "pull_out":
+        zoom = f"max({MOTION_MAX_ZOOM}-{step:.6f}*on,1.0)"
+        x, y = centre_x, centre_y
+    elif style == "pan_right":
+        zoom = f"{MOTION_PAN_ZOOM}"
+        x, y = f"(iw-iw/zoom)*on/{span}", centre_y
+    elif style == "pan_left":
+        zoom = f"{MOTION_PAN_ZOOM}"
+        x, y = f"(iw-iw/zoom)*(1-on/{span})", centre_y
+    else:  # push_in
+        zoom = f"min(1+{step:.6f}*on,{MOTION_MAX_ZOOM})"
+        x, y = centre_x, centre_y
+
+    return f"zoompan=z='{zoom}':x='{x}':y='{y}':d=1:s={fmt.width}x{fmt.height}:fps=30"
+
+
+def build_concat_filter(
+    segment_count: int,
+    fmt: VideoFormat = SHORT,
+    durations: Optional[List[float]] = None,
+) -> str:
+    """Crops each segment to the format's ratio, scales it, then concatenates.
+
+    The crop is an expression rather than arithmetic in Python, so one filter
+    handles both cases and no source has to be probed for its dimensions:
+    footage narrower than the target is cut top and bottom, anything wider is
+    cut at the sides. Both stay centred.
+    """
+    ratio = fmt.aspect_ratio
     crop = (
-        f"crop=w='if(lt(iw/ih,{ASPECT_9_16}),iw,ih*{ASPECT_9_16})'"
-        f":h='if(lt(iw/ih,{ASPECT_9_16}),iw/{ASPECT_9_16},ih)'"
+        f"crop=w='if(lt(iw/ih,{ratio}),iw,ih*{ratio})'"
+        f":h='if(lt(iw/ih,{ratio}),iw/{ratio},ih)'"
         ":x='(iw-ow)/2':y='(ih-oh)/2'"
     )
-    chains = [
-        f"[{index}:v]{crop},scale=1080:1920,setsar=1,fps=30,"
-        f"setpts=PTS-STARTPTS[v{index}]"
-        for index in range(segment_count)
-    ]
+    chains = []
+    for index in range(segment_count):
+        seconds = durations[index] if durations else 4.0
+        motion = build_motion_filter(
+            MOTION_STYLES[index % len(MOTION_STYLES)], fmt, int(seconds * 30)
+        )
+        chains.append(
+            f"[{index}:v]{crop},scale={fmt.width}:{fmt.height},setsar=1,fps=30,"
+            f"{motion},setsar=1,setpts=PTS-STARTPTS[v{index}]"
+        )
     inputs = "".join(f"[v{index}]" for index in range(segment_count))
     chains.append(f"{inputs}concat=n={segment_count}:v=1:a=0[vout]")
     return ";".join(chains)
 
 
 def combine_videos(
-    video_paths: List[str], max_duration: float, max_clip_duration: float, threads: int
+    video_paths: List[str],
+    max_duration: float,
+    threads: int,
+    fmt: VideoFormat = SHORT,
 ) -> str:
     """
-    Combines stock clips into one 9:16 video of the requested duration.
+    Combines stock clips into one video of the format's shape and the requested
+    duration.
 
     Runs entirely in ffmpeg. The previous MoviePy implementation moved every
     frame through Python to crop and resize it, which cost roughly 40x what the
@@ -301,9 +442,9 @@ def combine_videos(
 
     Args:
         video_paths (List): A list of paths to the videos to combine.
-        max_duration (int): The maximum duration of the combined video.
-        max_clip_duration (int): The maximum duration of each clip.
+        max_duration (float): The maximum duration of the combined video.
         threads (int): Threads for the encoder.
+        fmt (VideoFormat): Output shape and the per-clip duration cap.
 
     Returns:
         str: The path to the combined video.
@@ -312,7 +453,9 @@ def combine_videos(
     combined_video_path = TEMP_DIR / f"{uuid.uuid4()}.mp4"
 
     sources = [(path, probe_duration(path)) for path in video_paths]
-    segments = plan_clip_segments(sources, float(max_duration), float(max_clip_duration))
+    segments = plan_clip_segments(
+        sources, float(max_duration), float(fmt.max_clip_duration)
+    )
 
     log("[+] Combining videos...", "info")
     log(f"[+] {len(segments)} segments covering {max_duration:.1f}s.", "info")
@@ -322,7 +465,9 @@ def combine_videos(
         command += ["-t", f"{duration:.3f}", "-i", path]
     command += [
         "-filter_complex",
-        build_concat_filter(len(segments)),
+        build_concat_filter(
+            len(segments), fmt, [duration for _, duration in segments]
+        ),
         "-map",
         "[vout]",
         "-an",
@@ -346,7 +491,9 @@ def ass_colour(hex_colour: str) -> str:
     return f"&H00{blue:02X}{green:02X}{red:02X}"
 
 
-def build_style_line(subtitles_position: str, text_colour: str) -> str:
+def build_style_line(
+    subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT
+) -> str:
     """The ASS `Style:` line for the subtitles.
 
     Written into the script rather than passed as force_style, because the size
@@ -358,7 +505,7 @@ def build_style_line(subtitles_position: str, text_colour: str) -> str:
     fields = [
         "Default",
         SUBTITLE_FONT_NAME,
-        str(SUBTITLE_FONT_SIZE),
+        str(fmt.subtitle_font_size),
         ass_colour(text_colour),   # PrimaryColour
         ass_colour(text_colour),   # SecondaryColour
         "&H00000000",              # OutlineColour
@@ -379,7 +526,9 @@ def build_style_line(subtitles_position: str, text_colour: str) -> str:
     return "Style: " + ",".join(fields)
 
 
-def patch_ass_script(script: str, subtitles_position: str, text_colour: str) -> str:
+def patch_ass_script(
+    script: str, subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT
+) -> str:
     """Sets the script's resolution and replaces its style definition.
 
     ffmpeg converts SRT to ASS with PlayResX/Y of 384x288. Font sizes are
@@ -392,26 +541,29 @@ def patch_ass_script(script: str, subtitles_position: str, text_colour: str) -> 
     for line in script.splitlines():
         stripped = line.strip()
         if stripped.startswith("PlayResX:"):
-            lines.append(f"PlayResX: {VIDEO_WIDTH}")
+            lines.append(f"PlayResX: {fmt.width}")
             seen_play_res_x = True
         elif stripped.startswith("PlayResY:"):
-            lines.append(f"PlayResY: {VIDEO_HEIGHT}")
+            lines.append(f"PlayResY: {fmt.height}")
             seen_play_res_y = True
         elif stripped.startswith("Style:"):
-            lines.append(build_style_line(subtitles_position, text_colour))
+            lines.append(build_style_line(subtitles_position, text_colour, fmt))
         else:
             lines.append(line)
             if stripped.startswith("[Script Info]") and not (
                 seen_play_res_x and seen_play_res_y
             ):
-                lines.append(f"PlayResX: {VIDEO_WIDTH}")
-                lines.append(f"PlayResY: {VIDEO_HEIGHT}")
+                lines.append(f"PlayResX: {fmt.width}")
+                lines.append(f"PlayResY: {fmt.height}")
                 seen_play_res_x = seen_play_res_y = True
     return "\n".join(lines) + "\n"
 
 
 def prepare_ass_subtitles(
-    subtitles_path: str, subtitles_position: str, text_colour: str
+    subtitles_path: str,
+    subtitles_position: str,
+    text_colour: str,
+    fmt: VideoFormat = SHORT,
 ) -> str:
     """Converts the .srt to a styled .ass sized for the real frame."""
     ass_path = TEMP_DIR / f"{uuid.uuid4()}.ass"
@@ -421,11 +573,65 @@ def prepare_ass_subtitles(
     )
     ass_path.write_text(
         patch_ass_script(
-            ass_path.read_text(encoding="utf-8"), subtitles_position, text_colour
+            ass_path.read_text(encoding="utf-8"), subtitles_position, text_colour, fmt
         ),
         encoding="utf-8",
     )
     return str(ass_path)
+
+
+def build_render_command(
+    combined_video_path: str,
+    tts_path: str,
+    subtitles_path: str,
+    output_path: str,
+    threads: int,
+    subtitles_position: str,
+    text_color: str,
+    fmt: VideoFormat = SHORT,
+) -> List[str]:
+    """The ffmpeg command that attaches the voiceover, burning subtitles if asked.
+
+    When the format does not burn subtitles there is nothing to draw, so the
+    video stream is copied rather than re-encoded: the picture already left
+    combine_videos in the right shape and codec.
+    """
+    command = [
+        _ffmpeg_binary(),
+        "-y",
+        "-i",
+        str(combined_video_path),
+        "-i",
+        tts_path,
+    ]
+
+    if fmt.burn_subtitles:
+        # libass needs the font by family name, and finds it only if told where
+        # to look; the file lives outside any system font directory.
+        ass_path = prepare_ass_subtitles(
+            subtitles_path, subtitles_position, text_color, fmt
+        )
+        command += ["-vf", f"ass='{ass_path}':fontsdir='{FONTS_DIR}'"]
+        video_args = encoder_args(threads, final=True)
+    else:
+        video_args = ["-c:v", "copy"]
+
+    command += [
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        *video_args,
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        # Video and audio are clamped to whichever ends first, so the last frame
+        # is never held over a silent tail.
+        "-shortest",
+        str(output_path),
+    ]
+    return command
 
 
 def generate_video(
@@ -435,12 +641,14 @@ def generate_video(
     threads: int,
     subtitles_position: str,
     text_color: str,
+    fmt: VideoFormat = SHORT,
 ) -> str:
     """
-    Burns the subtitles in and attaches the voiceover.
+    Attaches the voiceover, burning the subtitles in when the format wants them.
 
     One ffmpeg pass using libass, replacing a MoviePy composite that rendered
-    every subtitle frame through ImageMagick.
+    every subtitle frame through ImageMagick. Formats that ship subtitles as a
+    caption track instead skip the burn, and with it the whole re-encode.
 
     Args:
         combined_video_path (str): The path to the combined video.
@@ -449,41 +657,22 @@ def generate_video(
         threads (int): Threads for the encoder.
         subtitles_position (str): The position of the subtitles.
         text_color (str): Subtitle fill colour.
+        fmt (VideoFormat): Decides sizing and whether subtitles are burned in.
 
     Returns:
         str: "output.mp4", relative to the project root.
     """
     output_path = TEMP_DIR / "output.mp4"
-
-    # libass needs the font by family name, and finds it only if told where to
-    # look; the file lives outside any system font directory.
-    ass_path = prepare_ass_subtitles(subtitles_path, subtitles_position, text_color)
-    subtitle_filter = f"ass='{ass_path}':fontsdir='{FONTS_DIR}'"
-
-    command = [
-        _ffmpeg_binary(),
-        "-y",
-        "-i",
-        str(combined_video_path),
-        "-i",
+    command = build_render_command(
+        combined_video_path,
         tts_path,
-        "-vf",
-        subtitle_filter,
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0",
-        *encoder_args(threads, final=True),
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        # Video and audio are clamped to whichever ends first, as the MoviePy
-        # version did, so the last frame is never held over a silent tail.
-        "-shortest",
+        subtitles_path,
         str(output_path),
-    ]
-
+        threads,
+        subtitles_position,
+        text_color,
+        fmt,
+    )
     subprocess.run(command, check=True, capture_output=True, text=True)
     return "output.mp4"
 
@@ -682,6 +871,44 @@ def build_music_filter(duration: float, gain_db: float = MUSIC_FALLBACK_GAIN_DB)
         f"LRA={LOUDNESS_RANGE}[aout]"
     )
 
+
+def normalize_audio(video_path: str, output_path: str) -> str:
+    """Brings a finished video to the delivery loudness without touching the picture.
+
+    Loudness normalization used to live inside the music mix, so a video
+    without music shipped at whatever level the TTS happened to produce —
+    measured at -17.8 LUFS against the -14 YouTube normalizes to, i.e. audibly
+    quieter than everything around it.
+
+    Args:
+        video_path (str): The rendered video.
+        output_path (str): Where to write the normalized copy.
+
+    Returns:
+        str: `output_path`.
+
+    Raises:
+        subprocess.CalledProcessError: If ffmpeg fails.
+    """
+    command = [
+        _ffmpeg_binary(),
+        "-y",
+        "-i",
+        video_path,
+        "-af",
+        f"loudnorm=I={LOUDNESS_TARGET_LUFS}:TP={LOUDNESS_TRUE_PEAK_DB}:"
+        f"LRA={LOUDNESS_RANGE}",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        output_path,
+    ]
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    log("[+] Audio loudness normalized.", "success")
+    return output_path
 
 def mix_background_music(
     video_path: str,

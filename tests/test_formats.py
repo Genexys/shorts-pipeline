@@ -1,0 +1,121 @@
+import dataclasses
+
+import pytest
+
+import formats
+import video
+from formats import LONG, SHORT, resolve_format
+
+
+# -- resolution -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", [None, "", "   ", "nonsense", "vertical"])
+def test_resolve_format_falls_back_to_short(name):
+    # Anything unrecognised must keep producing today's output, so a payload
+    # written before formats existed is unaffected.
+    assert resolve_format(name) is SHORT
+
+
+@pytest.mark.parametrize("name", ["long", "LONG", " Long "])
+def test_resolve_format_is_case_and_space_insensitive(name):
+    assert resolve_format(name) is LONG
+
+
+def test_resolve_format_returns_short_by_name():
+    assert resolve_format("short") is SHORT
+
+
+# -- derived properties -----------------------------------------------------
+
+
+def test_short_is_nine_by_sixteen():
+    assert SHORT.aspect_ratio == pytest.approx(0.5625)
+
+
+def test_long_is_sixteen_by_nine():
+    assert LONG.aspect_ratio == pytest.approx(16 / 9)
+
+
+def test_stock_video_count_multiplies_terms_by_clips():
+    assert SHORT.stock_video_count == 10
+    assert LONG.stock_video_count == 20
+
+
+def test_every_format_has_enough_footage_to_avoid_repeating_itself():
+    # Footage repeating inside one video is what makes an automated upload look
+    # mass-produced. Each format must be able to cover its own runtime from
+    # distinct clips: spoken words at ~150 wpm, capped shots.
+    for fmt in (SHORT, LONG):
+        runtime_seconds = fmt.target_words / 150 * 60
+        coverage = fmt.stock_video_count * fmt.max_clip_duration
+        assert coverage >= runtime_seconds
+
+
+# -- preset sanity ----------------------------------------------------------
+
+
+def test_presets_are_frozen():
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        SHORT.width = 720
+
+
+def test_formats_are_registered_under_their_own_name():
+    assert all(name == fmt.name for name, fmt in formats.FORMATS.items())
+
+
+def test_short_preset_still_describes_a_vertical_burned_in_short():
+    # This preset exists to change nothing about today's output.
+    assert (SHORT.width, SHORT.height) == (1080, 1920)
+    assert SHORT.aspect_ratio == pytest.approx(0.5625)
+    assert SHORT.subtitle_font_size == 112
+    assert SHORT.burn_subtitles is True
+
+
+def test_video_defaults_to_the_short_format():
+    # Every format-aware entry point must fall back to SHORT, or an untouched
+    # caller would change shape.
+    assert "PlayResY: 1920" in video.patch_ass_script(
+        "[Script Info]\n\n[Events]\n", "center,center", "#FFFF00"
+    )
+
+
+def test_long_form_does_not_burn_subtitles():
+    # It ships an .srt caption track instead, which YouTube can translate.
+    assert LONG.burn_subtitles is False
+
+
+def test_long_form_uses_longer_clips_and_more_of_them():
+    # Repetition is the quality risk over several minutes, not render cost.
+    assert LONG.max_clip_duration > SHORT.max_clip_duration
+    assert LONG.stock_video_count > SHORT.stock_video_count
+
+
+def test_long_form_subtitle_lines_are_readable_not_word_by_word():
+    assert LONG.subtitle_max_chars > SHORT.subtitle_max_chars
+
+
+def test_long_form_targets_a_three_to_four_minute_script():
+    # ~150 spoken words per minute.
+    assert 3.0 <= LONG.target_words / 150 <= 4.0
+
+
+# -- voice ------------------------------------------------------------------
+
+
+def test_each_format_names_a_voice_the_tts_actually_has():
+    # A typo here would only surface as a failed job mid-render.
+    import tiktokvoice
+
+    for fmt in (SHORT, LONG):
+        assert fmt.voice in tiktokvoice.VOICES
+
+
+def test_short_keeps_the_voice_it_has_always_used():
+    assert SHORT.voice == "en_us_001"
+
+
+def test_the_two_formats_do_not_share_a_narrator():
+    # Same subject, same voice, same look across both formats is exactly the
+    # "impression of mass production" the monetization policy describes.
+    assert SHORT.voice != LONG.voice

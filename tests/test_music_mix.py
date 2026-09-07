@@ -264,3 +264,25 @@ def test_measure_voiceband_loudness_filters_to_the_voice_band(monkeypatch):
     assert f"lowpass=f={video.VOICE_BAND_HIGH_HZ}" in graph
     # The track is measured after levelling, since that is what the mix uses.
     assert graph.startswith(video.MUSIC_LEVELER)
+
+
+# -- loudness without music -------------------------------------------------
+
+
+def test_normalize_audio_copies_the_video_stream(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        video.subprocess, "run", lambda command, **kw: captured.update(command=command)
+    )
+    video.normalize_audio("in.mp4", "out.mp4")
+    command = captured["command"]
+    assert command[command.index("-c:v") + 1] == "copy"
+    assert f"loudnorm=I={video.LOUDNESS_TARGET_LUFS}" in command[command.index("-af") + 1]
+    assert command[-1] == "out.mp4"
+
+
+def test_normalize_audio_targets_the_same_level_as_the_music_mix(monkeypatch):
+    # A video with music and one without must not arrive at different levels.
+    monkeypatch.setattr(video.subprocess, "run", lambda command, **kw: None)
+    graph = video.build_music_filter(30.0)
+    assert f"I={video.LOUDNESS_TARGET_LUFS}" in graph

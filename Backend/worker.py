@@ -81,9 +81,22 @@ def process_next_job() -> bool:
                     job_id,
                     "video",
                     result.archived_path,
-                    {"title": result.title, "uploadError": result.upload_error},
+                    {
+                        "title": result.title,
+                        "uploadError": result.upload_error,
+                        "format": result.format_name,
+                    },
                     commit=False,
                 )
+                if result.thumbnail_path:
+                    add_artifact(
+                        session,
+                        job_id,
+                        "thumbnail",
+                        result.thumbnail_path,
+                        {"format": result.format_name},
+                        commit=False,
+                    )
                 if result.youtube_video_id:
                     add_artifact(
                         session,

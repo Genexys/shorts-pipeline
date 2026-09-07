@@ -203,3 +203,25 @@ def upload_video(
         },
     )
     return str(response["id"])
+
+
+def upload_thumbnail(video_id: str, thumbnail_path: str) -> None:
+    """Sets a custom thumbnail on an uploaded video.
+
+    thumbnails.set accepts the upload-only scope, so this needs no wider grant
+    than the video upload itself. It does require the channel to be verified;
+    an unverified one is refused by the API.
+
+    Args:
+        video_id (str): The uploaded video.
+        thumbnail_path (str): JPEG or PNG, under 2 MB.
+
+    Raises:
+        Exception: Whatever the API client raises. Callers treat this as
+            non-fatal: the video is already live.
+    """
+    youtube = get_authenticated_service()
+    youtube.thumbnails().set(
+        videoId=video_id, media_body=MediaFileUpload(thumbnail_path)
+    ).execute()
+    log(f"[+] Thumbnail set on {video_id}", "success")
