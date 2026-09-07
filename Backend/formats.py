@@ -1,0 +1,77 @@
+"""Output shapes the pipeline can produce.
+
+One frozen preset per shape, so every hardcoded 9:16 assumption has somewhere
+to move to. Nothing reads this yet; wiring happens in later steps.
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass(frozen=True)
+class VideoFormat:
+    """Everything the pipeline needs to know about an output shape."""
+
+    name: str
+    width: int
+    height: int
+    max_clip_duration: float
+    search_term_count: int
+    clips_per_term: int
+    subtitle_font_size: int
+    burn_subtitles: bool
+    target_words: int
+    subtitle_max_chars: int
+
+    @property
+    def aspect_ratio(self) -> float:
+        return self.width / self.height
+
+    @property
+    def stock_video_count(self) -> int:
+        return self.search_term_count * self.clips_per_term
+
+
+SHORT = VideoFormat(
+    name="short",
+    width=1080,
+    height=1920,
+    max_clip_duration=5.0,
+    search_term_count=5,
+    clips_per_term=1,
+    # 112, not 100: matched by measuring glyph height against the previous
+    # MoviePy render. See SUBTITLE_FONT_SIZE in video.py.
+    subtitle_font_size=112,
+    burn_subtitles=True,
+    target_words=90,
+    # Word-by-word captions, the usual Shorts style.
+    subtitle_max_chars=10,
+)
+
+LONG = VideoFormat(
+    name="long",
+    width=1920,
+    height=1080,
+    max_clip_duration=12.0,
+    search_term_count=10,
+    clips_per_term=2,
+    # Proportional to SHORT against the shorter frame: 112 * 1080/1920.
+    subtitle_font_size=63,
+    # Long form ships the .srt as a caption track instead, so YouTube can
+    # translate it and viewers can turn it off.
+    burn_subtitles=False,
+    target_words=550,
+    # Readable subtitle lines rather than single words.
+    subtitle_max_chars=42,
+)
+
+FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}
+
+
+def resolve_format(name: Optional[str]) -> VideoFormat:
+    """Looks up a format by name.
+
+    Unknown or missing names fall back to SHORT, so a payload written before
+    formats existed keeps producing exactly what it produces today.
+    """
+    return FORMATS.get((name or "").strip().lower(), SHORT)
