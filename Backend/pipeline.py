@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from moviepy import AudioFileClip, concatenate_audioclips
 
+from formats import SHORT
 from gpt import (
     generate_metadata,
     generate_script,
@@ -174,8 +175,10 @@ def run_generation_pipeline(
 
     temp_audio = AudioFileClip(tts_path)
     try:
+        # The format still resolves to SHORT for every payload; reading it from
+        # the request is a later step.
         combined_video_path = combine_videos(
-            video_paths, temp_audio.duration, 5, n_threads or 2
+            video_paths, temp_audio.duration, n_threads or 2, SHORT
         )
     finally:
         temp_audio.close()

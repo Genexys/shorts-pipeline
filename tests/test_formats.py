@@ -60,7 +60,7 @@ def test_short_preset_matches_what_the_pipeline_does_today():
     # alter every Short.
     assert (SHORT.width, SHORT.height) == (video.VIDEO_WIDTH, video.VIDEO_HEIGHT)
     assert SHORT.subtitle_font_size == video.SUBTITLE_FONT_SIZE
-    assert SHORT.aspect_ratio == pytest.approx(video.ASPECT_9_16)
+    assert SHORT.aspect_ratio == pytest.approx(0.5625)
     assert SHORT.burn_subtitles is True
 
 

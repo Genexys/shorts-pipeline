@@ -1,6 +1,7 @@
 import pytest
 
 import video
+from formats import LONG, SHORT
 
 
 # -- clip selection ---------------------------------------------------------
@@ -51,10 +52,58 @@ def test_build_concat_filter_chains_every_segment():
 
 def test_build_concat_filter_crops_both_orientations_in_one_expression():
     graph = video.build_concat_filter(1)
-    # Footage narrower than 9:16 is cut top and bottom, wider is cut at the
-    # sides; a single expression must cover both.
+    # Footage narrower than the target is cut top and bottom, wider is cut at
+    # the sides; a single expression must cover both.
     assert "if(lt(iw/ih," in graph
     assert "setsar=1" in graph
+
+
+def test_build_concat_filter_defaults_to_the_short_format():
+    # Callers that pass no format must keep producing today's vertical output.
+    assert video.build_concat_filter(1) == video.build_concat_filter(1, SHORT)
+
+
+def test_build_concat_filter_scales_to_the_format_size():
+    assert f"scale={SHORT.width}:{SHORT.height}" in video.build_concat_filter(1, SHORT)
+    assert f"scale={LONG.width}:{LONG.height}" in video.build_concat_filter(1, LONG)
+
+
+def test_build_concat_filter_crops_to_the_format_ratio():
+    assert str(SHORT.aspect_ratio) in video.build_concat_filter(1, SHORT)
+    assert str(LONG.aspect_ratio) in video.build_concat_filter(1, LONG)
+
+
+def test_build_concat_filter_differs_between_formats():
+    # Guards against the ratio being wired in while the scale is left behind.
+    assert video.build_concat_filter(2, SHORT) != video.build_concat_filter(2, LONG)
+
+
+def test_combine_videos_takes_the_clip_cap_from_the_format(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(video, "probe_duration", lambda path: 60.0)
+    monkeypatch.setattr(
+        video, "plan_clip_segments",
+        lambda sources, duration, cap: captured.update(cap=cap) or [("a.mp4", 5.0)],
+    )
+    monkeypatch.setattr(video.subprocess, "run", lambda command, **kw: None)
+
+    video.combine_videos(["a.mp4"], 30.0, 4, LONG)
+
+    assert captured["cap"] == LONG.max_clip_duration
+
+
+def test_combine_videos_defaults_to_short(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(video, "probe_duration", lambda path: 60.0)
+    monkeypatch.setattr(
+        video, "plan_clip_segments",
+        lambda sources, duration, cap: captured.update(cap=cap) or [("a.mp4", 5.0)],
+    )
+    monkeypatch.setattr(video.subprocess, "run", lambda command, **kw: None)
+
+    video.combine_videos(["a.mp4"], 30.0, 4)
+
+    assert captured["cap"] == SHORT.max_clip_duration
 
 
 # -- subtitle styling -------------------------------------------------------

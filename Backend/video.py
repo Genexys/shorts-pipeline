@@ -12,6 +12,7 @@ from pathlib import Path
 # AudioFileClip is still what the pipeline hands to generate_subtitles.
 from moviepy import AudioFileClip
 from dotenv import load_dotenv
+from formats import SHORT, VideoFormat
 from logstream import log
 from search import PEXELS_TIMEOUT
 from utils import ENV_FILE, TEMP_DIR, SUBTITLES_DIR, FONTS_DIR
@@ -203,8 +204,6 @@ def generate_subtitles(
     return str(subtitles_path)
 
 
-ASPECT_9_16 = 9 / 16
-
 # ASS alignment values (numpad layout) for the UI's vertical positions.
 SUBTITLE_ALIGNMENT = {"top": 8, "center": 5, "bottom": 2}
 SUBTITLE_TOP_MARGIN_PX = 80
@@ -267,20 +266,22 @@ def plan_clip_segments(
     return segments
 
 
-def build_concat_filter(segment_count: int) -> str:
-    """Crops each segment to 9:16, scales it to 1080x1920, then concatenates.
+def build_concat_filter(segment_count: int, fmt: VideoFormat = SHORT) -> str:
+    """Crops each segment to the format's ratio, scales it, then concatenates.
 
-    The crop is written as an expression so one filter handles both cases:
-    footage narrower than 9:16 is cut top and bottom, anything wider is cut at
-    the sides. Both stay centred.
+    The crop is an expression rather than arithmetic in Python, so one filter
+    handles both cases and no source has to be probed for its dimensions:
+    footage narrower than the target is cut top and bottom, anything wider is
+    cut at the sides. Both stay centred.
     """
+    ratio = fmt.aspect_ratio
     crop = (
-        f"crop=w='if(lt(iw/ih,{ASPECT_9_16}),iw,ih*{ASPECT_9_16})'"
-        f":h='if(lt(iw/ih,{ASPECT_9_16}),iw/{ASPECT_9_16},ih)'"
+        f"crop=w='if(lt(iw/ih,{ratio}),iw,ih*{ratio})'"
+        f":h='if(lt(iw/ih,{ratio}),iw/{ratio},ih)'"
         ":x='(iw-ow)/2':y='(ih-oh)/2'"
     )
     chains = [
-        f"[{index}:v]{crop},scale=1080:1920,setsar=1,fps=30,"
+        f"[{index}:v]{crop},scale={fmt.width}:{fmt.height},setsar=1,fps=30,"
         f"setpts=PTS-STARTPTS[v{index}]"
         for index in range(segment_count)
     ]
@@ -290,10 +291,14 @@ def build_concat_filter(segment_count: int) -> str:
 
 
 def combine_videos(
-    video_paths: List[str], max_duration: float, max_clip_duration: float, threads: int
+    video_paths: List[str],
+    max_duration: float,
+    threads: int,
+    fmt: VideoFormat = SHORT,
 ) -> str:
     """
-    Combines stock clips into one 9:16 video of the requested duration.
+    Combines stock clips into one video of the format's shape and the requested
+    duration.
 
     Runs entirely in ffmpeg. The previous MoviePy implementation moved every
     frame through Python to crop and resize it, which cost roughly 40x what the
@@ -301,9 +306,9 @@ def combine_videos(
 
     Args:
         video_paths (List): A list of paths to the videos to combine.
-        max_duration (int): The maximum duration of the combined video.
-        max_clip_duration (int): The maximum duration of each clip.
+        max_duration (float): The maximum duration of the combined video.
         threads (int): Threads for the encoder.
+        fmt (VideoFormat): Output shape and the per-clip duration cap.
 
     Returns:
         str: The path to the combined video.
@@ -312,7 +317,9 @@ def combine_videos(
     combined_video_path = TEMP_DIR / f"{uuid.uuid4()}.mp4"
 
     sources = [(path, probe_duration(path)) for path in video_paths]
-    segments = plan_clip_segments(sources, float(max_duration), float(max_clip_duration))
+    segments = plan_clip_segments(
+        sources, float(max_duration), float(fmt.max_clip_duration)
+    )
 
     log("[+] Combining videos...", "info")
     log(f"[+] {len(segments)} segments covering {max_duration:.1f}s.", "info")
@@ -322,7 +329,7 @@ def combine_videos(
         command += ["-t", f"{duration:.3f}", "-i", path]
     command += [
         "-filter_complex",
-        build_concat_filter(len(segments)),
+        build_concat_filter(len(segments), fmt),
         "-map",
         "[vout]",
         "-an",
