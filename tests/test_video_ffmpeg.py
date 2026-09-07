@@ -140,7 +140,7 @@ def test_build_style_line_defaults_to_centre_for_unknown_positions():
 def test_build_style_line_names_the_bundled_font_and_size():
     fields = video.build_style_line("center,center", "#FFFF00").split(",")
     assert fields[1] == video.SUBTITLE_FONT_NAME
-    assert fields[2] == str(video.SUBTITLE_FONT_SIZE)
+    assert fields[2] == str(SHORT.subtitle_font_size)
 
 
 def test_build_style_line_only_offsets_vertically_off_centre():
@@ -171,8 +171,8 @@ def test_patch_ass_script_declares_the_real_frame_size():
     # The whole bug: ffmpeg writes 384x288, font sizes are relative to it, and
     # a size meant for a 1920-tall frame renders almost seven times too big.
     patched = video.patch_ass_script(ASS_FROM_FFMPEG, "center,center", "#FFFF00")
-    assert f"PlayResX: {video.VIDEO_WIDTH}" in patched
-    assert f"PlayResY: {video.VIDEO_HEIGHT}" in patched
+    assert f"PlayResX: {SHORT.width}" in patched
+    assert f"PlayResY: {SHORT.height}" in patched
     assert "PlayResY: 288" not in patched
 
 
@@ -191,7 +191,7 @@ def test_patch_ass_script_keeps_the_dialogue():
 def test_patch_ass_script_inserts_resolution_when_absent():
     script = "[Script Info]\nScriptType: v4.00+\n\n[Events]\n"
     patched = video.patch_ass_script(script, "center,center", "#FFFF00")
-    assert f"PlayResY: {video.VIDEO_HEIGHT}" in patched
+    assert f"PlayResY: {SHORT.height}" in patched
 
 
 # -- encoder choice ---------------------------------------------------------
@@ -242,3 +242,78 @@ def test_nvenc_availability_is_probed_once(monkeypatch):
     video.nvenc_available()
 
     assert len(calls) == 1
+
+
+# -- format-driven subtitles ------------------------------------------------
+
+
+def test_patch_ass_script_uses_the_format_resolution():
+    for fmt in (SHORT, LONG):
+        patched = video.patch_ass_script(
+            ASS_FROM_FFMPEG, "center,center", "#FFFF00", fmt
+        )
+        assert f"PlayResX: {fmt.width}" in patched
+        assert f"PlayResY: {fmt.height}" in patched
+
+
+def test_build_style_line_uses_the_format_font_size():
+    for fmt in (SHORT, LONG):
+        assert (
+            video.build_style_line("center,center", "#FFFF00", fmt).split(",")[2]
+            == str(fmt.subtitle_font_size)
+        )
+
+
+# -- optional burn-in -------------------------------------------------------
+
+
+def _render_command(fmt, monkeypatch):
+    monkeypatch.setattr(video, "prepare_ass_subtitles", lambda *a, **k: "/tmp/x.ass")
+    monkeypatch.setattr(video, "nvenc_available", lambda: False)
+    return video.build_render_command(
+        "in.mp4", "voice.mp3", "subs.srt", "out.mp4", 4, "center,center", "#FFFF00", fmt
+    )
+
+
+def test_render_burns_subtitles_for_short(monkeypatch):
+    command = _render_command(SHORT, monkeypatch)
+    assert "-vf" in command
+    assert "ass=" in command[command.index("-vf") + 1]
+
+
+def test_render_skips_the_burn_for_long(monkeypatch):
+    # Long form ships an .srt caption track instead.
+    command = _render_command(LONG, monkeypatch)
+    assert "-vf" not in command
+
+
+def test_render_copies_the_video_stream_when_nothing_is_drawn(monkeypatch):
+    # Nothing is composited, so re-encoding would cost minutes and lose quality
+    # for no change at all.
+    command = _render_command(LONG, monkeypatch)
+    assert command[command.index("-c:v") + 1] == "copy"
+
+
+def test_render_re_encodes_when_subtitles_are_burned(monkeypatch):
+    command = _render_command(SHORT, monkeypatch)
+    assert command[command.index("-c:v") + 1] != "copy"
+
+
+def test_render_always_attaches_the_voiceover_and_clamps_length(monkeypatch):
+    for fmt in (SHORT, LONG):
+        command = _render_command(fmt, monkeypatch)
+        assert command[command.index("-map") + 1] == "0:v:0"
+        assert "1:a:0" in command
+        assert "-shortest" in command
+
+
+def test_render_does_not_prepare_subtitles_it_will_not_draw(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        video, "prepare_ass_subtitles", lambda *a, **k: calls.append(a) or "/tmp/x.ass"
+    )
+    monkeypatch.setattr(video, "nvenc_available", lambda: False)
+    video.build_render_command(
+        "in.mp4", "voice.mp3", "subs.srt", "out.mp4", 4, "center,center", "#FFFF00", LONG
+    )
+    assert calls == []

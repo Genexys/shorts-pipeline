@@ -163,6 +163,7 @@ def run_generation_pipeline(
             sentences=sentences,
             audio_clips=paths,
             voice=voice_prefix,
+            max_chars=SHORT.subtitle_max_chars,
         )
     except Exception as err:
         emit(f"[-] Error generating subtitles: {err}", "error")
@@ -191,6 +192,7 @@ def run_generation_pipeline(
             n_threads or 2,
             subtitles_position,
             text_color or "#FFFF00",
+            SHORT,
         )
     except Exception as err:
         raise RuntimeError(

@@ -54,14 +54,20 @@ def test_formats_are_registered_under_their_own_name():
     assert all(name == fmt.name for name, fmt in formats.FORMATS.items())
 
 
-def test_short_preset_matches_what_the_pipeline_does_today():
-    # This preset exists to change nothing. If any of these drift from the
-    # values video.py and pipeline.py use, wiring the format in would silently
-    # alter every Short.
-    assert (SHORT.width, SHORT.height) == (video.VIDEO_WIDTH, video.VIDEO_HEIGHT)
-    assert SHORT.subtitle_font_size == video.SUBTITLE_FONT_SIZE
+def test_short_preset_still_describes_a_vertical_burned_in_short():
+    # This preset exists to change nothing about today's output.
+    assert (SHORT.width, SHORT.height) == (1080, 1920)
     assert SHORT.aspect_ratio == pytest.approx(0.5625)
+    assert SHORT.subtitle_font_size == 112
     assert SHORT.burn_subtitles is True
+
+
+def test_video_defaults_to_the_short_format():
+    # Every format-aware entry point must fall back to SHORT, or an untouched
+    # caller would change shape.
+    assert "PlayResY: 1920" in video.patch_ass_script(
+        "[Script Info]\n\n[Events]\n", "center,center", "#FFFF00"
+    )
 
 
 def test_long_form_does_not_burn_subtitles():

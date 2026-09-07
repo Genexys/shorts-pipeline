@@ -161,7 +161,11 @@ def __generate_subtitles_locally(
 
 
 def generate_subtitles(
-    audio_path: str, sentences: List[str], audio_clips: List[AudioFileClip], voice: str
+    audio_path: str,
+    sentences: List[str],
+    audio_clips: List[AudioFileClip],
+    voice: str,
+    max_chars: int = SHORT.subtitle_max_chars,
 ) -> str:
     """
     Generates subtitles from a given audio file and returns the path to the subtitles.
@@ -170,14 +174,16 @@ def generate_subtitles(
         audio_path (str): The path to the audio file to generate subtitles from.
         sentences (List[str]): all the sentences said out loud in the audio clips
         audio_clips (List[AudioFileClip]): all the individual audio clips which will make up the final audio track
+        max_chars (int): Characters per subtitle cue after re-wrapping.
 
     Returns:
         str: The path to the generated subtitles.
     """
 
-    def equalize_subtitles(srt_path: str, max_chars: int = 10) -> None:
-        # Equalize subtitles
-        srt_equalizer.equalize_srt_file(srt_path, srt_path, max_chars)
+    def equalize_subtitles(srt_path: str, width: int) -> None:
+        # Re-wrap the cues. Shorts want one word at a time; longer videos want
+        # readable lines.
+        srt_equalizer.equalize_srt_file(srt_path, srt_path, width)
 
     # Save subtitles
     SUBTITLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -197,7 +203,7 @@ def generate_subtitles(
         file.write(subtitles)
 
     # Equalize subtitles
-    equalize_subtitles(str(subtitles_path))
+    equalize_subtitles(str(subtitles_path), max_chars)
 
     log("[+] Subtitles generated.", "success")
 
@@ -208,12 +214,7 @@ def generate_subtitles(
 SUBTITLE_ALIGNMENT = {"top": 8, "center": 5, "bottom": 2}
 SUBTITLE_TOP_MARGIN_PX = 80
 SUBTITLE_SIDE_MARGIN_PX = 60
-VIDEO_WIDTH = 1080
-VIDEO_HEIGHT = 1920
 SUBTITLE_FONT_NAME = "The Bold Font"
-# Chosen by measuring glyph height against the previous MoviePy render:
-# at 100 the caps came out 64 px against its 72 px, an 11% shrink.
-SUBTITLE_FONT_SIZE = 112
 SUBTITLE_OUTLINE = 5
 
 
@@ -353,7 +354,9 @@ def ass_colour(hex_colour: str) -> str:
     return f"&H00{blue:02X}{green:02X}{red:02X}"
 
 
-def build_style_line(subtitles_position: str, text_colour: str) -> str:
+def build_style_line(
+    subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT
+) -> str:
     """The ASS `Style:` line for the subtitles.
 
     Written into the script rather than passed as force_style, because the size
@@ -365,7 +368,7 @@ def build_style_line(subtitles_position: str, text_colour: str) -> str:
     fields = [
         "Default",
         SUBTITLE_FONT_NAME,
-        str(SUBTITLE_FONT_SIZE),
+        str(fmt.subtitle_font_size),
         ass_colour(text_colour),   # PrimaryColour
         ass_colour(text_colour),   # SecondaryColour
         "&H00000000",              # OutlineColour
@@ -386,7 +389,9 @@ def build_style_line(subtitles_position: str, text_colour: str) -> str:
     return "Style: " + ",".join(fields)
 
 
-def patch_ass_script(script: str, subtitles_position: str, text_colour: str) -> str:
+def patch_ass_script(
+    script: str, subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT
+) -> str:
     """Sets the script's resolution and replaces its style definition.
 
     ffmpeg converts SRT to ASS with PlayResX/Y of 384x288. Font sizes are
@@ -399,26 +404,29 @@ def patch_ass_script(script: str, subtitles_position: str, text_colour: str) -> 
     for line in script.splitlines():
         stripped = line.strip()
         if stripped.startswith("PlayResX:"):
-            lines.append(f"PlayResX: {VIDEO_WIDTH}")
+            lines.append(f"PlayResX: {fmt.width}")
             seen_play_res_x = True
         elif stripped.startswith("PlayResY:"):
-            lines.append(f"PlayResY: {VIDEO_HEIGHT}")
+            lines.append(f"PlayResY: {fmt.height}")
             seen_play_res_y = True
         elif stripped.startswith("Style:"):
-            lines.append(build_style_line(subtitles_position, text_colour))
+            lines.append(build_style_line(subtitles_position, text_colour, fmt))
         else:
             lines.append(line)
             if stripped.startswith("[Script Info]") and not (
                 seen_play_res_x and seen_play_res_y
             ):
-                lines.append(f"PlayResX: {VIDEO_WIDTH}")
-                lines.append(f"PlayResY: {VIDEO_HEIGHT}")
+                lines.append(f"PlayResX: {fmt.width}")
+                lines.append(f"PlayResY: {fmt.height}")
                 seen_play_res_x = seen_play_res_y = True
     return "\n".join(lines) + "\n"
 
 
 def prepare_ass_subtitles(
-    subtitles_path: str, subtitles_position: str, text_colour: str
+    subtitles_path: str,
+    subtitles_position: str,
+    text_colour: str,
+    fmt: VideoFormat = SHORT,
 ) -> str:
     """Converts the .srt to a styled .ass sized for the real frame."""
     ass_path = TEMP_DIR / f"{uuid.uuid4()}.ass"
@@ -428,11 +436,65 @@ def prepare_ass_subtitles(
     )
     ass_path.write_text(
         patch_ass_script(
-            ass_path.read_text(encoding="utf-8"), subtitles_position, text_colour
+            ass_path.read_text(encoding="utf-8"), subtitles_position, text_colour, fmt
         ),
         encoding="utf-8",
     )
     return str(ass_path)
+
+
+def build_render_command(
+    combined_video_path: str,
+    tts_path: str,
+    subtitles_path: str,
+    output_path: str,
+    threads: int,
+    subtitles_position: str,
+    text_color: str,
+    fmt: VideoFormat = SHORT,
+) -> List[str]:
+    """The ffmpeg command that attaches the voiceover, burning subtitles if asked.
+
+    When the format does not burn subtitles there is nothing to draw, so the
+    video stream is copied rather than re-encoded: the picture already left
+    combine_videos in the right shape and codec.
+    """
+    command = [
+        _ffmpeg_binary(),
+        "-y",
+        "-i",
+        str(combined_video_path),
+        "-i",
+        tts_path,
+    ]
+
+    if fmt.burn_subtitles:
+        # libass needs the font by family name, and finds it only if told where
+        # to look; the file lives outside any system font directory.
+        ass_path = prepare_ass_subtitles(
+            subtitles_path, subtitles_position, text_color, fmt
+        )
+        command += ["-vf", f"ass='{ass_path}':fontsdir='{FONTS_DIR}'"]
+        video_args = encoder_args(threads, final=True)
+    else:
+        video_args = ["-c:v", "copy"]
+
+    command += [
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        *video_args,
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        # Video and audio are clamped to whichever ends first, so the last frame
+        # is never held over a silent tail.
+        "-shortest",
+        str(output_path),
+    ]
+    return command
 
 
 def generate_video(
@@ -442,12 +504,14 @@ def generate_video(
     threads: int,
     subtitles_position: str,
     text_color: str,
+    fmt: VideoFormat = SHORT,
 ) -> str:
     """
-    Burns the subtitles in and attaches the voiceover.
+    Attaches the voiceover, burning the subtitles in when the format wants them.
 
     One ffmpeg pass using libass, replacing a MoviePy composite that rendered
-    every subtitle frame through ImageMagick.
+    every subtitle frame through ImageMagick. Formats that ship subtitles as a
+    caption track instead skip the burn, and with it the whole re-encode.
 
     Args:
         combined_video_path (str): The path to the combined video.
@@ -456,41 +520,22 @@ def generate_video(
         threads (int): Threads for the encoder.
         subtitles_position (str): The position of the subtitles.
         text_color (str): Subtitle fill colour.
+        fmt (VideoFormat): Decides sizing and whether subtitles are burned in.
 
     Returns:
         str: "output.mp4", relative to the project root.
     """
     output_path = TEMP_DIR / "output.mp4"
-
-    # libass needs the font by family name, and finds it only if told where to
-    # look; the file lives outside any system font directory.
-    ass_path = prepare_ass_subtitles(subtitles_path, subtitles_position, text_color)
-    subtitle_filter = f"ass='{ass_path}':fontsdir='{FONTS_DIR}'"
-
-    command = [
-        _ffmpeg_binary(),
-        "-y",
-        "-i",
-        str(combined_video_path),
-        "-i",
+    command = build_render_command(
+        combined_video_path,
         tts_path,
-        "-vf",
-        subtitle_filter,
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0",
-        *encoder_args(threads, final=True),
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        # Video and audio are clamped to whichever ends first, as the MoviePy
-        # version did, so the last frame is never held over a silent tail.
-        "-shortest",
+        subtitles_path,
         str(output_path),
-    ]
-
+        threads,
+        subtitles_position,
+        text_color,
+        fmt,
+    )
     subprocess.run(command, check=True, capture_output=True, text=True)
     return "output.mp4"
 
