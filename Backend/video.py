@@ -215,6 +215,11 @@ def generate_subtitles(
 # length and average to 1.0, so the shot count and total duration are unchanged.
 SHOT_RHYTHM = (1.0, 0.8, 1.2)
 
+# Shorter than this and a shot reads as a flicker rather than a cut. The
+# rhythm leaves a remainder that would otherwise become a quarter-second
+# segment, which also drags in one more clip and reintroduces a repeat.
+MIN_SHOT_SECONDS = 0.9
+
 # Slow camera moves, cycled per shot so neighbours never move the same way.
 # Static stock footage cut together is what the monetization policy calls an
 # image slideshow; a drift across the frame reads as a deliberate edit.
@@ -284,7 +289,30 @@ def plan_clip_segments(
         if not progressed:
             raise RuntimeError("Could not reach target duration from source videos.")
 
-    return segments
+    return _absorb_trailing_sliver(segments, sources)
+
+
+def _absorb_trailing_sliver(
+    segments: List[Tuple[str, float]], sources: List[Tuple[str, float]]
+) -> List[Tuple[str, float]]:
+    """Folds a too-short final shot into the one before it.
+
+    Only when the earlier shot's source is long enough to hold the extra time;
+    otherwise the sliver stays, which is still better than overrunning a clip.
+    """
+    if len(segments) < 2:
+        return segments
+
+    last_path, last_duration = segments[-1]
+    if last_duration >= MIN_SHOT_SECONDS:
+        return segments
+
+    previous_path, previous_duration = segments[-2]
+    usable = dict(sources).get(previous_path, 0.0) - FRAME_EPSILON
+    if previous_duration + last_duration > usable:
+        return segments
+
+    return segments[:-2] + [(previous_path, previous_duration + last_duration)]
 
 
 def build_motion_filter(style: str, fmt: VideoFormat, frames: int) -> str:

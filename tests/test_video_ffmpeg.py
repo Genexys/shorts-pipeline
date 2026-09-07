@@ -380,3 +380,26 @@ def test_plan_clip_segments_still_sums_to_the_audio_length():
 def test_a_flat_rhythm_gives_identical_shots():
     segments = video.plan_clip_segments([("a.mp4", 60.0)] * 6, 18.0, 5.0, rhythm=(1.0,))
     assert len({round(duration, 2) for _, duration in segments}) == 1
+
+
+def test_a_trailing_sliver_is_folded_into_the_previous_shot():
+    # The rhythm leaves a remainder; as its own segment it is a quarter-second
+    # flicker, and it drags in one more clip, reintroducing a repeat.
+    segments = video.plan_clip_segments([("a.mp4", 60.0)] * 8, 10.7, 5.0)
+    assert all(duration >= video.MIN_SHOT_SECONDS for _, duration in segments)
+    assert sum(duration for _, duration in segments) == pytest.approx(10.7)
+
+
+def test_folding_never_overruns_the_source_clip():
+    # Extending a shot past its own footage would read frames that do not exist.
+    segments = video.plan_clip_segments(
+        [("a.mp4", 2.0), ("b.mp4", 2.0), ("c.mp4", 2.0)], 5.2, 2.0
+    )
+    lengths = dict([("a.mp4", 2.0), ("b.mp4", 2.0), ("c.mp4", 2.0)])
+    for path, duration in segments:
+        assert duration <= lengths[path]
+
+
+def test_folding_leaves_a_single_shot_alone():
+    segments = video.plan_clip_segments([("a.mp4", 60.0)], 0.5, 5.0)
+    assert len(segments) == 1
