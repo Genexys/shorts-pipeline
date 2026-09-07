@@ -24,6 +24,10 @@
 <p>Shorts Pipeline is a personal, self-hosted automation tool operated by a single person for their own
 YouTube channel. It has no other users, collects nothing from visitors, and shares no information with
 anyone.</p>
+<p>The application uses <strong>YouTube API Services</strong>. Its operator is therefore bound by the
+<a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>, and information received from
+Google APIs is handled in line with the <a href="https://policies.google.com/privacy">Google Privacy
+Policy</a> in addition to this policy.</p>
 
 <h2>Information the application accesses</h2>
 <p>When the operator signs in with Google, the application requests exactly one permission,
@@ -40,6 +44,20 @@ videos, comments, subscribers, analytics, profile or email, and it holds no othe
   <li>Access can be withdrawn at any time at
       <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>, which
       immediately makes the stored token useless.</li>
+</ul>
+
+<h2>Retention and deletion</h2>
+<ul>
+  <li>The OAuth token is kept only for as long as the application is in use. Deleting the token file
+      removes it permanently and immediately; the application then has no access of any kind until a new
+      one is granted.</li>
+  <li>No YouTube API response is retained. The identifier of a video the operator has just uploaded to
+      their own channel is written to a local job record and can be deleted with that record.</li>
+  <li>Rendered video files live in a local output directory and are removed automatically after a
+      configurable number of days.</li>
+  <li>There is no server-side database belonging to anyone else, no backup held by a third party, and no
+      data of any other person to delete. Requests for deletion can be raised through the contact link
+      below, though the application holds nothing that belongs to anyone but its operator.</li>
 </ul>
 
 <h2>Information collected from other people</h2>
@@ -64,6 +82,11 @@ User Data Policy</a>, including the Limited Use requirements.</p>
 <p>Questions about this policy can be raised at
 <a href="https://github.com/Genexys/shorts-pipeline/issues">github.com/Genexys/shorts-pipeline/issues</a>.</p>
 
-<footer><a href="index.html">Back to Shorts Pipeline</a></footer>
+<footer>
+  <a href="index.html">Back to Shorts Pipeline</a> &middot;
+  <a href="terms.html">Terms of service</a> &middot;
+  <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a> &middot;
+  <a href="https://policies.google.com/privacy">Google Privacy Policy</a>
+</footer>
 </body>
 </html>
