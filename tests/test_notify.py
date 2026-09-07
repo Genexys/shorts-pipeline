@@ -101,3 +101,25 @@ def test_send_telegram_truncates_long_text(monkeypatch):
     notify.send_telegram("x" * 5000, token="T", chat_id="1")
 
     assert len(captured["json"]["text"]) == 4000
+
+
+def test_scrub_token_removes_raw_token():
+    assert "secret123" not in notify.scrub_token("failed with secret123", "secret123")
+
+
+def test_scrub_token_removes_percent_encoded_token_from_url():
+    # The real leak: requests reports the URL with the token quoted and
+    # percent-encoded, so an exact-string replace never matches it.
+    text = '404 for url: https://api.telegram.org/bot%22123:AAE-xyz%22/sendMessage'
+    scrubbed = notify.scrub_token(text, "123:AAE-xyz")
+    assert "AAE-xyz" not in scrubbed
+    assert "/bot<token>/sendMessage" in scrubbed
+
+
+def test_scrub_token_handles_unknown_token():
+    text = "https://api.telegram.org/bot987:SECRET/getUpdates"
+    assert "SECRET" not in notify.scrub_token(text, "")
+
+
+def test_scrub_token_leaves_unrelated_text_alone():
+    assert notify.scrub_token("plain failure", "tok") == "plain failure"

@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Optional
 
 import requests
@@ -7,6 +8,19 @@ from logstream import log
 
 TELEGRAM_TIMEOUT = 10
 TELEGRAM_MAX_TEXT = 4000
+
+
+# The token also reaches error text through the request URL, where it may be
+# percent-encoded and so will not match the raw value. Strip the path segment
+# as well, or a failed call prints the bot's credentials into the log.
+_BOT_PATH_RE = re.compile(r"/bot[^/\s]+")
+
+
+def scrub_token(text: str, token: str) -> str:
+    """Removes a bot token from arbitrary text, encoded or not."""
+    if token:
+        text = text.replace(token, "<token>")
+    return _BOT_PATH_RE.sub("/bot<token>", text)
 
 
 def send_telegram(
@@ -30,6 +44,5 @@ def send_telegram(
         response.raise_for_status()
         return True
     except Exception as err:
-        detail = str(err).replace(token, "<token>")
-        log(f"[-] Telegram notification failed: {detail}", "warning")
+        log(f"[-] Telegram notification failed: {scrub_token(str(err), token)}", "warning")
         return False
