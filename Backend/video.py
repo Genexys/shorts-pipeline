@@ -210,6 +210,22 @@ def generate_subtitles(
     return str(subtitles_path)
 
 
+# Shot rhythm. Every shot used to run exactly the same length, which reads as
+# machine-cut however varied the footage is. These multiply the nominal shot
+# length and average to 1.0, so the shot count and total duration are unchanged.
+SHOT_RHYTHM = (1.0, 0.8, 1.2)
+
+# Slow camera moves, cycled per shot so neighbours never move the same way.
+# Static stock footage cut together is what the monetization policy calls an
+# image slideshow; a drift across the frame reads as a deliberate edit.
+# Values are per-frame zoom steps at 30 fps, kept small enough to be felt
+# rather than seen.
+MOTION_ZOOM_STEP = 0.0008
+MOTION_MAX_ZOOM = 1.14
+# Pans hold a fixed slight zoom, which is the headroom they slide across.
+MOTION_PAN_ZOOM = 1.10
+MOTION_STYLES = ("push_in", "pull_out", "pan_right", "pan_left")
+
 # ASS alignment values (numpad layout) for the UI's vertical positions.
 SUBTITLE_ALIGNMENT = {"top": 8, "center": 5, "bottom": 2}
 SUBTITLE_TOP_MARGIN_PX = 80
@@ -222,6 +238,7 @@ def plan_clip_segments(
     sources: List[Tuple[str, float]],
     max_duration: float,
     max_clip_duration: float,
+    rhythm: Tuple[float, ...] = SHOT_RHYTHM,
 ) -> List[Tuple[str, float]]:
     """Chooses which clip to show for how long, cycling until the audio is covered.
 
@@ -231,6 +248,8 @@ def plan_clip_segments(
         sources: (path, source duration) pairs, in the order they should cycle.
         max_duration: Total duration to fill, normally the voiceover length.
         max_clip_duration: Longest single segment.
+        rhythm: Multipliers cycled over the shots so they are not all the same
+            length. Must average 1.0 or the shot count drifts.
 
     Returns:
         (path, segment duration) pairs whose durations sum to max_duration.
@@ -255,7 +274,8 @@ def plan_clip_segments(
             usable = source_duration - FRAME_EPSILON
             if usable <= 0:
                 continue
-            target = min(required, max_clip_duration, remaining, usable)
+            beat = rhythm[len(segments) % len(rhythm)] if rhythm else 1.0
+            target = min(required * beat, max_clip_duration, remaining, usable)
             if target <= 0:
                 continue
             segments.append((path, target))
@@ -267,7 +287,51 @@ def plan_clip_segments(
     return segments
 
 
-def build_concat_filter(segment_count: int, fmt: VideoFormat = SHORT) -> str:
+def build_motion_filter(style: str, fmt: VideoFormat, frames: int) -> str:
+    """A slow camera move over one shot, as a zoompan expression.
+
+    Everything is expressed against `on`, the output frame counter, not against
+    zoompan's own `zoom` accumulator. With d=1 — which is what makes zoompan
+    advance one output frame per input frame instead of holding a still —
+    `zoom` restarts at 1 for every input frame, so an expression like
+    zoom+0.0008 never grows and the filter silently does nothing.
+
+    Args:
+        style (str): One of MOTION_STYLES.
+        fmt (VideoFormat): Output shape.
+        frames (int): Length of this shot in frames, so the move finishes with it.
+
+    Returns:
+        str: A zoompan filter string.
+    """
+    span = max(frames, 1)
+    # Reach the same amount of movement whatever the shot length, so short
+    # shots are not left looking static.
+    step = (MOTION_MAX_ZOOM - 1.0) / span
+    centre_x = "iw/2-(iw/zoom/2)"
+    centre_y = "ih/2-(ih/zoom/2)"
+
+    if style == "pull_out":
+        zoom = f"max({MOTION_MAX_ZOOM}-{step:.6f}*on,1.0)"
+        x, y = centre_x, centre_y
+    elif style == "pan_right":
+        zoom = f"{MOTION_PAN_ZOOM}"
+        x, y = f"(iw-iw/zoom)*on/{span}", centre_y
+    elif style == "pan_left":
+        zoom = f"{MOTION_PAN_ZOOM}"
+        x, y = f"(iw-iw/zoom)*(1-on/{span})", centre_y
+    else:  # push_in
+        zoom = f"min(1+{step:.6f}*on,{MOTION_MAX_ZOOM})"
+        x, y = centre_x, centre_y
+
+    return f"zoompan=z='{zoom}':x='{x}':y='{y}':d=1:s={fmt.width}x{fmt.height}:fps=30"
+
+
+def build_concat_filter(
+    segment_count: int,
+    fmt: VideoFormat = SHORT,
+    durations: Optional[List[float]] = None,
+) -> str:
     """Crops each segment to the format's ratio, scales it, then concatenates.
 
     The crop is an expression rather than arithmetic in Python, so one filter
@@ -281,11 +345,16 @@ def build_concat_filter(segment_count: int, fmt: VideoFormat = SHORT) -> str:
         f":h='if(lt(iw/ih,{ratio}),iw/{ratio},ih)'"
         ":x='(iw-ow)/2':y='(ih-oh)/2'"
     )
-    chains = [
-        f"[{index}:v]{crop},scale={fmt.width}:{fmt.height},setsar=1,fps=30,"
-        f"setpts=PTS-STARTPTS[v{index}]"
-        for index in range(segment_count)
-    ]
+    chains = []
+    for index in range(segment_count):
+        seconds = durations[index] if durations else 4.0
+        motion = build_motion_filter(
+            MOTION_STYLES[index % len(MOTION_STYLES)], fmt, int(seconds * 30)
+        )
+        chains.append(
+            f"[{index}:v]{crop},scale={fmt.width}:{fmt.height},setsar=1,fps=30,"
+            f"{motion},setsar=1,setpts=PTS-STARTPTS[v{index}]"
+        )
     inputs = "".join(f"[v{index}]" for index in range(segment_count))
     chains.append(f"{inputs}concat=n={segment_count}:v=1:a=0[vout]")
     return ";".join(chains)
@@ -330,7 +399,9 @@ def combine_videos(
         command += ["-t", f"{duration:.3f}", "-i", path]
     command += [
         "-filter_complex",
-        build_concat_filter(len(segments), fmt),
+        build_concat_filter(
+            len(segments), fmt, [duration for _, duration in segments]
+        ),
         "-map",
         "[vout]",
         "-an",

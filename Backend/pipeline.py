@@ -52,7 +52,6 @@ def run_generation_pipeline(
     data: dict,
     is_cancelled: Callable[[], bool],
     on_log: Callable[[str, str], None],
-    amount_of_stock_videos: int = 5,
 ) -> PipelineResult:
     def emit(message: str, level: str = "info") -> None:
         log(message, level)
@@ -101,7 +100,7 @@ def run_generation_pipeline(
         )
 
     search_terms = get_search_terms(
-        data["videoSubject"], amount_of_stock_videos, script, ai_model
+        data["videoSubject"], SHORT.search_term_count, script, ai_model
     )
 
     video_urls = []
@@ -113,9 +112,13 @@ def run_generation_pipeline(
         found_urls = search_for_stock_videos(
             search_term, os.getenv("PEXELS_API_KEY"), it, min_dur
         )
+        taken = 0
         for url in found_urls:
-            if url not in video_urls:
-                video_urls.append(url)
+            if url in video_urls:
+                continue
+            video_urls.append(url)
+            taken += 1
+            if taken >= SHORT.clips_per_term:
                 break
 
     if not video_urls:

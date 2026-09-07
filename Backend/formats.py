@@ -39,7 +39,9 @@ SHORT = VideoFormat(
     height=1920,
     max_clip_duration=5.0,
     search_term_count=5,
-    clips_per_term=1,
+    # Two per term, not one. Five clips capped at 5 s covered 25 s, and Shorts
+    # run past 30 s, so footage repeated within a single video by arithmetic.
+    clips_per_term=2,
     # 112, not 100: matched by measuring glyph height against the previous
     # MoviePy render. See SUBTITLE_FONT_SIZE in video.py.
     subtitle_font_size=112,

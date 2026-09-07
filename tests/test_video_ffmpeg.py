@@ -317,3 +317,66 @@ def test_render_does_not_prepare_subtitles_it_will_not_draw(monkeypatch):
         "in.mp4", "voice.mp3", "subs.srt", "out.mp4", 4, "center,center", "#FFFF00", LONG
     )
     assert calls == []
+
+
+# -- camera motion ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("style", video.MOTION_STYLES)
+def test_motion_expressions_are_driven_by_the_frame_counter(style):
+    # zoompan's own `zoom` restarts at 1 for every input frame when d=1, so an
+    # expression like zoom+0.0008 never grows and the filter silently does
+    # nothing. Shipped exactly that once; the frame counter is what moves.
+    graph = video.build_motion_filter(style, SHORT, 90)
+    assert "on" in graph
+    assert "zoom+" not in graph
+    assert "zoom-" not in graph
+
+
+@pytest.mark.parametrize("style", video.MOTION_STYLES)
+def test_motion_advances_one_output_frame_per_input_frame(style):
+    # Without d=1 zoompan holds a still and multiplies the frame count.
+    assert ":d=1:" in video.build_motion_filter(style, SHORT, 90)
+
+
+@pytest.mark.parametrize("style", video.MOTION_STYLES)
+def test_motion_renders_at_the_format_size(style):
+    graph = video.build_motion_filter(style, LONG, 90)
+    assert f"s={LONG.width}x{LONG.height}" in graph
+
+
+def test_short_shots_move_as_much_as_long_ones():
+    # The step is derived from the shot length, so a 1-second shot is not left
+    # looking static next to a 5-second one.
+    short_shot = video.build_motion_filter("push_in", SHORT, 30)
+    long_shot = video.build_motion_filter("push_in", SHORT, 150)
+    assert short_shot != long_shot
+
+
+def test_neighbouring_shots_do_not_move_the_same_way():
+    graph = video.build_concat_filter(4, SHORT, [3.0, 3.0, 3.0, 3.0])
+    chains = graph.split(";")[:4]
+    assert len({chain.split("zoompan=")[1][:40] for chain in chains}) == 4
+
+
+# -- shot rhythm ------------------------------------------------------------
+
+
+def test_shot_rhythm_averages_to_one():
+    # Otherwise the shot count drifts and footage starts repeating.
+    assert sum(video.SHOT_RHYTHM) / len(video.SHOT_RHYTHM) == pytest.approx(1.0)
+
+
+def test_plan_clip_segments_varies_shot_length():
+    segments = video.plan_clip_segments([("a.mp4", 60.0)] * 6, 18.0, 5.0)
+    assert len({round(duration, 2) for _, duration in segments}) > 1
+
+
+def test_plan_clip_segments_still_sums_to_the_audio_length():
+    segments = video.plan_clip_segments([("a.mp4", 60.0)] * 6, 18.0, 5.0)
+    assert sum(duration for _, duration in segments) == pytest.approx(18.0)
+
+
+def test_a_flat_rhythm_gives_identical_shots():
+    segments = video.plan_clip_segments([("a.mp4", 60.0)] * 6, 18.0, 5.0, rhythm=(1.0,))
+    assert len({round(duration, 2) for _, duration in segments}) == 1

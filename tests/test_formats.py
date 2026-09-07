@@ -38,8 +38,18 @@ def test_long_is_sixteen_by_nine():
 
 
 def test_stock_video_count_multiplies_terms_by_clips():
-    assert SHORT.stock_video_count == 5
+    assert SHORT.stock_video_count == 10
     assert LONG.stock_video_count == 20
+
+
+def test_every_format_has_enough_footage_to_avoid_repeating_itself():
+    # Footage repeating inside one video is what makes an automated upload look
+    # mass-produced. Each format must be able to cover its own runtime from
+    # distinct clips: spoken words at ~150 wpm, capped shots.
+    for fmt in (SHORT, LONG):
+        runtime_seconds = fmt.target_words / 150 * 60
+        coverage = fmt.stock_video_count * fmt.max_clip_duration
+        assert coverage >= runtime_seconds
 
 
 # -- preset sanity ----------------------------------------------------------
