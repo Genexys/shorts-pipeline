@@ -150,7 +150,9 @@ def test_generate_metadata_makes_single_call_and_validates(monkeypatch):
     assert len(prompts) == 1
     assert "script text" in prompts[0]
     assert title == "Big title"
-    assert description == "Desc"
+    # Hashtags are appended to every description, so the summary is the prefix.
+    assert description.startswith("Desc")
+    assert description.endswith("#Shorts #A #BC")
     assert tags == ["a", "b c"]
 
 
@@ -160,5 +162,83 @@ def test_generate_metadata_falls_back_when_response_is_not_json(monkeypatch):
     title, description, tags = generate_metadata("ocean facts", "script", "model")
 
     assert title == "Ocean facts"
-    assert description == "Ocean facts"
+    assert description.startswith("Ocean facts")
+    assert "#Shorts" in description
     assert tags == []
+
+
+# -- hashtags ---------------------------------------------------------------
+
+
+def test_to_hashtag_camel_cases_words():
+    assert gpt.to_hashtag("ocean pressure") == "#OceanPressure"
+
+
+def test_to_hashtag_strips_punctuation():
+    assert gpt.to_hashtag("deep-sea, life!") == "#DeepSeaLife"
+
+
+def test_to_hashtag_rejects_unusable_text():
+    assert gpt.to_hashtag("!!!") == ""
+    assert gpt.to_hashtag("") == ""
+
+
+def test_to_hashtag_rejects_overlong_result():
+    assert gpt.to_hashtag("a" * (gpt.HASHTAG_MAX_CHARS + 5)) == ""
+
+
+def test_build_hashtags_always_includes_the_required_ones():
+    assert gpt.build_hashtags([], "") == list(gpt.ALWAYS_HASHTAGS)
+
+
+def test_build_hashtags_derives_from_tags():
+    hashtags = gpt.build_hashtags(["deep sea", "marine biology"], "subject")
+    assert hashtags[0] == "#Shorts"
+    assert "#DeepSea" in hashtags and "#MarineBiology" in hashtags
+
+
+def test_build_hashtags_falls_back_to_subject_when_tags_are_unusable():
+    hashtags = gpt.build_hashtags(["!!!", "-"], "octopus puzzle solving")
+    assert hashtags == ["#Shorts", "#OctopusPuzzleSolving"]
+
+
+def test_build_hashtags_deduplicates_case_insensitively():
+    hashtags = gpt.build_hashtags(["shorts", "Deep Sea", "deep sea"], "subject")
+    assert hashtags.count("#Shorts") == 1
+    assert hashtags.count("#DeepSea") == 1
+
+
+def test_build_hashtags_respects_the_cap():
+    tags = [f"tag number {i}" for i in range(20)]
+    assert len(gpt.build_hashtags(tags, "subject")) == gpt.HASHTAG_MAX_COUNT
+
+
+def test_append_hashtags_puts_them_on_their_own_line():
+    result = gpt.append_hashtags("A summary.", ["#Shorts", "#DeepSea"])
+    assert result == "A summary.\n\n#Shorts #DeepSea"
+
+
+def test_append_hashtags_keeps_the_description_within_the_limit():
+    long_description = "x" * gpt.DESCRIPTION_MAX_CHARS
+    result = gpt.append_hashtags(long_description, ["#Shorts"])
+    assert len(result) <= gpt.DESCRIPTION_MAX_CHARS
+    assert result.endswith("#Shorts")
+
+
+def test_generate_metadata_always_appends_hashtags(monkeypatch):
+    monkeypatch.setattr(
+        gpt,
+        "generate_response",
+        lambda p, m: '{"title": "T", "description": "D", "tags": ["deep sea"]}',
+    )
+    _title, description, _tags = gpt.generate_metadata("subject", "script", "model")
+    assert "#Shorts" in description
+    assert "#DeepSea" in description
+
+
+def test_generate_metadata_appends_hashtags_even_when_the_model_fails(monkeypatch):
+    # The whole point of building them in code: a bad generation must not ship
+    # a video without hashtags.
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: "not json at all")
+    _title, description, _tags = gpt.generate_metadata("octopus facts", "script", "model")
+    assert "#Shorts" in description

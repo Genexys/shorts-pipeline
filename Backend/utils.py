@@ -18,6 +18,10 @@ SONGS_DIR = PROJECT_ROOT / "Songs"
 FONTS_DIR = PROJECT_ROOT / "fonts"
 ENV_FILE = PROJECT_ROOT / ".env"
 
+# Background-music moods. Each is an optional subdirectory of Songs/; a flat
+# Songs/ folder still works and is used whenever the mood folder is empty.
+MUSIC_MOODS: tuple[str, ...] = ("calm", "curious", "tense", "upbeat")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -51,9 +55,26 @@ def clean_dir(path: str) -> None:
         logger.error(f"Error occurred while cleaning directory {path}: {str(e)}")
 
 
-def choose_random_song() -> Optional[str]:
+def _mp3s_in(directory: Path) -> list[Path]:
+    """MP3 files directly inside `directory`. Missing directory yields an empty list."""
+    if not directory.is_dir():
+        return []
+    return [
+        entry
+        for entry in directory.iterdir()
+        if entry.is_file() and entry.suffix.lower() == ".mp3"
+    ]
+
+
+def choose_random_song(mood: Optional[str] = None) -> Optional[str]:
     """
-    Chooses a random MP3 from the Songs/ directory.
+    Chooses a random MP3 for the background bed.
+
+    Prefers `Songs/<mood>/` when that folder holds tracks and falls back to the
+    flat `Songs/` layout, so a library that predates mood folders keeps working.
+
+    Args:
+        mood (Optional[str]): Subdirectory to prefer, e.g. "calm".
 
     Returns:
         str: The path to the chosen song, or None if no MP3 files found.
@@ -62,11 +83,16 @@ def choose_random_song() -> Optional[str]:
         if not SONGS_DIR.exists():
             return None
 
-        songs = [
-            song
-            for song in SONGS_DIR.iterdir()
-            if song.is_file() and song.suffix.lower() == ".mp3"
-        ]
+        songs: list[Path] = []
+        if mood:
+            songs = _mp3s_in(SONGS_DIR / mood)
+            if not songs:
+                logger.info(
+                    f"No tracks in Songs/{mood}; falling back to the flat Songs/ folder."
+                )
+
+        if not songs:
+            songs = _mp3s_in(SONGS_DIR)
 
         if not songs:
             return None

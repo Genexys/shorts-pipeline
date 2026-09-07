@@ -60,12 +60,60 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_PARAGRAPHS` | Paragraphs in the script, 1..10. | `1` |
 | `AUTOPILOT_SUBTITLES_POSITION` | Same values as the UI. | `center,center` |
 | `AUTOPILOT_COLOR` | Subtitle colour. | `#FFFF00` |
-| `AUTOPILOT_USE_MUSIC` | Mix a random MP3 from `Songs/`. | `false` |
+| `AUTOPILOT_USE_MUSIC` | Mix a background music bed from `Songs/`. See [Background music](#background-music). | `false` |
 | `AUTOPILOT_CUSTOM_PROMPT` | Custom script prompt. | empty |
 | `OUTPUT_RETENTION_DAYS` | Days to keep `output/*.mp4`, 1..365. | `7` |
 | `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
 | `TELEGRAM_CHAT_ID` | Chat that receives notifications. | empty |
 | `TZ` | Timezone for the window and the daily counter. | `UTC` |
+
+## Background music
+
+Videos always carry the TTS voiceover; the music bed is optional and off by
+default. Turn it on per job with the **Use music** toggle in the UI, or for
+autopilot with `AUTOPILOT_USE_MUSIC=true`. With no tracks available the job
+logs a warning and continues with voice only — it never fails for this.
+
+### Where tracks live
+
+`Songs/` is a bind mount, so dropping MP3s into it on the host is enough; no
+restart and no upload through the UI are needed.
+
+Two layouts are supported:
+
+```
+Songs/track.mp3            # flat: any track may be picked
+Songs/calm/track.mp3       # mood folders, preferred when they hold tracks
+Songs/curious/track.mp3
+Songs/tense/track.mp3
+Songs/upbeat/track.mp3
+```
+
+With mood folders present, Ollama picks one of `calm`, `curious`, `tense` or
+`upbeat` for each script and a random track is taken from that folder. The
+choice is best effort: if Ollama is unreachable or answers with something
+unknown, the pipeline falls back to the flat `Songs/` folder. A flat library
+keeps working unchanged.
+
+Licensing is your responsibility. Prefer the **YouTube Audio Library** — it is
+free, mostly attribution-free, and being YouTube's own library it does not
+trigger Content ID claims on YouTube.
+
+### How the mix is built
+
+One ffmpeg pass (`Backend/video.py:mix_background_music`), never re-encoding the
+picture:
+
+1. The bed is attenuated to `MUSIC_VOLUME` (0.25) and looped to cover the video.
+2. Fades in over 1.5 s and out over the last 2 s.
+3. `sidechaincompress` ducks the music under the voice, keyed off a split copy
+   of the voice track, so the bed drops during narration and returns in gaps.
+4. `loudnorm` normalizes the finished mix to -14 LUFS, matching the level
+   YouTube normalizes playback to, so loudness is stable across videos.
+
+The video stream is copied (`-c:v copy`), so adding music costs seconds rather
+than a full re-render. If the mix fails for any reason the already-rendered
+voice-only video is kept and the job still completes.
 
 ## Notes
 
