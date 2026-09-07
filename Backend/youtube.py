@@ -33,8 +33,16 @@ def _path_from_env(name: str, default: Path) -> Path:
 CLIENT_SECRETS_FILE = _path_from_env("YOUTUBE_CLIENT_SECRETS_FILE", BASE_DIR / "client_secret.json")
 TOKEN_FILE = _path_from_env("YOUTUBE_TOKEN_FILE", BASE_DIR / "youtube_token.json")
 
-# Upload-only scope: enough for videos.insert and nothing else.
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# videos.insert and thumbnails.set both accept the upload-only scope.
+UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+# captions.insert does not. force-ssl is a substantially wider grant — it
+# allows managing and deleting channel content — and it is the only scope that
+# covers caption uploads. Kept separate so it is visible what each one buys.
+CAPTION_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
+
+# Used when minting a new token. Existing tokens are loaded with whatever they
+# were actually granted; see load_credentials.
+SCOPES = [UPLOAD_SCOPE, CAPTION_SCOPE]
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
 
@@ -70,7 +78,12 @@ def load_credentials(token_file: Path = TOKEN_FILE) -> Optional[Credentials]:
     if not token_file.exists():
         return None
     try:
-        credentials = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+        # Deliberately no scope argument: the credential takes the scopes the
+        # token was actually granted. Passing a wider list makes google-auth
+        # compare requested against granted on the next refresh and raise
+        # RefreshError, which would stop uploads within the hour on any
+        # deployment whose token predates the caption scope.
+        credentials = Credentials.from_authorized_user_file(str(token_file))
     except (ValueError, OSError, KeyError) as err:
         log(f"[-] Could not read YouTube token file {token_file}: {err}", "error")
         return None
@@ -225,3 +238,71 @@ def upload_thumbnail(video_id: str, thumbnail_path: str) -> None:
         videoId=video_id, media_body=MediaFileUpload(thumbnail_path)
     ).execute()
     log(f"[+] Thumbnail set on {video_id}", "success")
+
+
+def has_scope(credentials, scope: str) -> bool:
+    """Whether a token was actually granted a scope."""
+    return scope in (getattr(credentials, "scopes", None) or [])
+
+
+def upload_captions(
+    video_id: str,
+    srt_path: str,
+    language: str = DEFAULT_LANGUAGE,
+    name: str = "",
+) -> str:
+    """Attaches an .srt to an uploaded video as a caption track.
+
+    Needs CAPTION_SCOPE, which a token minted before captions existed will not
+    have. That case is reported rather than attempted, because the API's own
+    error for it is opaque.
+
+    Args:
+        video_id (str): The uploaded video.
+        srt_path (str): Path to the subtitle file.
+        language (str): BCP-47 code for the caption track.
+        name (str): Track name shown in the player.
+
+    Returns:
+        str: The caption track id.
+
+    Raises:
+        YouTubeAuthError: If the saved token lacks the caption scope.
+        Exception: Whatever the API client raises. Callers treat this as
+            non-fatal: the video is already live.
+    """
+    credentials = load_credentials()
+    if credentials is None:
+        raise YouTubeAuthError("No valid YouTube credentials.")
+    if not has_scope(credentials, CAPTION_SCOPE):
+        raise YouTubeAuthError(
+            "The saved token was granted upload-only access, which does not "
+            "cover captions.insert. Re-run Backend/youtube_auth.py to mint a "
+            "token with the caption scope."
+        )
+
+    youtube = build(
+        YOUTUBE_API_SERVICE_NAME,
+        YOUTUBE_API_VERSION,
+        credentials=credentials,
+        cache_discovery=False,
+    )
+    response = (
+        youtube.captions()
+        .insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "videoId": video_id,
+                    "language": language,
+                    "name": name,
+                    "isDraft": False,
+                }
+            },
+            media_body=MediaFileUpload(srt_path, mimetype="application/octet-stream"),
+        )
+        .execute()
+    )
+    caption_id = str(response["id"])
+    log(f"[+] Caption track {caption_id} added to {video_id}", "success")
+    return caption_id

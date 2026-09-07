@@ -41,6 +41,12 @@ Use `.env.example` as your template.
 | `YOUTUBE_CLIENT_SECRETS_FILE` | Path to the OAuth client JSON. | `Backend/client_secret.json` |
 | `YOUTUBE_TOKEN_FILE` | Path to the saved OAuth token. | `Backend/youtube_token.json` |
 
+Scopes: `youtube.upload` covers `videos.insert` and `thumbnails.set`.
+`captions.insert` accepts only `youtube.force-ssl`, which also allows managing
+and deleting channel content — a token minted before that scope existed keeps
+working for everything else, and caption upload is refused with a message
+rather than an opaque API error.
+
 Files (both git-ignored, both live in `Backend/`):
 
 - `client_secret.json`: OAuth client of type "Desktop app" from Google Cloud Console (YouTube Data API v3 enabled, consent screen published "In production", scope `youtube.upload`).
