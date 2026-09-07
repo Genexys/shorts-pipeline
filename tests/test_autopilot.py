@@ -83,7 +83,8 @@ def test_build_topic_prompt_mentions_niche_and_recent():
 
 def test_start_message(pilot):
     assert pilot.start_message() == (
-        "Autopilot started. Niche: ocean facts. 2/day, window 09:00-21:00 UTC."
+        "Autopilot started. Niche: ocean facts. 2/day, window 09:00-21:00 UTC. "
+        "Long form: 0/week."
     )
 
 

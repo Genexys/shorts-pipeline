@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Mapping, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -69,6 +69,7 @@ class AutopilotConfig:
     color: str
     use_music: bool
     custom_prompt: str
+    longform_per_week: int
     output_retention_days: int
     telegram_bot_token: str
     telegram_chat_id: str
@@ -129,6 +130,9 @@ class AutopilotConfig:
             color=get("AUTOPILOT_COLOR").strip() or "#FFFF00",
             use_music=_parse_bool("AUTOPILOT_USE_MUSIC", get("AUTOPILOT_USE_MUSIC"), default=False),
             custom_prompt=get("AUTOPILOT_CUSTOM_PROMPT"),
+            longform_per_week=_parse_int(
+                "AUTOPILOT_LONGFORM_PER_WEEK", get("AUTOPILOT_LONGFORM_PER_WEEK"), 0, 0, 7
+            ),
             output_retention_days=_parse_int("OUTPUT_RETENTION_DAYS", get("OUTPUT_RETENTION_DAYS"), 7, 1, 365),
             telegram_bot_token=get("TELEGRAM_BOT_TOKEN").strip(),
             telegram_chat_id=get("TELEGRAM_CHAT_ID").strip(),
@@ -167,3 +171,31 @@ def slot_available(
         return True
 
     return (local_now - last_local) >= timedelta(seconds=config.min_gap_seconds)
+
+
+def week_start(now: datetime, tz: tzinfo) -> datetime:
+    """Local Monday 00:00 for the week containing `now`, as UTC.
+
+    Weekly rather than rolling: a fixed boundary is what someone reading the
+    channel's output actually perceives, and it is far easier to reason about
+    when a budget looks wrong.
+    """
+    local_now = now.astimezone(tz)
+    midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return (midnight - timedelta(days=local_now.weekday())).astimezone(timezone.utc)
+
+
+def next_format(longform_this_week: int, config: AutopilotConfig) -> str:
+    """Which format the next video should be.
+
+    Long form wins whenever its weekly budget has room: it is the scarcer and
+    more valuable slot, and leaving it until the end of the week risks losing
+    it to a day the machine happens to be off.
+
+    Deliberately does not take the daily count. slot_available already decides
+    whether anything runs at all, and duplicating that gate here would let the
+    two disagree.
+    """
+    if config.longform_per_week <= 0:
+        return "short"
+    return "long" if longform_this_week < config.longform_per_week else "short"
