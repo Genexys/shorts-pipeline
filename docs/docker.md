@@ -100,11 +100,51 @@ docker compose -f docker-compose.yml -f compose.mac.yml up -d --build
 
 The `ollama` and `ollama-init` services still start and pull the model but sit idle. None of this applies to a Linux VPS, where Ollama runs natively inside the container.
 
+## Local runs on Windows (NVIDIA GPU)
+
+Windows is the better host for unattended runs: WSL2 exposes the NVIDIA GPU to Linux containers, so both Ollama inference and video encoding run on hardware. A Mac cannot do this at all — VideoToolbox is a macOS framework and the containers live in Docker Desktop's Linux VM, which has no path to it.
+
+Prerequisites: the NVIDIA driver installed on Windows (not inside WSL — WSL uses the Windows driver), Docker Desktop on the WSL2 backend, and a working GPU passthrough. Verify passthrough before anything else:
+
+```powershell
+docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+```
+
+Then start the stack with the tracked override:
+
+```bash
+docker compose -f docker-compose.yml -f compose.win.yml up -d --build
+```
+
+`compose.win.yml` reserves the GPU for `ollama` and `worker`, and sets `FFMPEG_BINARY=/usr/bin/ffmpeg` on the worker. That last part is load-bearing: MoviePy defaults to the `imageio-ffmpeg` binary, which is built without nvenc, so without it the GPU reservation is a silent no-op and every encode quietly stays on the CPU.
+
+Verify the encoder actually answers before changing any render settings:
+
+```bash
+# 1. the GPU is visible inside the worker
+docker compose -f docker-compose.yml -f compose.win.yml exec worker nvidia-smi
+
+# 2. the ffmpeg the worker will use has the nvenc encoders
+docker compose -f docker-compose.yml -f compose.win.yml exec worker \
+  /usr/bin/ffmpeg -hide_banner -encoders | grep nvenc
+
+# 3. an encode really runs on the GPU (watch Task Manager → GPU → Video Encode)
+docker compose -f docker-compose.yml -f compose.win.yml exec worker \
+  /usr/bin/ffmpeg -hide_banner -f lavfi -i testsrc=size=1080x1920:rate=30:duration=5 \
+  -c:v h264_nvenc -f null -
+```
+
+Only after all three pass is it worth switching `Backend/video.py` from `libx264` to `h264_nvenc`. Doing it in the other order makes "nvenc is unavailable" indistinguishable from "the render is broken".
+
+Not every GA107 board has an encoder — NVIDIA fused NVENC off on some RTX 3050 SKUs. The Video Encode graph in Task Manager → Performance → GPU tells you which one you have.
+
 ## Troubleshooting
 
 - `ollama-init` exits non-zero: no internet access or unknown model name; `docker compose logs ollama-init`.
 - `api` never becomes healthy: `docker compose logs api`; usually a missing required variable (`TIKTOK_SESSION_ID`, `PEXELS_API_KEY`).
 - `autopilot` restarts in a loop with `configuration error`: `AUTOPILOT_NICHE` is empty or `AUTOPILOT_WINDOW` is invalid.
 - Upload skipped with `No valid YouTube credentials`: `secrets/youtube_token.json` is missing or invalid; recreate it on a machine with a browser (docs/deploy.md).
+- Renders are still slow on Windows with `compose.win.yml`: the GPU reservation succeeded but `FFMPEG_BINARY` did not take effect. Check `docker compose ... exec worker printenv FFMPEG_BINARY`; if it is empty, MoviePy is using the imageio binary, which has no nvenc.
+- `h264_nvenc` fails with `Cannot load libnvidia-encode.so`: `NVIDIA_DRIVER_CAPABILITIES` is missing `video`. The default capability set grants compute only.
 - Files in `output/` are owned by root: containers run as root; `sudo chown -R $USER output` if you need to edit them.
 - `worker` or `autopilot` restart a few times right after a host reboot: `restart: always` ignores `depends_on`, so they can start before Postgres answers; they settle within a minute.

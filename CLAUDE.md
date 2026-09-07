@@ -30,7 +30,7 @@ mkdir -p secrets output Songs      # secrets/: client_secret.json + youtube_toke
 docker compose up -d --build       # postgres, ollama (+model pull), api :8080, worker, autopilot, frontend :8001
 docker compose logs -f autopilot worker
 ```
-Ports bind to 127.0.0.1 only; on a server use `ssh -L 8080:127.0.0.1:8080 -L 8001:127.0.0.1:8001`. See `docs/docker.md` and `docs/deploy.md`. On a Mac, Ollama inside Docker is too slow to finish a job; use the native-Ollama override described in the "Local runs on a Mac" section of docs/docker.md.
+Ports bind to 127.0.0.1 only; on a server use `ssh -L 8080:127.0.0.1:8080 -L 8001:127.0.0.1:8001`. See `docs/docker.md` and `docs/deploy.md`. On a Mac, Ollama inside Docker is too slow to finish a job; use the native-Ollama override described in the "Local runs on a Mac" section of docs/docker.md. On Windows with an NVIDIA GPU, use the tracked `compose.win.yml` override ("Local runs on Windows" in docs/docker.md) — it is the only host where hardware encoding is reachable from the containers.
 
 ### Verify
 ```bash
@@ -39,7 +39,7 @@ curl http://localhost:8080/api/models         # API smoke test
 ```
 
 ### Tests
-No test suite exists yet. If added, use pytest:
+pytest, under `tests/`:
 ```bash
 uv run pytest -q                                           # all tests
 uv run pytest tests/test_file.py::test_name -q             # single test
