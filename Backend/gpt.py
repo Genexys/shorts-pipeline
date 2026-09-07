@@ -139,6 +139,61 @@ def generate_response(prompt: str, ai_model: str) -> str:
     return content
 
 
+def parse_string_array(response: str) -> List[str]:
+    """Parses a JSON array of strings out of an LLM response, tolerating noise.
+
+    Tries the whole response, then the first bracketed span, then falls back to
+    collecting quoted strings. Entries that are not strings are dropped: a
+    number surviving into the result used to crash the caller that joins it
+    for logging.
+
+    Args:
+        response (str): Raw model output.
+
+    Returns:
+        List[str]: Non-empty strings, in order. Empty when nothing parses.
+    """
+
+    def usable(items: object) -> List[str]:
+        if not isinstance(items, list):
+            return []
+        return [
+            item.strip()
+            for item in items
+            if isinstance(item, str) and item.strip()
+        ]
+
+    try:
+        found = usable(json.loads(response))
+        if found:
+            return found
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    match = re.search(r"\[[\s\S]*\]", response or "")
+    if match:
+        try:
+            found = usable(json.loads(match.group()))
+            if found:
+                return found
+        except json.JSONDecodeError:
+            pass
+
+    quoted = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', response or "")
+    return [item.strip() for item in quoted if item.strip()]
+
+
+def clean_script_text(response: str) -> str:
+    """Removes the formatting the model is told not to produce but sometimes does.
+
+    Deliberately does not strip surrounding whitespace: generate_script splits
+    on blank lines afterwards, and trimming here would change which paragraphs
+    it selects.
+    """
+    cleaned = (response or "").replace("*", "").replace("#", "")
+    cleaned = re.sub(r"\[.*\]", "", cleaned)
+    return re.sub(r"\(.*\)", "", cleaned)
+
 def generate_script(
     video_subject: str,
     paragraph_number: int,
@@ -207,14 +262,7 @@ def generate_script(
 
     # Return the generated script
     if response:
-        # Clean the script
-        # Remove asterisks, hashes
-        response = response.replace("*", "")
-        response = response.replace("#", "")
-
-        # Remove markdown syntax
-        response = re.sub(r"\[.*\]", "", response)
-        response = re.sub(r"\(.*\)", "", response)
+        response = clean_script_text(response)
 
         # Split the script into paragraphs
         paragraphs = response.split("\n\n")
@@ -279,31 +327,9 @@ def get_search_terms(
     response = generate_response(prompt, ai_model)
     log(response, "info")
 
-    # Parse response into a list of search terms
-    search_terms = []
-
-    try:
-        search_terms = json.loads(response)
-        if not isinstance(search_terms, list) or not all(
-            isinstance(term, str) for term in search_terms
-        ):
-            raise ValueError("Response is not a list of strings.")
-
-    except (json.JSONDecodeError, ValueError):
-        log("[*] GPT returned an unformatted response. Attempting to clean...", "warning")
-
-        # Attempt to extract JSON array first
-        match = re.search(r"\[[\s\S]*\]", response)
-        if match:
-            try:
-                search_terms = json.loads(match.group())
-            except json.JSONDecodeError:
-                search_terms = []
-
-        # Last-resort fallback: collect quoted strings
-        if not search_terms:
-            search_terms = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', response)
-            search_terms = [term.strip() for term in search_terms if term.strip()]
+    search_terms = parse_string_array(response)
+    if not search_terms:
+        log("[*] GPT returned no usable search terms.", "warning")
 
     # Let user know
     log(f"\nGenerated {len(search_terms)} search terms: {', '.join(search_terms)}", "info")
@@ -603,3 +629,120 @@ def select_music_mood(
 
     log(f"[!] Model did not return a known music mood: {response[:120]}", "warning")
     return None
+
+
+LONG_SECTION_MIN_WORDS = 40
+
+
+def generate_outline(
+    video_subject: str, section_count: int, ai_model: str
+) -> List[str]:
+    """
+    Asks for the section headings of a longer video.
+
+    Args:
+        video_subject (str): The subject of the video.
+        section_count (int): How many sections to ask for.
+        ai_model (str): The AI model to use for generation.
+
+    Returns:
+        List[str]: Headings, at most `section_count`. Empty if none parsed.
+    """
+    prompt = f"""
+    Plan a {section_count}-part explainer video.
+
+    Subject: {video_subject}
+
+    Give {section_count} section headings that build on each other, from the
+    hook to the closing thought. Each heading is a short phrase, not a sentence.
+    Do not number them.
+
+    The sections must not overlap. Each one covers something the others do not,
+    so no idea is explained twice across the video.
+
+    Return ONLY a JSON array of strings.
+    """
+
+    headings = parse_string_array(generate_response(prompt, ai_model))[:section_count]
+    log(f"[+] Outline: {len(headings)} sections", "info")
+    return headings
+
+
+def generate_long_script(
+    video_subject: str,
+    target_words: int,
+    ai_model: str,
+    voice: str,
+    custom_prompt: str,
+    section_count: int = 6,
+) -> Optional[str]:
+    """
+    Writes a long script one section at a time.
+
+    An 8B model asked for 550 coherent words in one call repeats itself and
+    loses the thread. Each section is roughly the length it already handles
+    well for Shorts, and every call sees the whole outline so it knows what has
+    been covered and what is still coming.
+
+    Args:
+        video_subject (str): The subject of the video.
+        target_words (int): Total words wanted across all sections.
+        ai_model (str): The AI model to use for generation.
+        voice (str): Voice id, used to name the language.
+        custom_prompt (str): Extra instruction applied to every section.
+        section_count (int): How many sections to plan.
+
+    Returns:
+        Optional[str]: The joined script, or None if nothing usable came back.
+    """
+    outline = generate_outline(video_subject, section_count, ai_model)
+    if not outline:
+        log("[-] Could not plan the video: no outline returned.", "error")
+        return None
+
+    words_per_section = max(LONG_SECTION_MIN_WORDS, target_words // len(outline))
+    plan = "\n".join(f"{index}. {heading}" for index, heading in enumerate(outline, 1))
+    sections: List[str] = []
+
+    for index, heading in enumerate(outline, 1):
+        prompt = f"""
+        You are writing one section of a spoken video script.
+
+        Subject: {video_subject}
+        Language: {voice}
+
+        Full outline:
+        {plan}
+
+        Write section {index}: "{heading}".
+
+        Rules:
+        - About {words_per_section} words.
+        - Continue naturally from the earlier sections; do not recap them.
+        - Do not cover what later sections will cover.
+        - Plain spoken prose. No heading, no markdown, no stage directions.
+        - Do not mention sections, the outline, or this prompt.
+        {custom_prompt}
+        """
+
+        try:
+            section = clean_script_text(generate_response(prompt, ai_model)).strip()
+        except Exception as err:
+            # One bad section is worth losing; the video is not.
+            log(f"[!] Section {index} failed: {err}", "warning")
+            continue
+
+        if section:
+            sections.append(section)
+
+    if not sections:
+        log("[-] Every section came back empty.", "error")
+        return None
+
+    script = "\n\n".join(sections)
+    log(
+        f"[+] Long script: {len(sections)}/{len(outline)} sections, "
+        f"{len(script.split())} words",
+        "success",
+    )
+    return script
