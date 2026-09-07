@@ -317,6 +317,14 @@ DESCRIPTION_MAX_CHARS = 4500
 TAG_MAX_CHARS = 30
 TAGS_MAX_TOTAL_CHARS = 400
 TAGS_MAX_COUNT = 15
+
+# Hashtags live in the description, not in snippet.tags: YouTube renders the
+# first three above the title. It ignores every hashtag in a description that
+# carries more than 15, so the cap stays well clear of that.
+HASHTAG_MAX_COUNT = 5
+HASHTAG_MAX_CHARS = 30
+# Always present, whatever the model returns.
+ALWAYS_HASHTAGS = ("#Shorts",)
 MAX_JSON_CANDIDATES = 32
 
 
@@ -451,6 +459,58 @@ def validate_metadata(
     return title, description, tags
 
 
+def to_hashtag(text: str) -> str:
+    """Turns a tag into a hashtag, or "" when nothing usable is left.
+
+    YouTube hashtags cannot contain spaces or punctuation, so the words are
+    stripped to alphanumerics and joined in CamelCase.
+    """
+    words = re.findall(r"[A-Za-z0-9]+", text or "")
+    if not words:
+        return ""
+    hashtag = "#" + "".join(word[:1].upper() + word[1:] for word in words)
+    return hashtag if len(hashtag) <= HASHTAG_MAX_CHARS else ""
+
+
+def build_hashtags(tags: List[str], subject: str) -> List[str]:
+    """Hashtags for a video. Never empty: ALWAYS_HASHTAGS is the floor.
+
+    Derived from the tags rather than requested from the model, so a video
+    cannot end up without them because one generation forgot.
+    """
+    hashtags: List[str] = []
+    seen: set[str] = set()
+
+    for candidate in list(ALWAYS_HASHTAGS) + [to_hashtag(tag) for tag in tags]:
+        if not candidate or candidate.lower() in seen:
+            continue
+        hashtags.append(candidate)
+        seen.add(candidate.lower())
+        if len(hashtags) >= HASHTAG_MAX_COUNT:
+            break
+
+    # Tags can all be unusable (empty, punctuation-only, too long); fall back to
+    # the subject so the video still carries something topical.
+    if len(hashtags) == len(ALWAYS_HASHTAGS):
+        from_subject = to_hashtag(subject)
+        if from_subject and from_subject.lower() not in seen:
+            hashtags.append(from_subject)
+
+    return hashtags
+
+
+def append_hashtags(description: str, hashtags: List[str]) -> str:
+    """Puts the hashtags on their own line, inside the description limit."""
+    if not hashtags:
+        return description
+    block = " ".join(hashtags)
+    body = description.rstrip()
+    room = DESCRIPTION_MAX_CHARS - len(block) - 2
+    if room < 0:
+        return block[:DESCRIPTION_MAX_CHARS]
+    return f"{body[:room]}\n\n{block}"
+
+
 def generate_metadata(
     video_subject: str, script: str, ai_model: str
 ) -> Tuple[str, str, List[str]]:
@@ -473,7 +533,7 @@ def generate_metadata(
 
     Rules:
     - title: catchy, at most 70 characters, plain text, no hashtags, no quotes, no emojis.
-    - description: 2-3 sentences that summarize the video, plain text.
+    - description: 2-3 sentences that summarize the video, plain text, no hashtags (they are appended automatically).
     - tags: 5 to 10 short keywords, each 1-3 words, no commas inside a tag.
     - Do not add any text before or after the JSON object.
     """
@@ -486,7 +546,13 @@ def generate_metadata(
         log(response[:500], "info")
 
     title, description, tags = validate_metadata(raw, video_subject)
-    log(f"[+] Metadata: title='{title}', {len(tags)} tags", "success")
+    hashtags = build_hashtags(tags, video_subject)
+    description = append_hashtags(description, hashtags)
+    log(
+        f"[+] Metadata: title='{title}', {len(tags)} tags, "
+        f"hashtags {' '.join(hashtags)}",
+        "success",
+    )
     return title, description, tags
 
 

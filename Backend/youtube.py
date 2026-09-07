@@ -40,6 +40,26 @@ YOUTUBE_API_VERSION = "v3"
 
 VALID_PRIVACY_STATUSES = ("public", "private", "unlisted")
 
+# TikTok TTS voice prefixes to BCP-47. Declaring the language feeds YouTube's
+# audience matching, auto-captions and translations; left unset the video reads
+# as language-agnostic and loses that.
+VOICE_LANGUAGE_MAP = {
+    "en": "en",
+    "br": "pt",
+    "id": "id",
+    "jp": "ja",
+    "kr": "ko",
+    "es": "es",
+    "fr": "fr",
+    "de": "de",
+}
+DEFAULT_LANGUAGE = "en"
+
+
+def resolve_language(voice: Optional[str]) -> str:
+    """BCP-47 code for a TikTok TTS voice. Unknown voices fall back to English."""
+    return VOICE_LANGUAGE_MAP.get((voice or "")[:2].lower(), DEFAULT_LANGUAGE)
+
 
 class YouTubeAuthError(RuntimeError):
     """Raised when no usable YouTube credentials are available."""
@@ -102,12 +122,15 @@ def resolve_privacy_status(raw: Optional[str]) -> Tuple[str, Optional[str]]:
 
 
 def initialize_upload(youtube, options: dict) -> dict:
+    language = options.get("language") or DEFAULT_LANGUAGE
     body = {
         "snippet": {
             "title": options["title"],
             "description": options["description"],
             "tags": options["tags"] or None,
             "categoryId": options["category"],
+            "defaultLanguage": language,
+            "defaultAudioLanguage": language,
         },
         "status": {
             "privacyStatus": options["privacyStatus"],
@@ -163,6 +186,7 @@ def upload_video(
     category: str,
     tags: List[str],
     privacy_status: str,
+    language: str = DEFAULT_LANGUAGE,
 ) -> str:
     """Upload a video and return its YouTube id. Raises on any failure."""
     youtube = get_authenticated_service()
@@ -175,6 +199,7 @@ def upload_video(
             "category": category,
             "tags": list(tags),
             "privacyStatus": privacy_status,
+            "language": language,
         },
     )
     return str(response["id"])

@@ -39,7 +39,7 @@ FRAME_EPSILON = 1 / 120
 # target, derived from a mix that was judged right by ear.
 VOICE_BAND_LOW_HZ = 300
 VOICE_BAND_HIGH_HZ = 3000
-MUSIC_VOICEBAND_TARGET_LUFS = -26.0
+MUSIC_VOICEBAND_TARGET_LUFS = -30.0
 
 # Used when the measurement pass fails, so a bed is still laid rather than the
 # job silently losing its music.

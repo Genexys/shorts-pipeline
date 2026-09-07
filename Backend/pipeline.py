@@ -30,7 +30,7 @@ from video import (
     mix_background_music,
     save_video,
 )
-from youtube import resolve_privacy_status, upload_video
+from youtube import resolve_language, resolve_privacy_status, upload_video
 
 
 class PipelineCancelled(Exception):
@@ -276,6 +276,7 @@ def run_generation_pipeline(
                 category=category_id,
                 tags=keywords,
                 privacy_status=privacy_status,
+                language=resolve_language(voice),
             )
             emit(f"[+] Uploaded: https://youtu.be/{youtube_video_id}", "success")
         except Exception as err:
