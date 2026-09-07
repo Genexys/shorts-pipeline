@@ -1,3 +1,4 @@
+import math
 import os
 import shutil
 import subprocess
@@ -122,19 +123,27 @@ def run_generation_pipeline(
     it = 15
     min_dur = 10
 
+    found_per_term = []
     for search_term in search_terms:
         guard_cancelled()
-        found_urls = search_for_stock_videos(
-            search_term, os.getenv("PEXELS_API_KEY"), it, min_dur
+        found_per_term.append(
+            search_for_stock_videos(
+                search_term, os.getenv("PEXELS_API_KEY"), it, min_dur
+            )
         )
-        taken = 0
-        for url in found_urls:
-            if url in video_urls:
-                continue
-            video_urls.append(url)
-            taken += 1
-            if taken >= fmt.clips_per_term:
+
+    # Round-robin rather than taking a fixed share from each term and stopping:
+    # search terms overlap and some return almost nothing, so a fixed share
+    # leaves the video short of footage and it starts repeating itself.
+    wanted = fmt.stock_video_count
+    for depth in range(it):
+        if len(video_urls) >= wanted:
+            break
+        for found_urls in found_per_term:
+            if len(video_urls) >= wanted:
                 break
+            if depth < len(found_urls) and found_urls[depth] not in video_urls:
+                video_urls.append(found_urls[depth])
 
     if not video_urls:
         raise RuntimeError("No videos found to download.")
@@ -198,6 +207,16 @@ def run_generation_pipeline(
 
     temp_audio = AudioFileClip(tts_path)
     try:
+        # One shot per clip only holds while each shot can be long enough.
+        # Below this many clips the run needs more shots than it has footage,
+        # and the video starts repeating itself part way through.
+        least_clips = math.ceil(temp_audio.duration / fmt.max_clip_duration)
+        if len(video_paths) < least_clips:
+            emit(
+                f"[!] Only {len(video_paths)} clips for {temp_audio.duration:.0f}s; "
+                f"{least_clips} are needed to avoid repeating footage.",
+                "warning",
+            )
         combined_video_path = combine_videos(
             video_paths, temp_audio.duration, n_threads or 2, fmt
         )

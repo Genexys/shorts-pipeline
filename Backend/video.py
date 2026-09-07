@@ -215,10 +215,12 @@ def generate_subtitles(
 # length and average to 1.0, so the shot count and total duration are unchanged.
 SHOT_RHYTHM = (1.0, 0.8, 1.2)
 
-# Shorter than this and a shot reads as a flicker rather than a cut. The
-# rhythm leaves a remainder that would otherwise become a quarter-second
-# segment, which also drags in one more clip and reintroduces a repeat.
+# Shorter than this and a shot reads as a flicker rather than a cut.
 MIN_SHOT_SECONDS = 0.9
+# A shot this much shorter than its neighbours reads as a mistake even when it
+# is seconds long: two seconds among ten-second shots is as jarring as a
+# quarter-second among three-second ones.
+SHORT_SHOT_FRACTION = 0.5
 
 # Slow camera moves, cycled per shot so neighbours never move the same way.
 # Static stock footage cut together is what the monetization policy calls an
@@ -238,6 +240,28 @@ SUBTITLE_SIDE_MARGIN_PX = 60
 SUBTITLE_FONT_NAME = "The Bold Font"
 SUBTITLE_OUTLINE = 5
 
+
+def _fit_rhythm(
+    rhythm: Tuple[float, ...], required: float, max_clip_duration: float
+) -> Tuple[float, ...]:
+    """Compresses the rhythm so its longest beat still fits under the cap.
+
+    Without this the cap truncates the long beats while the short ones stay,
+    so the average shot comes out under `required` and the run needs one more
+    shot than there are clips — which means footage repeats. Compressing
+    toward 1.0 keeps the variation as wide as the cap allows and the average
+    at exactly 1.0.
+    """
+    if not rhythm or required <= 0:
+        return rhythm
+    longest = max(rhythm)
+    if longest <= 1.0:
+        return rhythm
+    head_room = max_clip_duration / required
+    if longest <= head_room:
+        return rhythm
+    scale = max(0.0, (head_room - 1.0) / (longest - 1.0))
+    return tuple(1.0 + (beat - 1.0) * scale for beat in rhythm)
 
 def plan_clip_segments(
     sources: List[Tuple[str, float]],
@@ -267,6 +291,7 @@ def plan_clip_segments(
         raise ValueError("No source videos were provided for concatenation.")
 
     required = max_duration / len(sources)
+    rhythm = _fit_rhythm(rhythm, required, max_clip_duration)
     segments: List[Tuple[str, float]] = []
     total = 0.0
 
@@ -289,27 +314,40 @@ def plan_clip_segments(
         if not progressed:
             raise RuntimeError("Could not reach target duration from source videos.")
 
-    return _absorb_trailing_sliver(segments, sources)
+    return _absorb_trailing_sliver(
+        segments, sources, required, max_clip_duration
+    )
 
 
 def _absorb_trailing_sliver(
-    segments: List[Tuple[str, float]], sources: List[Tuple[str, float]]
+    segments: List[Tuple[str, float]],
+    sources: List[Tuple[str, float]],
+    required: float = 0.0,
+    max_clip_duration: float = float("inf"),
 ) -> List[Tuple[str, float]]:
     """Folds a too-short final shot into the one before it.
 
-    Only when the earlier shot's source is long enough to hold the extra time;
-    otherwise the sliver stays, which is still better than overrunning a clip.
+    The rhythm cycle rarely divides the clip count evenly, so the last partial
+    cycle leaves a remainder. As its own shot that remainder is both visually
+    wrong and one shot too many, which pulls in an extra clip and makes the
+    footage repeat.
+
+    Only folds when the earlier shot can take the extra time without passing
+    the per-shot cap or running past its own source; otherwise the short shot
+    stays, which beats either.
     """
     if len(segments) < 2:
         return segments
 
+    threshold = max(MIN_SHOT_SECONDS, required * SHORT_SHOT_FRACTION)
     last_path, last_duration = segments[-1]
-    if last_duration >= MIN_SHOT_SECONDS:
+    if last_duration >= threshold:
         return segments
 
     previous_path, previous_duration = segments[-2]
+    merged = previous_duration + last_duration
     usable = dict(sources).get(previous_path, 0.0) - FRAME_EPSILON
-    if previous_duration + last_duration > usable:
+    if merged > usable or merged > max_clip_duration:
         return segments
 
     return segments[:-2] + [(previous_path, previous_duration + last_duration)]

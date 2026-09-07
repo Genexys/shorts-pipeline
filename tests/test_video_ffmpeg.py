@@ -403,3 +403,53 @@ def test_folding_never_overruns_the_source_clip():
 def test_folding_leaves_a_single_shot_alone():
     segments = video.plan_clip_segments([("a.mp4", 60.0)], 0.5, 5.0)
     assert len(segments) == 1
+
+
+# -- one shot per clip ------------------------------------------------------
+
+
+@pytest.mark.parametrize("fmt", [SHORT, LONG])
+@pytest.mark.parametrize("ratio", [0.6, 0.9, 1.0, 1.2])
+def test_never_needs_more_shots_than_it_has_clips(fmt, ratio):
+    # Repeated footage part way through is what makes an automated upload look
+    # mass-produced, and it is invisible in any single-number check.
+    import math
+
+    duration = fmt.target_words / 150 * 60 * ratio
+    least = max(2, math.ceil(duration / fmt.max_clip_duration))
+    for clips in range(least, fmt.stock_video_count + 1):
+        segments = video.plan_clip_segments(
+            [(f"c{i}.mp4", 60.0) for i in range(clips)], duration, fmt.max_clip_duration
+        )
+        assert len(segments) <= clips
+        assert sum(d for _, d in segments) == pytest.approx(duration)
+
+
+def test_the_rhythm_is_compressed_to_fit_under_the_cap():
+    # A long beat truncated by the cap drags the average shot below the
+    # nominal length, so the run needs one more shot than it has clips.
+    fitted = video._fit_rhythm((1.0, 0.8, 1.2), required=10.04, max_clip_duration=12.0)
+    assert max(fitted) * 10.04 <= 12.0 + 1e-9
+    assert sum(fitted) / len(fitted) == pytest.approx(1.0)
+
+
+def test_the_rhythm_is_left_alone_when_it_already_fits():
+    assert video._fit_rhythm((1.0, 0.8, 1.2), 3.0, 12.0) == (1.0, 0.8, 1.2)
+
+
+def test_a_shot_far_shorter_than_its_neighbours_is_folded_in():
+    # Two seconds among ten-second shots reads as a mistake just as much as a
+    # quarter-second among three-second ones.
+    segments = video.plan_clip_segments([("a.mp4", 60.0)] * 20, 200.8, 12.0)
+    shortest = min(d for _, d in segments)
+    assert shortest >= 200.8 / 20 * video.SHORT_SHOT_FRACTION
+
+
+def test_folding_never_exceeds_the_per_shot_cap():
+    # Absorbing a remainder must not quietly produce a shot longer than the
+    # format allows.
+    for clips, duration, cap in ((1, 30.0, 5.0), (3, 20.0, 5.0), (20, 200.8, 12.0)):
+        segments = video.plan_clip_segments(
+            [(f"c{i}.mp4", 60.0) for i in range(clips)], duration, cap
+        )
+        assert all(d <= cap + 1e-9 for _, d in segments)
