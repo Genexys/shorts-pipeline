@@ -25,6 +25,7 @@ class VideoFormat:
     voice: str
     elevenlabs_voice_id: Optional[str]
     build_thumbnail: bool
+    always_hashtags: tuple
 
     @property
     def aspect_ratio(self) -> float:
@@ -58,6 +59,7 @@ SHORT = VideoFormat(
     # Shorts are chosen from a vertical feed, not from a thumbnail grid, and a
     # 16:9 still does not represent them anyway.
     build_thumbnail=False,
+    always_hashtags=("#Shorts",),
 )
 
 LONG = VideoFormat(
@@ -83,6 +85,9 @@ LONG = VideoFormat(
     elevenlabs_voice_id="JBFqnCBsd6RMkjVDRZzb",
     # For a long video the thumbnail decides whether anyone opens it at all.
     build_thumbnail=True,
+    # #Shorts on a three-minute landscape video misleads both the viewer and
+    # the platform about what it is.
+    always_hashtags=(),
 )
 
 FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}

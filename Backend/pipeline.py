@@ -248,7 +248,7 @@ def run_generation_pipeline(
         ) from err
 
     title, description, keywords = generate_metadata(
-        data["videoSubject"], script, ai_model
+        data["videoSubject"], script, ai_model, fmt.always_hashtags
     )
 
     emit("[-] Metadata for YouTube upload:", "info")

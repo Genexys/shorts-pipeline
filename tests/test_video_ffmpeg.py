@@ -87,7 +87,8 @@ def test_combine_videos_takes_the_clip_cap_from_the_format(monkeypatch):
     )
     monkeypatch.setattr(video.subprocess, "run", lambda command, **kw: None)
 
-    video.combine_videos(["a.mp4"], 30.0, 4, LONG)
+    # Enough clips that no stretching is needed, so the format's cap stands.
+    video.combine_videos([f"c{i}.mp4" for i in range(20)], 200.0, 4, LONG)
 
     assert captured["cap"] == LONG.max_clip_duration
 
@@ -101,7 +102,7 @@ def test_combine_videos_defaults_to_short(monkeypatch):
     )
     monkeypatch.setattr(video.subprocess, "run", lambda command, **kw: None)
 
-    video.combine_videos(["a.mp4"], 30.0, 4)
+    video.combine_videos([f"c{i}.mp4" for i in range(10)], 33.0, 4)
 
     assert captured["cap"] == SHORT.max_clip_duration
 
@@ -453,3 +454,48 @@ def test_folding_never_exceeds_the_per_shot_cap():
             [(f"c{i}.mp4", 60.0) for i in range(clips)], duration, cap
         )
         assert all(d <= cap + 1e-9 for _, d in segments)
+
+
+# -- adapting to the footage that actually arrived ---------------------------
+
+
+def test_the_cap_is_unchanged_when_there_is_enough_footage():
+    assert video.effective_clip_cap(201.0, 20, 12.0) == 12.0
+
+
+def test_the_cap_stretches_when_footage_is_short():
+    # The real case: a narrow subject returned 13 clips for a 201 s video.
+    cap = video.effective_clip_cap(201.0, 13, 12.0)
+    assert cap == pytest.approx(201.0 / 13)
+    segments = video.plan_clip_segments([(f"c{i}.mp4", 60.0) for i in range(13)], 201.0, cap)
+    assert len(segments) == 13
+
+
+def test_the_cap_stops_at_the_ceiling():
+    # Past a point a held shot outstays its welcome more than a repeat would.
+    assert video.effective_clip_cap(600.0, 5, 12.0) == video.MAX_ADAPTIVE_SHOT_SECONDS
+
+
+def test_the_cap_never_shrinks_below_the_format():
+    # More footage than needed must not shorten shots into a flicker reel.
+    assert video.effective_clip_cap(60.0, 40, 12.0) == 12.0
+
+
+def test_the_cap_survives_having_no_clips():
+    assert video.effective_clip_cap(60.0, 0, 12.0) == 12.0
+
+
+def test_combine_videos_stretches_the_cap_when_clips_are_scarce(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(video, "probe_duration", lambda path: 60.0)
+    monkeypatch.setattr(
+        video, "plan_clip_segments",
+        lambda sources, duration, cap: captured.update(cap=cap) or [("a.mp4", 5.0)],
+    )
+    monkeypatch.setattr(video.subprocess, "run", lambda command, **kw: None)
+
+    # The case that prompted this: 13 clips where 17 were needed.
+    video.combine_videos([f"c{i}.mp4" for i in range(13)], 201.0, 4, LONG)
+
+    assert captured["cap"] > LONG.max_clip_duration
+    assert captured["cap"] == pytest.approx(201.0 / 13)

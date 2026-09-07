@@ -337,8 +337,12 @@ def get_search_terms(
     The search terms are to be returned as
     a JSON-Array of strings.
 
-    Each search term should consist of 1-3 words,
-    always add the main subject of the video.
+    Each search term is 1-3 words naming something filmable.
+
+    Cover different angles so the results do not overlap: the setting, the
+    creatures or objects, the physical process, the human activity around it,
+    the scale. Repeating the subject in every term returns the same handful of
+    clips over and over, which is the one thing to avoid.
     
     YOU MUST ONLY RETURN THE JSON-ARRAY OF STRINGS.
     YOU MUST NOT RETURN ANYTHING ELSE. 
@@ -378,7 +382,7 @@ TAGS_MAX_COUNT = 15
 # carries more than 15, so the cap stays well clear of that.
 HASHTAG_MAX_COUNT = 5
 HASHTAG_MAX_CHARS = 30
-# Always present, whatever the model returns.
+# Kept for callers that do not name a format; the format overrides it.
 ALWAYS_HASHTAGS = ("#Shorts",)
 MAX_JSON_CANDIDATES = 32
 
@@ -527,7 +531,9 @@ def to_hashtag(text: str) -> str:
     return hashtag if len(hashtag) <= HASHTAG_MAX_CHARS else ""
 
 
-def build_hashtags(tags: List[str], subject: str) -> List[str]:
+def build_hashtags(
+    tags: List[str], subject: str, always: tuple = ALWAYS_HASHTAGS
+) -> List[str]:
     """Hashtags for a video. Never empty: ALWAYS_HASHTAGS is the floor.
 
     Derived from the tags rather than requested from the model, so a video
@@ -536,7 +542,7 @@ def build_hashtags(tags: List[str], subject: str) -> List[str]:
     hashtags: List[str] = []
     seen: set[str] = set()
 
-    for candidate in list(ALWAYS_HASHTAGS) + [to_hashtag(tag) for tag in tags]:
+    for candidate in list(always) + [to_hashtag(tag) for tag in tags]:
         if not candidate or candidate.lower() in seen:
             continue
         hashtags.append(candidate)
@@ -546,7 +552,7 @@ def build_hashtags(tags: List[str], subject: str) -> List[str]:
 
     # Tags can all be unusable (empty, punctuation-only, too long); fall back to
     # the subject so the video still carries something topical.
-    if len(hashtags) == len(ALWAYS_HASHTAGS):
+    if len(hashtags) == len(always):
         from_subject = to_hashtag(subject)
         if from_subject and from_subject.lower() not in seen:
             hashtags.append(from_subject)
@@ -567,7 +573,10 @@ def append_hashtags(description: str, hashtags: List[str]) -> str:
 
 
 def generate_metadata(
-    video_subject: str, script: str, ai_model: str
+    video_subject: str,
+    script: str,
+    ai_model: str,
+    always_hashtags: tuple = ALWAYS_HASHTAGS,
 ) -> Tuple[str, str, List[str]]:
     """
     Generate YouTube title, description and tags with a single JSON request.
@@ -601,7 +610,7 @@ def generate_metadata(
         log(response[:500], "info")
 
     title, description, tags = validate_metadata(raw, video_subject)
-    hashtags = build_hashtags(tags, video_subject)
+    hashtags = build_hashtags(tags, video_subject, always_hashtags)
     description = append_hashtags(description, hashtags)
     log(
         f"[+] Metadata: title='{title}', {len(tags)} tags, "
