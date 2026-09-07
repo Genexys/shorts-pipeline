@@ -203,3 +203,98 @@ def test_generate_outline_asks_for_non_overlapping_sections(monkeypatch):
     # Observed on a real generation: without this the model plans overlapping
     # sections and the same idea gets explained three times.
     assert "must not overlap" in prompts[0]
+
+
+# -- narrative variety ------------------------------------------------------
+
+
+def test_script_angles_are_distinct():
+    assert len(set(gpt.SCRIPT_ANGLES)) == len(gpt.SCRIPT_ANGLES)
+    # Enough shapes that consecutive uploads rarely share one.
+    assert len(gpt.SCRIPT_ANGLES) >= 6
+
+
+def test_choose_script_angle_returns_a_known_angle():
+    assert gpt.choose_script_angle() in gpt.SCRIPT_ANGLES
+
+
+def test_generate_script_puts_the_angle_in_the_prompt(monkeypatch):
+    prompts = []
+
+    def generate(prompt, ai_model):
+        prompts.append(prompt)
+        return "some script"
+
+    monkeypatch.setattr(gpt, "generate_response", generate)
+    gpt.generate_script("subject", 1, "model", "en_us_001", "", angle="ANGLE-MARKER")
+
+    assert "ANGLE-MARKER" in prompts[0]
+
+
+def test_generate_script_picks_an_angle_when_none_is_given(monkeypatch):
+    prompts = []
+
+    def generate(prompt, ai_model):
+        prompts.append(prompt)
+        return "some script"
+
+    monkeypatch.setattr(gpt, "generate_response", generate)
+    monkeypatch.setattr(gpt.random, "choice", lambda options: options[0])
+    gpt.generate_script("subject", 1, "model", "en_us_001", "")
+
+    assert gpt.SCRIPT_ANGLES[0] in prompts[0]
+
+
+def test_a_custom_prompt_still_wins(monkeypatch):
+    prompts = []
+
+    def generate(prompt, ai_model):
+        prompts.append(prompt)
+        return "some script"
+
+    monkeypatch.setattr(gpt, "generate_response", generate)
+    gpt.generate_script("subject", 1, "model", "en_us_001", "MY OWN PROMPT")
+
+    # The caller's prompt is used verbatim, as it always was; no angle is
+    # injected into it.
+    assert prompts[0].startswith("MY OWN PROMPT")
+    assert not any(angle in prompts[0] for angle in gpt.SCRIPT_ANGLES)
+
+
+def test_generate_outline_carries_the_angle(monkeypatch):
+    prompts = []
+
+    def generate(prompt, ai_model):
+        prompts.append(prompt)
+        return '["A", "B"]'
+
+    monkeypatch.setattr(gpt, "generate_response", generate)
+    gpt.generate_outline("subject", 2, "model", "ANGLE-MARKER")
+
+    assert "ANGLE-MARKER" in prompts[0]
+
+
+def test_generate_outline_without_an_angle_says_nothing_about_shape(monkeypatch):
+    prompts = []
+
+    def generate(prompt, ai_model):
+        prompts.append(prompt)
+        return '["A"]'
+
+    monkeypatch.setattr(gpt, "generate_response", generate)
+    gpt.generate_outline("subject", 1, "model")
+
+    assert "Shape the video" not in prompts[0]
+
+
+def test_long_script_shapes_the_outline_by_the_angle(monkeypatch):
+    prompts = []
+
+    def generate(prompt, ai_model):
+        prompts.append(prompt)
+        return '["A"]' if len(prompts) == 1 else "text."
+
+    monkeypatch.setattr(gpt, "generate_response", generate)
+    gpt.generate_long_script("s", 300, "model", "en_us_001", "", angle="ANGLE-MARKER")
+
+    assert "ANGLE-MARKER" in prompts[0]

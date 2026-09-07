@@ -22,6 +22,7 @@ class VideoFormat:
     burn_subtitles: bool
     target_words: int
     subtitle_max_chars: int
+    voice: str
 
     @property
     def aspect_ratio(self) -> float:
@@ -46,6 +47,7 @@ SHORT = VideoFormat(
     target_words=90,
     # Word-by-word captions, the usual Shorts style.
     subtitle_max_chars=10,
+    voice="en_us_001",
 )
 
 LONG = VideoFormat(
@@ -63,6 +65,9 @@ LONG = VideoFormat(
     target_words=550,
     # Readable subtitle lines rather than single words.
     subtitle_max_chars=42,
+    # Deliberately different from the Shorts voice, so the two formats do not
+    # sound like the same channel output run twice.
+    voice="en_au_002",
 )
 
 FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}

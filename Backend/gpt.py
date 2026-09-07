@@ -1,6 +1,7 @@
 import re
 import os
 import json
+import random
 from ollama import Client, ResponseError
 
 from dotenv import load_dotenv
@@ -139,6 +140,27 @@ def generate_response(prompt: str, ai_model: str) -> str:
     return content
 
 
+# Every video used to come out of one prompt, so they all opened the same way
+# and unfolded the same way. YouTube's inauthentic-content policy asks that
+# "the substance of each video should be materially varied", and a fixed
+# narrative shape is exactly what "produced using a template" describes.
+# One of these is drawn per video and steers the structure, not the subject.
+SCRIPT_ANGLES = (
+    "Open with one specific, surprising number or fact, then explain why it is true.",
+    "Name a belief most people hold about this, then show what is actually the case.",
+    "Walk through what happens step by step, in the order it happens.",
+    "Compare two things that look alike and explain the one difference that matters.",
+    "Start from the question a curious person would ask first, and answer it directly.",
+    "Trace how this was worked out, and what it changed once it was known.",
+    "Describe the problem this solves, and what the world looked like before it.",
+    "Take the reader from the everyday version of this to the surprising one underneath.",
+)
+
+
+def choose_script_angle() -> str:
+    """Picks the narrative shape for one video."""
+    return random.choice(SCRIPT_ANGLES)
+
 def parse_string_array(response: str) -> List[str]:
     """Parses a JSON array of strings out of an LLM response, tolerating noise.
 
@@ -200,6 +222,7 @@ def generate_script(
     ai_model: str,
     voice: str,
     customPrompt: str,
+    angle: Optional[str] = None,
 ) -> Optional[str]:
     """
     Generate a script for a video, depending on the subject of the video, the number of paragraphs, and the AI model.
@@ -225,9 +248,15 @@ def generate_script(
     # Build prompt
 
     if customPrompt:
+        # An explicit prompt from the caller wins, as it always has.
         prompt = customPrompt
     else:
-        prompt = """
+        angle = angle or choose_script_angle()
+        log(f"[+] Script angle: {angle}", "info")
+        prompt = f"""
+            Structure this script like so: {angle}
+
+        """ + """
             Generate a script for a video, depending on the subject of the video.
 
             The script is to be returned as a string with the specified number of paragraphs.
@@ -635,7 +664,10 @@ LONG_SECTION_MIN_WORDS = 40
 
 
 def generate_outline(
-    video_subject: str, section_count: int, ai_model: str
+    video_subject: str,
+    section_count: int,
+    ai_model: str,
+    angle: Optional[str] = None,
 ) -> List[str]:
     """
     Asks for the section headings of a longer video.
@@ -652,6 +684,7 @@ def generate_outline(
     Plan a {section_count}-part explainer video.
 
     Subject: {video_subject}
+    {"Shape the video like so: " + angle if angle else ""}
 
     Give {section_count} section headings that build on each other, from the
     hook to the closing thought. Each heading is a short phrase, not a sentence.
@@ -675,6 +708,7 @@ def generate_long_script(
     voice: str,
     custom_prompt: str,
     section_count: int = 6,
+    angle: Optional[str] = None,
 ) -> Optional[str]:
     """
     Writes a long script one section at a time.
@@ -695,7 +729,9 @@ def generate_long_script(
     Returns:
         Optional[str]: The joined script, or None if nothing usable came back.
     """
-    outline = generate_outline(video_subject, section_count, ai_model)
+    angle = angle or choose_script_angle()
+    log(f"[+] Script angle: {angle}", "info")
+    outline = generate_outline(video_subject, section_count, ai_model, angle)
     if not outline:
         log("[-] Could not plan the video: no outline returned.", "error")
         return None

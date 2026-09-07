@@ -88,3 +88,24 @@ def test_long_form_subtitle_lines_are_readable_not_word_by_word():
 def test_long_form_targets_a_three_to_four_minute_script():
     # ~150 spoken words per minute.
     assert 3.0 <= LONG.target_words / 150 <= 4.0
+
+
+# -- voice ------------------------------------------------------------------
+
+
+def test_each_format_names_a_voice_the_tts_actually_has():
+    # A typo here would only surface as a failed job mid-render.
+    import tiktokvoice
+
+    for fmt in (SHORT, LONG):
+        assert fmt.voice in tiktokvoice.VOICES
+
+
+def test_short_keeps_the_voice_it_has_always_used():
+    assert SHORT.voice == "en_us_001"
+
+
+def test_the_two_formats_do_not_share_a_narrator():
+    # Same subject, same voice, same look across both formats is exactly the
+    # "impression of mass production" the monetization policy describes.
+    assert SHORT.voice != LONG.voice

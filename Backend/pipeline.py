@@ -79,13 +79,13 @@ def run_generation_pipeline(
 
     guard_cancelled()
 
+    # An explicit choice from the request wins; otherwise the format decides,
+    # so Shorts and long form do not share a narrator.
     voice = data.get("voice", "")
-    voice_prefix = voice[:2]
-
     if not voice:
-        emit('[!] No voice was selected. Defaulting to "en_us_001"', "warning")
-        voice = "en_us_001"
-        voice_prefix = voice[:2]
+        voice = SHORT.voice
+        emit(f'[!] No voice was selected. Using "{voice}"', "warning")
+    voice_prefix = voice[:2]
 
     script = generate_script(
         data["videoSubject"],
