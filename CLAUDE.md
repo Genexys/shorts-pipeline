@@ -30,7 +30,7 @@ mkdir -p secrets output Songs      # secrets/: client_secret.json + youtube_toke
 docker compose up -d --build       # postgres, ollama (+model pull), api :8080, worker, autopilot, frontend :8001
 docker compose logs -f autopilot worker
 ```
-Ports bind to 127.0.0.1 only; on a server use `ssh -L 8080:127.0.0.1:8080 -L 8001:127.0.0.1:8001`. See `docs/docker.md` and `docs/deploy.md`.
+Ports bind to 127.0.0.1 only; on a server use `ssh -L 8080:127.0.0.1:8080 -L 8001:127.0.0.1:8001`. See `docs/docker.md` and `docs/deploy.md`. On a Mac, Ollama inside Docker is too slow to finish a job; use the native-Ollama override described in the "Local runs on a Mac" section of docs/docker.md.
 
 ### Verify
 ```bash

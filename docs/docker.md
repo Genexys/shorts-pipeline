@@ -76,6 +76,30 @@ Pause the autopilot without stopping anything else: set `AUTOPILOT_ENABLED=false
 
 Change the model: edit `OLLAMA_MODEL` in `.env`, then `docker compose up -d` (ollama-init pulls the new model, the app services restart).
 
+## Local runs on a Mac
+
+Docker Desktop gives the `ollama` container no GPU, and CPU inference inside its VM is far slower than native Ollama on the same machine: measured 0.3 tokens/s for `llama3.2:3b` with every vCPU busy. Jobs then fail with `Failed to connect to Ollama: timed out`. For local runs keep `ollama serve` running on the Mac, pull the model natively (`ollama pull llama3.1:8b`), and point the app containers at it with an override file:
+
+```yaml
+# compose.mac.yml (untracked)
+services:
+  api:
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+  worker:
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+  autopilot:
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+```
+
+```bash
+docker compose -f docker-compose.yml -f compose.mac.yml up -d --build
+```
+
+The `ollama` and `ollama-init` services still start and pull the model but sit idle. None of this applies to a Linux VPS, where Ollama runs natively inside the container.
+
 ## Troubleshooting
 
 - `ollama-init` exits non-zero: no internet access or unknown model name; `docker compose logs ollama-init`.
