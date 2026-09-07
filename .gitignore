@@ -13,11 +13,13 @@ subtitles/*
 /venv
 .venv
 client_secret.json
+client_secret*.json
 main.py-oauth2.json
 .DS_Store
 Backend/output*
 Songs/
 venv/
-Backend/youtube_token.json
+youtube_token*
 *.db
 secrets/
+compose.mac.yml
