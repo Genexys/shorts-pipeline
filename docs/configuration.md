@@ -19,6 +19,7 @@ Use `.env.example` as your template.
 | `OLLAMA_BASE_URL` | Ollama server base URL used for model listing and chat generation. | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Fallback model if frontend does not send a model value. | `llama3.1:8b` |
 | `OLLAMA_TIMEOUT` | Seconds to wait for one Ollama response. | `180` |
+| `ELEVENLABS_API_KEY` | Narration for formats that ask for it. Empty keeps everything on the free TikTok voice. See [Narration](#narration). | empty |
 | `ASSEMBLY_AI_API_KEY` | If set, subtitles are generated with AssemblyAI; otherwise local subtitle generation is used. | empty |
 | `POSTGRES_DB` | Database name for Docker Postgres service. | `moneyprinter` |
 | `POSTGRES_USER` | Database user for Docker Postgres service. | `moneyprinter` |
@@ -114,6 +115,33 @@ picture:
 The video stream is copied (`-c:v copy`), so adding music costs seconds rather
 than a full re-render. If the mix fails for any reason the already-rendered
 voice-only video is kept and the job still completes.
+
+## Narration
+
+Two voice services, chosen per format rather than per request.
+
+| Format | Service | Voice |
+|---|---|---|
+| `short` | TikTok TTS | `en_us_001` |
+| `long` | ElevenLabs | George, British, `narrative_story` |
+
+Shorts stay on the free service deliberately. Thirty seconds of synthetic
+narration is tolerable; four minutes of it is where retention goes. Paid
+credits are worth more on the longer format.
+
+`ELEVENLABS_API_KEY` empty switches the integration off entirely and every
+format narrates with TikTok, so a deployment without a key still works.
+
+**Failure is whole-video.** If ElevenLabs errors or runs out of credits
+part-way through, every sentence is re-narrated with TikTok rather than the
+remaining ones. Retrying only the failed sentence would splice two narrators
+into one video, which is worse than the cheaper voice throughout. The job logs
+which service was used and never fails because of narration.
+
+Cost, on pay-as-you-go at $0.10 per 1000 characters: about $0.33 for a
+long-form video of ~550 words, and about $0.055 for a Short if you ever switch
+one over. Restrict the API key to Text to Speech and give it a credit cap — the
+autopilot uses it unattended.
 
 ## Notes
 

@@ -16,7 +16,7 @@ from gpt import (
 )
 from logstream import log
 from search import search_for_stock_videos
-from tiktokvoice import tts
+from speech import synthesize_sentences
 from utils import (
     OUTPUT_DIR,
     PROJECT_ROOT,
@@ -142,14 +142,18 @@ def run_generation_pipeline(
 
     sentences = script.split(". ")
     sentences = list(filter(lambda x: x != "", sentences))
-    paths = []
 
-    for sentence in sentences:
-        guard_cancelled()
-        current_tts_path = str(TEMP_DIR / f"{uuid4()}.mp3")
-        tts(sentence, voice, filename=current_tts_path)
-        audio_clip = AudioFileClip(current_tts_path)
-        paths.append(audio_clip)
+    guard_cancelled()
+    audio_paths, provider = synthesize_sentences(
+        sentences,
+        make_path=lambda: str(TEMP_DIR / f"{uuid4()}.mp3"),
+        tiktok_voice=voice,
+        elevenlabs_voice_id=SHORT.elevenlabs_voice_id,
+        on_log=emit,
+    )
+    emit(f"[+] Narrated with {provider}", "info")
+
+    paths = [AudioFileClip(path) for path in audio_paths]
 
     final_audio = concatenate_audioclips(paths)
     tts_path = str(TEMP_DIR / f"{uuid4()}.mp3")

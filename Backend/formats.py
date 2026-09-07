@@ -23,6 +23,7 @@ class VideoFormat:
     target_words: int
     subtitle_max_chars: int
     voice: str
+    elevenlabs_voice_id: Optional[str]
 
     @property
     def aspect_ratio(self) -> float:
@@ -50,6 +51,9 @@ SHORT = VideoFormat(
     # Word-by-word captions, the usual Shorts style.
     subtitle_max_chars=10,
     voice="en_us_001",
+    # Shorts stay on the free service. Thirty seconds of synthetic narration is
+    # tolerable, and the paid credits are worth more where minutes are at stake.
+    elevenlabs_voice_id=None,
 )
 
 LONG = VideoFormat(
@@ -70,6 +74,9 @@ LONG = VideoFormat(
     # Deliberately different from the Shorts voice, so the two formats do not
     # sound like the same channel output run twice.
     voice="en_au_002",
+    # George: British, labelled narrative_story. Four minutes of obviously
+    # synthetic narration is where retention goes to die.
+    elevenlabs_voice_id="JBFqnCBsd6RMkjVDRZzb",
 )
 
 FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}
