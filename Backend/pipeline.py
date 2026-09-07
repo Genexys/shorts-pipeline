@@ -5,15 +5,14 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 from uuid import uuid4
 
-from moviepy import (
-    AudioFileClip,
-    CompositeAudioClip,
-    VideoFileClip,
-    afx,
-    concatenate_audioclips,
-)
+from moviepy import AudioFileClip, concatenate_audioclips
 
-from gpt import generate_metadata, generate_script, get_search_terms
+from gpt import (
+    generate_metadata,
+    generate_script,
+    get_search_terms,
+    select_music_mood,
+)
 from logstream import log
 from search import search_for_stock_videos
 from tiktokvoice import tts
@@ -24,7 +23,13 @@ from utils import (
     TEMP_DIR,
     choose_random_song,
 )
-from video import combine_videos, generate_subtitles, generate_video, save_video
+from video import (
+    combine_videos,
+    generate_subtitles,
+    generate_video,
+    mix_background_music,
+    save_video,
+)
 from youtube import resolve_privacy_status, upload_video
 
 
@@ -203,12 +208,12 @@ def run_generation_pipeline(
 
     final_output_path = str(PROJECT_ROOT / final_video_path)
     rendered_video_path = str(TEMP_DIR / final_video_path)
-    render_threads = n_threads or (os.cpu_count() or 2)
 
     guard_cancelled()
 
     if use_music:
-        song_path = choose_random_song()
+        mood = select_music_mood(data["videoSubject"], script, ai_model)
+        song_path = choose_random_song(mood)
 
         if not song_path:
             emit(
@@ -216,101 +221,31 @@ def run_generation_pipeline(
                 "warning",
             )
             use_music = False
+        else:
+            emit(
+                f"[+] Music: {os.path.basename(song_path)} "
+                f"(mood: {mood or 'not determined, using Songs/ fallback'})",
+                "info",
+            )
 
-        if use_music:
-            video_clip = VideoFileClip(rendered_video_path)
-            song_clip = None
-            mixed_audio = None
-            mixed_audio_path = str(TEMP_DIR / f"{uuid4()}_mixed_audio.m4a")
-            try:
-                original_duration = video_clip.duration
-                original_audio = video_clip.audio
-                song_clip = AudioFileClip(song_path).with_fps(44100)
-                song_clip = song_clip.with_effects(
-                    [afx.AudioLoop(duration=original_duration)]
-                )
-                song_clip = song_clip.with_volume_scaled(0.1).with_fps(44100)
-
-                mixed_audio = CompositeAudioClip(
-                    [original_audio, song_clip]
-                ).with_duration(original_duration)
-                mixed_audio.write_audiofile(
-                    mixed_audio_path,
-                    fps=44100,
-                    codec="aac",
-                    bitrate="192k",
-                )
-            finally:
-                video_clip.close()
-                if mixed_audio is not None:
-                    mixed_audio.close()
-                if song_clip is not None:
-                    song_clip.close()
-
-            try:
-                subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        rendered_video_path,
-                        "-i",
-                        mixed_audio_path,
-                        "-map",
-                        "0:v:0",
-                        "-map",
-                        "1:a:0",
-                        "-c:v",
-                        "copy",
-                        "-c:a",
-                        "aac",
-                        "-b:a",
-                        "192k",
-                        "-shortest",
-                        final_output_path,
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            except Exception:
-                emit(
-                    "[!] ffmpeg remux failed. Falling back to MoviePy render for music mix.",
-                    "warning",
-                )
-                video_clip = VideoFileClip(rendered_video_path)
-                song_clip = None
-                try:
-                    original_duration = video_clip.duration
-                    original_audio = video_clip.audio
-                    song_clip = AudioFileClip(song_path).with_fps(44100)
-                    song_clip = song_clip.with_effects(
-                        [afx.AudioLoop(duration=original_duration)]
-                    )
-                    song_clip = song_clip.with_volume_scaled(0.1).with_fps(44100)
-                    comp_audio = CompositeAudioClip(
-                        [original_audio, song_clip]
-                    ).with_duration(original_duration)
-                    video_clip = (
-                        video_clip.with_audio(comp_audio)
-                        .with_fps(30)
-                        .with_duration(original_duration)
-                    )
-                    video_clip.write_videofile(
-                        final_output_path,
-                        threads=render_threads,
-                        fps=30,
-                        codec="libx264",
-                        audio_codec="aac",
-                        preset="medium",
-                    )
-                finally:
-                    video_clip.close()
-                    if song_clip is not None:
-                        song_clip.close()
-            finally:
-                if os.path.exists(mixed_audio_path):
-                    os.remove(mixed_audio_path)
+    if use_music:
+        try:
+            mix_background_music(rendered_video_path, song_path, final_output_path)
+            emit("[+] Music mixed, ducked under the voice, normalized.", "success")
+        except Exception as err:
+            # The render is already finished and usable. A failed music pass must
+            # not discard a job that cost several minutes, so fall back to the
+            # voice-only video instead of raising.
+            detail = str(err)
+            if isinstance(err, subprocess.CalledProcessError) and err.stderr:
+                tail = err.stderr.strip().splitlines()
+                if tail:
+                    detail = tail[-1]
+            emit(
+                f"[!] Music mix failed ({detail}). Keeping the voice-only render.",
+                "warning",
+            )
+            use_music = False
 
     if not use_music:
         shutil.copy2(rendered_video_path, final_output_path)

@@ -6,7 +6,7 @@ from ollama import Client, ResponseError
 from dotenv import load_dotenv
 from logstream import log
 from typing import Tuple, List, Optional
-from utils import ENV_FILE
+from utils import ENV_FILE, MUSIC_MOODS
 
 # Load environment variables
 load_dotenv(ENV_FILE)
@@ -488,3 +488,52 @@ def generate_metadata(
     title, description, tags = validate_metadata(raw, video_subject)
     log(f"[+] Metadata: title='{title}', {len(tags)} tags", "success")
     return title, description, tags
+
+
+def select_music_mood(
+    video_subject: str, script: str, ai_model: str
+) -> Optional[str]:
+    """
+    Picks a background-music mood for a script.
+
+    Best effort by design: the mood only decides which Songs/ subfolder is
+    preferred, so an Ollama outage or a malformed answer must not fail a job
+    that is otherwise finished. Returns None and lets the caller fall back to
+    the flat Songs/ folder.
+
+    Args:
+        video_subject (str): The subject of the video.
+        script (str): The generated script.
+        ai_model (str): The AI model to use for generation.
+
+    Returns:
+        Optional[str]: One of MUSIC_MOODS, or None if no usable answer.
+    """
+    prompt = f"""
+    Pick the background music mood for a short vertical video.
+
+    Subject: {video_subject}
+
+    Script:
+    {script}
+
+    Choose exactly one of: {", ".join(MUSIC_MOODS)}.
+
+    Return ONLY a JSON object: {{"mood": "..."}}
+    """
+
+    try:
+        response = generate_response(prompt, ai_model)
+    except Exception as err:
+        log(f"[!] Could not pick a music mood: {err}", "warning")
+        return None
+
+    parsed = extract_json_object(response)
+    mood = parsed.get("mood") if isinstance(parsed, dict) else None
+    if isinstance(mood, str) and mood.strip().lower() in MUSIC_MOODS:
+        selected = mood.strip().lower()
+        log(f"[+] Music mood: {selected}", "info")
+        return selected
+
+    log(f"[!] Model did not return a known music mood: {response[:120]}", "warning")
+    return None

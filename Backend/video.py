@@ -1,4 +1,5 @@
 import os
+import subprocess
 import uuid
 
 import requests
@@ -24,6 +25,20 @@ load_dotenv(ENV_FILE)
 
 ASSEMBLY_AI_API_KEY = os.getenv("ASSEMBLY_AI_API_KEY")
 FRAME_EPSILON = 1 / 120
+
+# Background-music mix. The bed is attenuated, faded, and then ducked under the
+# voice by a sidechain compressor keyed off the voice track, so the music stays
+# audible in the gaps instead of sitting at one flat level under the narration.
+MUSIC_VOLUME = 0.25
+MUSIC_FADE_IN_SECONDS = 1.5
+MUSIC_FADE_OUT_SECONDS = 2.0
+
+# YouTube normalizes playback to roughly -14 LUFS. Matching it here keeps the
+# perceived loudness stable across videos instead of tracking whatever level
+# the TTS service happened to return.
+LOUDNESS_TARGET_LUFS = -14.0
+LOUDNESS_TRUE_PEAK_DB = -1.5
+LOUDNESS_RANGE = 11.0
 
 
 def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
@@ -348,3 +363,132 @@ def generate_video(
         base_video.close()
 
     return "output.mp4"
+
+
+def _ffmpeg_binary() -> str:
+    """The ffmpeg the worker should use.
+
+    Honours FFMPEG_BINARY, which compose.win.yml sets to Debian's ffmpeg. The
+    imageio-ffmpeg build MoviePy defaults to is compiled without nvenc, so the
+    two are not interchangeable.
+    """
+    return os.getenv("FFMPEG_BINARY", "").strip() or "ffmpeg"
+
+
+def _ffprobe_binary() -> str:
+    """ffprobe living next to the configured ffmpeg, else whatever is on PATH."""
+    ffmpeg = Path(_ffmpeg_binary())
+    sibling = ffmpeg.with_name(ffmpeg.name.replace("ffmpeg", "ffprobe"))
+    if sibling.exists():
+        return str(sibling)
+    return "ffprobe"
+
+
+def probe_duration(media_path: str) -> float:
+    """Container duration in seconds, via ffprobe.
+
+    Args:
+        media_path (str): Path to the media file.
+
+    Returns:
+        float: Duration in seconds.
+    """
+    result = subprocess.run(
+        [
+            _ffprobe_binary(),
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            media_path,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return float(result.stdout.strip())
+
+
+def build_music_filter(duration: float, music_volume: float = MUSIC_VOLUME) -> str:
+    """Builds the filter_complex graph that ducks a music bed under the voice.
+
+    Input 0 is the rendered video (its audio is the voice), input 1 is the music.
+    The voice is split: one copy is mixed, the other is the sidechain key.
+
+    Args:
+        duration (float): Duration of the rendered video, for the fade-out start.
+        music_volume (float): Linear gain applied to the music before ducking.
+
+    Returns:
+        str: An ffmpeg filter_complex expression producing [aout].
+    """
+    fade_out_start = max(0.0, duration - MUSIC_FADE_OUT_SECONDS)
+    return (
+        f"[1:a]volume={music_volume},"
+        f"afade=t=in:st=0:d={MUSIC_FADE_IN_SECONDS},"
+        f"afade=t=out:st={fade_out_start:.3f}:d={MUSIC_FADE_OUT_SECONDS}[bed];"
+        "[0:a]asplit=2[voice][key];"
+        "[bed][key]sidechaincompress="
+        "threshold=0.05:ratio=8:attack=5:release=300[duck];"
+        "[voice][duck]amix=inputs=2:duration=first:dropout_transition=0,"
+        f"loudnorm=I={LOUDNESS_TARGET_LUFS}:TP={LOUDNESS_TRUE_PEAK_DB}:"
+        f"LRA={LOUDNESS_RANGE}[aout]"
+    )
+
+
+def mix_background_music(
+    video_path: str,
+    song_path: str,
+    output_path: str,
+    music_volume: float = MUSIC_VOLUME,
+) -> str:
+    """Adds a ducked, loudness-normalized music bed to an already rendered video.
+
+    One ffmpeg pass. The video stream is copied, never re-encoded: this changes
+    audio only, so re-encoding the picture would cost minutes and lose quality
+    for nothing. The music is looped to cover the whole video and trimmed by
+    -shortest.
+
+    Args:
+        video_path (str): The rendered video, whose audio track is the voice.
+        song_path (str): The music file to lay underneath.
+        output_path (str): Where to write the muxed result.
+        music_volume (float): Linear gain applied to the music before ducking.
+
+    Returns:
+        str: `output_path`.
+
+    Raises:
+        subprocess.CalledProcessError: If ffmpeg or ffprobe fails.
+    """
+    duration = probe_duration(video_path)
+    command = [
+        _ffmpeg_binary(),
+        "-y",
+        "-i",
+        video_path,
+        # Loop the bed indefinitely; -shortest cuts it back to the video.
+        "-stream_loop",
+        "-1",
+        "-i",
+        song_path,
+        "-filter_complex",
+        build_music_filter(duration, music_volume),
+        "-map",
+        "0:v:0",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-shortest",
+        output_path,
+    ]
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    log("[+] Background music mixed and loudness-normalized.", "success")
+    return output_path

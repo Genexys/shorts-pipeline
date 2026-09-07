@@ -59,7 +59,9 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
   → video.py: generate_subtitles() → .srt (AssemblyAI or local timestamps)
   → video.py: combine_videos() → concatenate/crop to 9:16
   → video.py: generate_video() → burn subtitles via ImageMagick, merge audio
-  → (optional) mix background music from Songs/ at 10% volume
+  → (optional) gpt.py: select_music_mood() → Songs/<mood>/ track
+  → (optional) video.py: mix_background_music() → one ffmpeg pass,
+     ducked under the voice (sidechaincompress) + loudnorm to -14 LUFS, -c:v copy
   → copy to output.mp4 and output/<job_id>.mp4
   → (optional) youtube.py: upload via saved token; failure is non-fatal (upload_error)
   → PipelineResult → worker stores Artifact rows (video, youtube_video)
@@ -76,7 +78,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 | `worker.py` | Job consumer that executes generation pipeline |
 | `db.py`/`models.py`/`repository.py` | DB engine, schema, queue/event persistence |
 | `gpt.py` | Ollama client: script generation, search terms, YouTube metadata |
-| `video.py` | Video processing: combine clips, burn subtitles, merge audio |
+| `video.py` | Video processing: combine clips, burn subtitles, merge audio, mix ducked background music |
 | `search.py` | Pexels stock video search and download |
 | `tiktokvoice.py` | TikTok TTS API (60+ voices, 300-char chunking, threaded) |
 | `youtube.py` | YouTube upload via google-auth-oauthlib token file (Backend/youtube_token.json); youtube_auth.py creates it once |
@@ -93,7 +95,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 ### Runtime Directories
 - `temp/`: intermediate video/audio files (cleared each generation)
 - `subtitles/`: generated .srt files (cleared each generation)
-- `Songs/`: user-uploaded background music MP3s
+- `Songs/`: background music MP3s, flat or in mood folders (`calm`, `curious`, `tense`, `upbeat`)
 - `fonts/`: subtitle font (`bold_font.ttf`)
 - `output/`: archived videos `<job_id>.mp4`
 
