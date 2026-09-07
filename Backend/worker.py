@@ -88,6 +88,15 @@ def process_next_job() -> bool:
                     },
                     commit=False,
                 )
+                if result.thumbnail_path:
+                    add_artifact(
+                        session,
+                        job_id,
+                        "thumbnail",
+                        result.thumbnail_path,
+                        {"format": result.format_name},
+                        commit=False,
+                    )
                 if result.youtube_video_id:
                     add_artifact(
                         session,

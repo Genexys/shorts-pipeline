@@ -46,6 +46,7 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             privacy_status="private",
             format_name="short",
             subtitles_path="subtitles/x.srt",
+            thumbnail_path=None,
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -98,6 +99,7 @@ def test_process_next_job_marks_failed_when_bookkeeping_raises(
             privacy_status="private",
             format_name="short",
             subtitles_path="subtitles/x.srt",
+            thumbnail_path=None,
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -138,6 +140,7 @@ def test_process_next_job_records_upload_error_without_youtube_artifact(
             privacy_status="private",
             format_name="short",
             subtitles_path="subtitles/x.srt",
+            thumbnail_path=None,
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -305,3 +308,34 @@ def test_process_next_job_cancels_instead_of_requeue_when_cancel_races_failure(
 
     # Nothing claimable: the job is cancelled, not stuck in queued.
     assert worker.process_next_job() is False
+
+
+def test_process_next_job_records_a_thumbnail_when_one_was_built(
+    monkeypatch, session_factory
+):
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "with thumbnail"})
+
+    monkeypatch.setattr(worker, "SessionLocal", session_factory)
+    _disable_cleanup(monkeypatch)
+
+    def fake_pipeline(data, is_cancelled, on_log):
+        return PipelineResult(
+            video_path="output.mp4",
+            archived_path=f"output/{data['jobId']}.mp4",
+            title="Long one",
+            youtube_video_id=None,
+            upload_error=None,
+            privacy_status="private",
+            format_name="long",
+            subtitles_path="subtitles/x.srt",
+            thumbnail_path="temp/thumb.jpg",
+        )
+
+    monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
+    assert worker.process_next_job() is True
+
+    with session_factory() as session:
+        artifacts = {a.artifact_type: a for a in list_artifacts(session, job.id)}
+        assert artifacts["thumbnail"].path == "temp/thumb.jpg"
+        assert artifacts["thumbnail"].metadata_json == {"format": "long"}

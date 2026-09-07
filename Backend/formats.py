@@ -24,6 +24,7 @@ class VideoFormat:
     subtitle_max_chars: int
     voice: str
     elevenlabs_voice_id: Optional[str]
+    build_thumbnail: bool
 
     @property
     def aspect_ratio(self) -> float:
@@ -54,6 +55,9 @@ SHORT = VideoFormat(
     # Shorts stay on the free service. Thirty seconds of synthetic narration is
     # tolerable, and the paid credits are worth more where minutes are at stake.
     elevenlabs_voice_id=None,
+    # Shorts are chosen from a vertical feed, not from a thumbnail grid, and a
+    # 16:9 still does not represent them anyway.
+    build_thumbnail=False,
 )
 
 LONG = VideoFormat(
@@ -77,6 +81,8 @@ LONG = VideoFormat(
     # George: British, labelled narrative_story. Four minutes of obviously
     # synthetic narration is where retention goes to die.
     elevenlabs_voice_id="JBFqnCBsd6RMkjVDRZzb",
+    # For a long video the thumbnail decides whether anyone opens it at all.
+    build_thumbnail=True,
 )
 
 FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}
