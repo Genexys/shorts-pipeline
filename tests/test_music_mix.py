@@ -128,8 +128,22 @@ def test_build_music_filter_normalizes_loudness_last():
     assert f"loudnorm=I={video.LOUDNESS_TARGET_LUFS}" in graph
 
 
-def test_build_music_filter_applies_requested_volume():
-    assert "[1:a]volume=0.4," in video.build_music_filter(30.0, music_volume=0.4)
+def test_build_music_filter_applies_requested_gain():
+    assert "volume=-7.50dB," in video.build_music_filter(30.0, gain_db=-7.5)
+
+
+def test_build_music_filter_levels_the_bed_before_attenuating_it():
+    graph = video.build_music_filter(30.0)
+    # Levelling has to happen on the raw track. Attenuating first would leave
+    # only the transients above the masking threshold for the leveller to see.
+    assert graph.startswith(f"[1:a]{video.MUSIC_LEVELER},")
+    assert graph.index(video.MUSIC_LEVELER) < graph.index("volume=")
+
+
+def test_build_music_filter_uses_a_moderate_duck_ratio():
+    # A levelled bed crushed by a heavy ratio is inaudible again.
+    assert video.MUSIC_DUCK_RATIO <= 4
+    assert f"ratio={video.MUSIC_DUCK_RATIO}" in video.build_music_filter(30.0)
 
 
 # -- mix_background_music ---------------------------------------------------
@@ -146,7 +160,7 @@ def test_mix_background_music_copies_video_and_loops_music(monkeypatch):
 
     monkeypatch.setattr(video.subprocess, "run", fake_run)
 
-    video.mix_background_music("in.mp4", "song.mp3", "out.mp4")
+    video.mix_background_music("in.mp4", "song.mp3", "out.mp4", gain_db=-6.0)
 
     command = captured["command"]
     # Never re-encode the picture for an audio-only change.
@@ -167,4 +181,86 @@ def test_mix_background_music_propagates_ffmpeg_failure(monkeypatch):
     monkeypatch.setattr(video.subprocess, "run", fake_run)
 
     with pytest.raises(video.subprocess.CalledProcessError):
-        video.mix_background_music("in.mp4", "song.mp3", "out.mp4")
+        video.mix_background_music("in.mp4", "song.mp3", "out.mp4", gain_db=-6.0)
+
+
+def test_mix_background_music_measures_the_track_when_no_gain_given(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(video, "probe_duration", lambda path: 25.0)
+    monkeypatch.setattr(video, "resolve_music_gain_db", lambda path: -9.25)
+    monkeypatch.setattr(
+        video.subprocess, "run", lambda command, **kw: captured.update(command=command)
+    )
+
+    video.mix_background_music("in.mp4", "song.mp3", "out.mp4")
+
+    graph = captured["command"][captured["command"].index("-filter_complex") + 1]
+    assert "volume=-9.25dB," in graph
+
+
+# -- voice-band measurement -------------------------------------------------
+
+
+EBUR128_SUMMARY = """[Parsed_ebur128_0 @ 0x1] Summary:
+
+  Integrated loudness:
+    I:         -20.1 LUFS
+    Threshold: -30.4 LUFS
+
+  Loudness range:
+    LRA:         3.1 LU
+    Threshold: -40.2 LUFS
+"""
+
+
+def test_parse_integrated_loudness_reads_the_i_value():
+    assert video._parse_integrated_loudness(EBUR128_SUMMARY) == -20.1
+
+
+def test_parse_integrated_loudness_ignores_the_threshold_line():
+    # 'Threshold' sits directly under 'I:' and carries a similar-looking number;
+    # picking by offset instead of by label would return it.
+    assert video._parse_integrated_loudness(EBUR128_SUMMARY) != -30.4
+
+
+def test_parse_integrated_loudness_returns_none_without_a_summary():
+    assert video._parse_integrated_loudness("ffmpeg: no such file") is None
+
+
+def test_resolve_music_gain_db_normalizes_to_the_target(monkeypatch):
+    monkeypatch.setattr(video, "measure_voiceband_loudness", lambda path: -20.1)
+    expected = video.MUSIC_VOICEBAND_TARGET_LUFS - (-20.1)
+    assert video.resolve_music_gain_db("song.mp3") == pytest.approx(expected)
+
+
+def test_resolve_music_gain_db_falls_back_when_measurement_fails(monkeypatch):
+    monkeypatch.setattr(video, "measure_voiceband_loudness", lambda path: None)
+    assert video.resolve_music_gain_db("song.mp3") == video.MUSIC_FALLBACK_GAIN_DB
+
+
+def test_measure_voiceband_loudness_returns_none_if_ffmpeg_fails(monkeypatch):
+    def boom(command, **kwargs):
+        raise video.subprocess.CalledProcessError(1, command, stderr="nope")
+
+    monkeypatch.setattr(video.subprocess, "run", boom)
+    assert video.measure_voiceband_loudness("song.mp3") is None
+
+
+def test_measure_voiceband_loudness_filters_to_the_voice_band(monkeypatch):
+    captured = {}
+
+    class Result:
+        stderr = EBUR128_SUMMARY
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return Result()
+
+    monkeypatch.setattr(video.subprocess, "run", fake_run)
+
+    assert video.measure_voiceband_loudness("song.mp3") == -20.1
+    graph = captured["command"][captured["command"].index("-af") + 1]
+    assert f"highpass=f={video.VOICE_BAND_LOW_HZ}" in graph
+    assert f"lowpass=f={video.VOICE_BAND_HIGH_HZ}" in graph
+    # The track is measured after levelling, since that is what the mix uses.
+    assert graph.startswith(video.MUSIC_LEVELER)
