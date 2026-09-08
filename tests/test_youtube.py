@@ -106,9 +106,14 @@ def test_scopes_are_exactly_what_the_calls_need():
     # Every scope here has to be justified: force-ssl allows managing and
     # deleting channel content, and is only present because captions.insert
     # accepts nothing narrower.
-    assert youtube.SCOPES == [youtube.UPLOAD_SCOPE, youtube.CAPTION_SCOPE]
+    # force-ssl is not requested: it allows managing and deleting channel
+    # content, and caption tracks are attached by hand instead.
+    assert youtube.SCOPES == [youtube.UPLOAD_SCOPE, youtube.ANALYTICS_SCOPE]
+    assert youtube.CAPTION_SCOPE not in youtube.SCOPES
     assert youtube.UPLOAD_SCOPE.endswith("/youtube.upload")
     assert youtube.CAPTION_SCOPE.endswith("/youtube.force-ssl")
+    # Read-only: it cannot change or delete anything on the channel.
+    assert youtube.ANALYTICS_SCOPE.endswith("/yt-analytics.readonly")
 
 
 def test_existing_tokens_are_loaded_with_their_own_scopes(monkeypatch, tmp_path):

@@ -40,9 +40,19 @@ UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 # covers caption uploads. Kept separate so it is visible what each one buys.
 CAPTION_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 
+# Read-only. Unlike force-ssl it cannot change or delete anything on the
+# channel; it is what per-video retention and CTR are read through.
+ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
+
 # Used when minting a new token. Existing tokens are loaded with whatever they
 # were actually granted; see load_credentials.
-SCOPES = [UPLOAD_SCOPE, CAPTION_SCOPE]
+#
+# CAPTION_SCOPE is deliberately absent. force-ssl allows managing and deleting
+# channel content, and the pending compliance audit was submitted describing
+# upload-only access; caption tracks are attached by hand in Studio instead,
+# which costs a minute per long video and nothing else. upload_captions stays
+# in place and refuses with a clear message if it is ever called.
+SCOPES = [UPLOAD_SCOPE, ANALYTICS_SCOPE]
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
 
