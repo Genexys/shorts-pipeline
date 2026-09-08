@@ -223,6 +223,7 @@ def generate_script(
     voice: str,
     customPrompt: str,
     angle: Optional[str] = None,
+    target_words: Optional[int] = None,
 ) -> Optional[str]:
     """
     Generate a script for a video, depending on the subject of the video, the number of paragraphs, and the AI model.
@@ -276,11 +277,16 @@ def generate_script(
 
         """
 
+    # "One paragraph" is whatever the model feels like: measured across real
+    # runs it produced anything from 11 to 33 seconds of speech. A word count
+    # is the only instruction that actually pins the length down.
+    length = f"    Length: about {target_words} words\n" if target_words else ""
+
     prompt += f"""
     
     Subject: {video_subject}
     Number of paragraphs: {paragraph_number}
-    Language: {voice}
+{length}    Language: {voice}
 
     """
 

@@ -312,3 +312,38 @@ def test_search_terms_are_not_asked_to_repeat_the_subject(monkeypatch):
 
     assert "always add the main subject" not in prompts[0]
     assert "different angles" in prompts[0]
+
+
+# -- pinning the length down ------------------------------------------------
+
+
+def test_generate_script_states_a_word_count(monkeypatch):
+    # "One paragraph" produced anything from 11 to 33 seconds of speech across
+    # real runs; a word count is the only instruction that pins it down.
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda prompt, model: prompts.append(prompt) or "script",
+    )
+    gpt.generate_script("subject", 1, "model", "en_us_001", "", target_words=90)
+    assert "about 90 words" in prompts[0]
+
+
+def test_generate_script_says_nothing_about_length_when_not_asked(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda prompt, model: prompts.append(prompt) or "script",
+    )
+    gpt.generate_script("subject", 1, "model", "en_us_001", "")
+    assert "words" not in prompts[0].split("Subject:")[1]
+
+
+def test_a_custom_prompt_is_still_left_alone(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda prompt, model: prompts.append(prompt) or "script",
+    )
+    gpt.generate_script("subject", 1, "model", "en_us_001", "MINE", target_words=90)
+    assert prompts[0].startswith("MINE")

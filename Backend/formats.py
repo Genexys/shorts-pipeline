@@ -49,7 +49,9 @@ SHORT = VideoFormat(
     # MoviePy render. See SUBTITLE_FONT_SIZE in video.py.
     subtitle_font_size=112,
     burn_subtitles=True,
-    target_words=90,
+    # About 48 seconds of speech at 150 wpm. Comfortably inside the Shorts
+    # limit, and long enough to make a point rather than state one.
+    target_words=120,
     # Word-by-word captions, the usual Shorts style.
     subtitle_max_chars=10,
     voice="en_us_001",

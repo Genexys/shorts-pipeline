@@ -119,3 +119,9 @@ def test_the_two_formats_do_not_share_a_narrator():
     # Same subject, same voice, same look across both formats is exactly the
     # "impression of mass production" the monetization policy describes.
     assert SHORT.voice != LONG.voice
+
+
+def test_each_format_targets_a_sensible_runtime():
+    # At roughly 150 spoken words a minute.
+    assert 20 <= SHORT.target_words / 150 * 60 <= 50
+    assert 180 <= LONG.target_words / 150 * 60 <= 240
