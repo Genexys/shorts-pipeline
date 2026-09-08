@@ -74,3 +74,18 @@ def test_auth_error_names_token_path(tmp_path):
     )
     assert "youtube_auth.py" in out
     assert str(missing) in out
+
+
+def test_minting_asks_for_all_three_scopes():
+    import youtube
+
+    # Every scope is deliberate: upload for videos and thumbnails, analytics
+    # read-only for retention. Captions are done by hand rather than widening
+    # the grant to force-ssl.
+    assert youtube.SCOPES == [youtube.UPLOAD_SCOPE, youtube.ANALYTICS_SCOPE]
+
+
+def test_the_analytics_scope_is_read_only():
+    import youtube
+
+    assert youtube.ANALYTICS_SCOPE.endswith("yt-analytics.readonly")

@@ -29,11 +29,41 @@ def main() -> int:
         )
         return 1
 
+    # A token already in place is replaced, so keep a copy: if the new grant is
+    # wrong the old one still uploads.
+    if TOKEN_FILE.exists():
+        backup = TOKEN_FILE.with_suffix(".json.bak")
+        backup.write_text(TOKEN_FILE.read_text())
+        os.chmod(backup, 0o600)
+        print(f"Existing token backed up to {backup}")
+
+    print("Requesting scopes:")
+    for scope in SCOPES:
+        print(f"  {scope}")
+
+    # A fixed port and no auto-launch make this runnable from a container,
+    # where there is no browser and a random port cannot be published.
+    port = int(os.getenv("YOUTUBE_AUTH_PORT", "0"))
+    open_browser = os.getenv("YOUTUBE_AUTH_OPEN_BROWSER", "1") != "0"
+
     flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS_FILE), SCOPES)
-    credentials = flow.run_local_server(port=0, access_type="offline", prompt="consent")
+    credentials = flow.run_local_server(
+        port=port,
+        # The redirect Google is sent stays localhost, because that is what the
+        # OAuth client has registered. The socket has to listen on every
+        # interface separately: inside a container "localhost" is the
+        # container's own loopback, so a published port reaches nothing and the
+        # browser gets a connection reset after consent.
+        host="localhost",
+        bind_addr=os.getenv("YOUTUBE_AUTH_BIND", "0.0.0.0"),
+        open_browser=open_browser,
+        access_type="offline",
+        prompt="consent",
+    )
     TOKEN_FILE.write_text(credentials.to_json())
     os.chmod(TOKEN_FILE, 0o600)
     print(f"Saved credentials to {TOKEN_FILE}")
+    print(f"Granted scopes: {credentials.scopes}")
     if not credentials.refresh_token:
         print("WARNING: no refresh token received. Revoke app access at "
               "https://myaccount.google.com/permissions and run again.")
