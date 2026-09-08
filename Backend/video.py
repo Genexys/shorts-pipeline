@@ -14,7 +14,7 @@ from moviepy import AudioFileClip
 from dotenv import load_dotenv
 from formats import SHORT, VideoFormat
 from logstream import log
-from search import PEXELS_TIMEOUT
+from search import DOWNLOAD_TIMEOUT
 from utils import ENV_FILE, TEMP_DIR, SUBTITLES_DIR, FONTS_DIR
 
 load_dotenv(ENV_FILE)
@@ -86,7 +86,7 @@ def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
     video_id = uuid.uuid4()
     video_path = destination / f"{video_id}.mp4"
     with open(video_path, "wb") as f:
-        f.write(requests.get(video_url, timeout=PEXELS_TIMEOUT).content)
+        f.write(requests.get(video_url, timeout=DOWNLOAD_TIMEOUT).content)
 
     return str(video_path)
 
