@@ -312,3 +312,72 @@ def test_search_terms_are_not_asked_to_repeat_the_subject(monkeypatch):
 
     assert "always add the main subject" not in prompts[0]
     assert "different angles" in prompts[0]
+
+
+# -- pinning the length down ------------------------------------------------
+
+
+def test_generate_script_states_a_word_count(monkeypatch):
+    # "One paragraph" produced anything from 11 to 33 seconds of speech across
+    # real runs; a word count is the only instruction that pins it down.
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda prompt, model: prompts.append(prompt) or "script",
+    )
+    gpt.generate_script("subject", 1, "model", "en_us_001", "", target_words=90)
+    assert "about 90 words" in prompts[0]
+
+
+def test_generate_script_says_nothing_about_length_when_not_asked(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda prompt, model: prompts.append(prompt) or "script",
+    )
+    gpt.generate_script("subject", 1, "model", "en_us_001", "")
+    assert "words" not in prompts[0].split("Subject:")[1]
+
+
+def test_a_custom_prompt_is_still_left_alone(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda prompt, model: prompts.append(prompt) or "script",
+    )
+    gpt.generate_script("subject", 1, "model", "en_us_001", "MINE", target_words=90)
+    assert prompts[0].startswith("MINE")
+
+
+def test_generate_script_states_a_floor_as_well_as_a_target(monkeypatch):
+    # Measured: asked for 90 words, the model wrote 62. A floor lands closer.
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda prompt, model: prompts.append(prompt) or "body text here",
+    )
+    gpt.generate_script("s", 1, "m", "en_us_001", "", target_words=120)
+    assert "about 120 words" in prompts[0]
+    assert "no fewer than 102" in prompts[0]
+
+
+def test_generate_script_drops_a_title_line(monkeypatch):
+    # Observed in a real run: the model opened with a question as a heading.
+    # Taking that as the whole script gives a three-second video.
+    body = "Ice floats because its crystal lattice traps air and lowers density."
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: f"What makes ice float?\n\n{body}",
+    )
+    assert gpt.generate_script("s", 1, "m", "en_us_001", "") == body
+
+
+def test_generate_script_keeps_a_short_script_that_has_no_title(monkeypatch):
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: "Short but whole.")
+    assert gpt.generate_script("s", 1, "m", "en_us_001", "") == "Short but whole."
+
+
+def test_generate_script_ignores_blank_blocks(monkeypatch):
+    body = "A real paragraph with enough words in it to count as the script body."
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: f"\n\n   \n\n{body}")
+    assert gpt.generate_script("s", 1, "m", "en_us_001", "") == body

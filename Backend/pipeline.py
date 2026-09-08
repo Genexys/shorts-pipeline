@@ -78,6 +78,8 @@ def run_generation_pipeline(
 
     fmt = resolve_format(data.get("format"))
     paragraph_number = int(data.get("paragraphNumber", 1))
+    # Length is the format's business, but a caller may ask for something else.
+    target_words = int(data.get("targetWords") or 0) or None
     ai_model = data.get("aiModel")
     n_threads = data.get("threads")
     subtitles_position = data.get("subtitlesPosition")
@@ -105,7 +107,7 @@ def run_generation_pipeline(
     if fmt is LONG:
         script = generate_long_script(
             data["videoSubject"],
-            fmt.target_words,
+            target_words or fmt.target_words,
             ai_model,
             voice,
             data["customPrompt"],
@@ -117,6 +119,7 @@ def run_generation_pipeline(
             ai_model,
             voice,
             data["customPrompt"],
+            target_words=target_words or fmt.target_words,
         )
 
     if not script:

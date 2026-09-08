@@ -223,6 +223,7 @@ def generate_script(
     voice: str,
     customPrompt: str,
     angle: Optional[str] = None,
+    target_words: Optional[int] = None,
 ) -> Optional[str]:
     """
     Generate a script for a video, depending on the subject of the video, the number of paragraphs, and the AI model.
@@ -276,11 +277,22 @@ def generate_script(
 
         """
 
+    # "One paragraph" is whatever the model feels like: measured across real
+    # runs it produced anything from 11 to 33 seconds of speech. A word count
+    # is the only instruction that actually pins the length down.
+    if target_words:
+        floor = int(target_words * SCRIPT_WORD_FLOOR_RATIO)
+        length = (
+            f"    Length: about {target_words} words, and no fewer than {floor}.\n"
+        )
+    else:
+        length = ""
+
     prompt += f"""
     
     Subject: {video_subject}
     Number of paragraphs: {paragraph_number}
-    Language: {voice}
+{length}    Language: {voice}
 
     """
 
@@ -294,7 +306,16 @@ def generate_script(
         response = clean_script_text(response)
 
         # Split the script into paragraphs
-        paragraphs = response.split("\n\n")
+        paragraphs = [block for block in response.split("\n\n") if block.strip()]
+
+        # Drop a leading title. The prompt forbids one and the model writes it
+        # anyway; selecting it as the whole script yields a few seconds of audio.
+        while (
+            len(paragraphs) > 1
+            and len(paragraphs[0].split()) <= TITLE_FRAGMENT_MAX_WORDS
+        ):
+            dropped = paragraphs.pop(0).strip()
+            log(f"[*] Dropped a title-like opening line: {dropped[:60]}", "warning")
 
         # Select the specified number of paragraphs
         selected_paragraphs = paragraphs[:paragraph_number]
@@ -385,6 +406,15 @@ HASHTAG_MAX_CHARS = 30
 # Kept for callers that do not name a format; the format overrides it.
 ALWAYS_HASHTAGS = ("#Shorts",)
 MAX_JSON_CANDIDATES = 32
+
+# A leading fragment this short is a title, not a paragraph. The prompt forbids
+# titles and the model writes them anyway; taking one as the whole script
+# produces a three-second video.
+TITLE_FRAGMENT_MAX_WORDS = 8
+
+# Models undershoot a word count. Measured: asked for 90, wrote 62. Stating a
+# floor as well lands much closer than an approximate target alone.
+SCRIPT_WORD_FLOOR_RATIO = 0.85
 
 
 def _iter_balanced_brace_spans(text: str):
