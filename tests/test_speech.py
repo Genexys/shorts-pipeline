@@ -8,8 +8,11 @@ from formats import LONG, SHORT
 # -- provider choice --------------------------------------------------------
 
 
-def test_short_stays_on_the_free_service():
-    assert SHORT.elevenlabs_voice_id is None
+def test_short_narrates_through_elevenlabs():
+    # It used to stay on the free service to save credits. The saving was not
+    # worth it: the default TikTok voice is the most recognisable synthetic
+    # voice on the internet and reads as an automated upload immediately.
+    assert SHORT.elevenlabs_voice_id == "Gfpl8Yo74Is0W6cPUWWT"
 
 
 def test_long_form_uses_elevenlabs():

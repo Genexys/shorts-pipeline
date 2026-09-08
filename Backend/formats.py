@@ -54,10 +54,12 @@ SHORT = VideoFormat(
     target_words=120,
     # Word-by-word captions, the usual Shorts style.
     subtitle_max_chars=10,
-    voice="en_us_001",
-    # Shorts stay on the free service. Thirty seconds of synthetic narration is
-    # tolerable, and the paid credits are worth more where minutes are at stake.
-    elevenlabs_voice_id=None,
+    # Not en_us_001. That is the single most recognisable synthetic voice on
+    # the internet, and it reads as "content farm" before a word of the script
+    # lands. This is only the fallback for when ElevenLabs is unavailable.
+    voice="en_male_narration",
+    # Max — Elearning and Documentary.
+    elevenlabs_voice_id="Gfpl8Yo74Is0W6cPUWWT",
     # Shorts are chosen from a vertical feed, not from a thumbnail grid, and a
     # 16:9 still does not represent them anyway.
     build_thumbnail=False,
