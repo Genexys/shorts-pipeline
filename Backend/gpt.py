@@ -536,7 +536,11 @@ def validate_metadata(
         for item in tags_value:
             if not isinstance(item, str):
                 continue
-            tag = re.sub(r"\s+", " ", item.replace(",", " ")).strip()
+            # Models write "blue-sky" and "light_scattering" whatever the
+            # prompt says. YouTube accepts them, but a search matches the
+            # spaced form, so joined words cost reach for nothing.
+            tag = item.replace(",", " ").replace("-", " ").replace("_", " ")
+            tag = re.sub(r"\s+", " ", tag).strip()
             if not tag or len(tag) > TAG_MAX_CHARS or tag.lower() in seen:
                 continue
             if len(tags) >= TAGS_MAX_COUNT or total_length + len(tag) > TAGS_MAX_TOTAL_CHARS:
@@ -628,7 +632,9 @@ def generate_metadata(
     Rules:
     - title: catchy, at most 70 characters, plain text, no hashtags, no quotes, no emojis.
     - description: 2-3 sentences that summarize the video, plain text, no hashtags (they are appended automatically).
-    - tags: 5 to 10 short keywords, each 1-3 words, no commas inside a tag.
+    - tags: 5 to 10 short keywords, each 1-3 ordinary words separated by
+      spaces. No hyphens, no underscores, no commas inside a tag.
+      Write "blue sky", not "blue-sky".
     - Do not add any text before or after the JSON object.
     """
 

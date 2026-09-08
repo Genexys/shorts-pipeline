@@ -273,3 +273,28 @@ def test_long_form_still_gets_topical_hashtags(monkeypatch):
     )
     assert "#Shorts" not in description
     assert "#DeepOcean" in description
+
+
+def test_validate_metadata_splits_joined_tag_words():
+    # Observed from a real run: the model returned "atmosphere-scattering" and
+    # "light_scattering". YouTube accepts them, but search matches the spaced
+    # form, so a joined tag costs reach for nothing.
+    _t, _d, tags = validate_metadata(
+        {"tags": ["atmosphere-scattering", "light_scattering", "blue sky"]}, "subject"
+    )
+    assert tags == ["atmosphere scattering", "light scattering", "blue sky"]
+
+
+def test_validate_metadata_still_collapses_whitespace_in_tags():
+    _t, _d, tags = validate_metadata({"tags": ["  deep   ocean  "]}, "subject")
+    assert tags == ["deep ocean"]
+
+
+def test_metadata_prompt_asks_for_spaced_tags(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or '{"title":"T","description":"D","tags":["a"]}',
+    )
+    gpt.generate_metadata("subject", "script", "model")
+    assert "No hyphens" in prompts[0]
