@@ -10,6 +10,7 @@ Use `.env.example` as your template.
 |---|---|
 | `TIKTOK_SESSION_ID` | TikTok session cookie (`sessionid`) used for TTS voice endpoint calls. |
 | `PEXELS_API_KEY` | API key used to fetch stock video clips. |
+| `PIXABAY_API_KEY` | *Optional.* A second stock library, merged with Pexels. Empty uses Pexels alone. Long videos need it — see [Stock footage](#stock-footage). |
 
 ## Optional
 
@@ -149,6 +150,24 @@ Cost, on pay-as-you-go at $0.10 per 1000 characters: about $0.33 for a
 long-form video of ~550 words, and about $0.055 for a Short if you ever switch
 one over. Restrict the API key to Text to Speech and give it a credit cap — the
 autopilot uses it unattended.
+
+## Stock footage
+
+Two libraries are searched per term and the results interleaved, so neither
+fills a video on its own. Pixabay is optional: with `PIXABAY_API_KEY` empty
+the pipeline uses Pexels alone, exactly as before.
+
+**Long videos need the second source.** A three-and-a-half minute video needs
+about 19 distinct clips at the twelve-second shot cap. Measured on a narrow
+subject, Pexels returned 13 of the 20 requested — ten search terms about the
+same thing return overlapping results, and the video repeated itself part way
+through. The two catalogues barely overlap, so a second library roughly
+doubles what is available.
+
+Neither library can fail a job. A search that errors or is unconfigured
+returns nothing and the other one carries the video; if both come up short,
+the shot cap stretches so the footage still covers the runtime without
+repeating.
 
 ## Notes
 
