@@ -19,7 +19,7 @@ from gpt import (
 from logstream import log
 from search import search_for_stock_videos
 from thumbnail import build_thumbnail
-from speech import synthesize_sentences
+from speech import ELEVENLABS, synthesize_sentences
 from utils import (
     OUTPUT_DIR,
     PROJECT_ROOT,
@@ -60,6 +60,8 @@ class PipelineResult:
     format_name: str
     subtitles_path: str
     thumbnail_path: Optional[str]
+    narration_provider: str
+    narration_fell_back: bool
 
 
 def run_generation_pipeline(
@@ -188,7 +190,11 @@ def run_generation_pipeline(
         elevenlabs_model=fmt.elevenlabs_model,
         on_log=emit,
     )
-    emit(f"[+] Narrated with {provider}", "info")
+    # Whether the format wanted the paid voice and did not get it. Recorded
+    # rather than only logged: running out of credits is otherwise discovered
+    # by listening to a finished video.
+    narration_fell_back = bool(fmt.elevenlabs_voice_id) and provider != ELEVENLABS
+    emit(f"[+] Narrated with {provider}", "warning" if narration_fell_back else "info")
 
     paths = [AudioFileClip(path) for path in audio_paths]
 
@@ -393,4 +399,6 @@ def run_generation_pipeline(
         format_name=fmt.name,
         subtitles_path=subtitles_path,
         thumbnail_path=thumbnail_path,
+        narration_provider=provider,
+        narration_fell_back=narration_fell_back,
     )

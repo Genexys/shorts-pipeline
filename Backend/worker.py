@@ -85,6 +85,8 @@ def process_next_job() -> bool:
                         "title": result.title,
                         "uploadError": result.upload_error,
                         "format": result.format_name,
+                        "narration": result.narration_provider,
+                        "narrationFellBack": result.narration_fell_back,
                     },
                     commit=False,
                 )

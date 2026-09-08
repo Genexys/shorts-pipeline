@@ -187,15 +187,24 @@ class Autopilot:
     def _success_message(self, session: Session, topic: Topic, job_id: str) -> str:
         title = topic.subject
         second_line = "upload skipped: unknown reason"
+        warning = ""
         for artifact in list_artifacts(session, job_id):
             metadata = artifact.metadata_json or {}
             if artifact.artifact_type == "video":
                 title = metadata.get("title") or title
                 if metadata.get("uploadError"):
                     second_line = f"upload skipped: {metadata['uploadError']}"
+                if metadata.get("narrationFellBack"):
+                    # Almost always exhausted ElevenLabs credits. Worth saying
+                    # out loud: the video is fine but sounds like a different
+                    # channel, and every one after it will too until topped up.
+                    warning = (
+                        f"\n⚠️ narrated with {metadata.get('narration')} — "
+                        "the paid voice was unavailable"
+                    )
             elif artifact.artifact_type == "youtube_video":
                 second_line = artifact.path
-        return f"✅ {title}\n{second_line}\njob {job_id}"
+        return f"✅ {title}\n{second_line}{warning}\njob {job_id}"
 
     def warn_stalled_topics(self, now: datetime) -> int:
         """Notify once per topic when its job has been queued/running for too long."""
