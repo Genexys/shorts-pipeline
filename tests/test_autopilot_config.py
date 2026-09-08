@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+from autopilot_config import next_format, week_start
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -164,3 +166,69 @@ def test_slot_uses_local_timezone():
     assert slot_available(datetime(2026, 9, 6, 7, 30, tzinfo=UTC), berlin, 0, None) is True
     # 19:30 UTC == 21:30 Berlin: outside
     assert slot_available(datetime(2026, 9, 6, 19, 30, tzinfo=UTC), berlin, 0, None) is False
+
+
+# -- weekly long-form budget ------------------------------------------------
+
+
+def _cfg(**overrides):
+    env = {"AUTOPILOT_NICHE": "ocean facts", **overrides}
+    return AutopilotConfig.from_env(env)
+
+
+def test_longform_is_off_by_default():
+    # An existing deployment must not start making long videos on upgrade.
+    assert _cfg().longform_per_week == 0
+
+
+def test_longform_budget_is_read_from_the_environment():
+    assert _cfg(AUTOPILOT_LONGFORM_PER_WEEK="3").longform_per_week == 3
+
+
+def test_longform_budget_is_bounded():
+    with pytest.raises(ConfigError):
+        _cfg(AUTOPILOT_LONGFORM_PER_WEEK="8")
+    with pytest.raises(ConfigError):
+        _cfg(AUTOPILOT_LONGFORM_PER_WEEK="-1")
+
+
+def test_next_format_is_short_when_long_form_is_off():
+    assert next_format(0, _cfg()) == "short"
+
+
+def test_next_format_prefers_long_while_the_budget_has_room():
+    config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="2")
+    # The scarcer slot goes first: leaving it to the end of the week risks
+    # losing it to a day the machine is off.
+    assert next_format(0, config) == "long"
+    assert next_format(1, config) == "long"
+
+
+def test_next_format_falls_back_to_short_once_the_budget_is_spent():
+    config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="2")
+    assert next_format(2, config) == "short"
+    assert next_format(5, config) == "short"
+
+
+# -- week boundary ----------------------------------------------------------
+
+
+def test_week_start_is_local_monday_midnight():
+    tz = ZoneInfo("Asia/Tbilisi")
+    # A Thursday afternoon.
+    now = datetime(2026, 9, 10, 15, 30, tzinfo=tz)
+    start = week_start(now, tz)
+    local = start.astimezone(tz)
+    assert (local.year, local.month, local.day) == (2026, 9, 7)
+    assert (local.hour, local.minute) == (0, 0)
+
+
+def test_week_start_on_monday_is_that_morning():
+    tz = ZoneInfo("Asia/Tbilisi")
+    now = datetime(2026, 9, 7, 9, 5, tzinfo=tz)
+    assert week_start(now, tz).astimezone(tz).day == 7
+
+
+def test_week_start_is_returned_as_utc():
+    tz = ZoneInfo("Asia/Tbilisi")
+    assert week_start(datetime(2026, 9, 10, 15, 30, tzinfo=tz), tz).tzinfo is timezone.utc

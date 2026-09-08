@@ -415,3 +415,27 @@ def list_topics(session: Session, status: Optional[str], limit: int) -> list[Top
     if status:
         stmt = stmt.where(Topic.status == status)
     return list(session.scalars(stmt).all())
+
+
+def count_longform_since(session: Session, since: datetime) -> int:
+    """Long-form jobs created since `since`, whatever state they are in.
+
+    Counts jobs rather than finished artifacts on purpose: a long video that is
+    queued or still rendering has already claimed its slot, and counting only
+    completed ones would queue a second before the first finishes.
+
+    Compared in Python for the same reason as count_topics_used_today: SQLite
+    stores tz-aware datetimes as naive strings, so a SQL comparison against an
+    aware bound is unreliable. The table is small.
+    """
+    rows = session.execute(
+        select(GenerationJob.payload, GenerationJob.created_at)
+    ).all()
+    return sum(
+        1
+        for payload, created_at in rows
+        if isinstance(payload, dict)
+        and payload.get("format") == "long"
+        and (converted := as_utc(created_at)) is not None
+        and converted >= since
+    )

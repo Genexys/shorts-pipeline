@@ -165,3 +165,44 @@ def test_add_artifact_and_list_artifacts_in_insert_order(session):
     assert artifacts[0].metadata_json == {"title": "T"}
     assert artifacts[1].path == "https://youtu.be/abc"
     assert list_artifacts(session, "missing") == []
+
+
+# -- long-form weekly counting ----------------------------------------------
+
+
+def test_count_longform_since_counts_only_long_jobs(session_factory):
+    from datetime import datetime, timedelta, timezone
+
+    from repository import count_longform_since, create_job
+
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    with session_factory() as session:
+        create_job(session, payload={"videoSubject": "a", "format": "long"})
+        create_job(session, payload={"videoSubject": "b", "format": "short"})
+        create_job(session, payload={"videoSubject": "c"})
+        assert count_longform_since(session, since) == 1
+
+
+def test_count_longform_since_counts_jobs_not_yet_finished(session_factory):
+    from datetime import datetime, timedelta, timezone
+
+    from repository import count_longform_since, create_job
+
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    with session_factory() as session:
+        # A queued long video has already claimed its slot; counting only
+        # finished ones would queue a second before the first completes.
+        job = create_job(session, payload={"videoSubject": "a", "format": "long"})
+        assert job.status == "queued"
+        assert count_longform_since(session, since) == 1
+
+
+def test_count_longform_since_ignores_older_weeks(session_factory):
+    from datetime import datetime, timedelta, timezone
+
+    from repository import count_longform_since, create_job
+
+    with session_factory() as session:
+        create_job(session, payload={"videoSubject": "a", "format": "long"})
+        future = datetime.now(timezone.utc) + timedelta(minutes=1)
+        assert count_longform_since(session, future) == 0

@@ -38,6 +38,7 @@ from video import (
 )
 from youtube import (
     resolve_language,
+    upload_captions,
     resolve_privacy_status,
     upload_thumbnail,
     upload_video,
@@ -247,7 +248,7 @@ def run_generation_pipeline(
         ) from err
 
     title, description, keywords = generate_metadata(
-        data["videoSubject"], script, ai_model
+        data["videoSubject"], script, ai_model, fmt.always_hashtags
     )
 
     emit("[-] Metadata for YouTube upload:", "info")
@@ -362,6 +363,18 @@ def run_generation_pipeline(
                 except Exception as err:
                     # Needs a phone-verified channel; the video is already live.
                     emit(f"[!] Thumbnail not set: {err}", "warning")
+            if not fmt.burn_subtitles:
+                try:
+                    upload_captions(
+                        youtube_video_id,
+                        subtitles_path,
+                        language=resolve_language(voice),
+                    )
+                    emit("[+] Caption track uploaded.", "success")
+                except Exception as err:
+                    # Needs the wider caption scope; a video without captions
+                    # is worth far more than a failed job.
+                    emit(f"[!] Captions not uploaded: {err}", "warning")
         except Exception as err:
             upload_error = str(err)
             emit(f"[!] YouTube upload skipped: {upload_error}", "warning")

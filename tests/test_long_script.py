@@ -298,3 +298,17 @@ def test_long_script_shapes_the_outline_by_the_angle(monkeypatch):
     gpt.generate_long_script("s", 300, "model", "en_us_001", "", angle="ANGLE-MARKER")
 
     assert "ANGLE-MARKER" in prompts[0]
+
+
+def test_search_terms_are_not_asked_to_repeat_the_subject(monkeypatch):
+    # Requiring the subject in every term is what made Pexels return the same
+    # handful of clips and the footage repeat inside a video.
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda prompt, model: prompts.append(prompt) or '["a", "b"]',
+    )
+    gpt.get_search_terms("deep ocean glow", 5, "script", "model")
+
+    assert "always add the main subject" not in prompts[0]
+    assert "different angles" in prompts[0]

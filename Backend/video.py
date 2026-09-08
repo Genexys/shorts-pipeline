@@ -222,6 +222,12 @@ MIN_SHOT_SECONDS = 0.9
 # quarter-second among three-second ones.
 SHORT_SHOT_FRACTION = 0.5
 
+# A stock library does not always have enough distinct clips for a long video,
+# especially on a narrow subject. Holding each shot longer is better than
+# showing the same footage twice — but only up to a point, past which a static
+# shot is worse than a repeat.
+MAX_ADAPTIVE_SHOT_SECONDS = 20.0
+
 # Slow camera moves, cycled per shot so neighbours never move the same way.
 # Static stock footage cut together is what the monetization policy calls an
 # image slideshow; a drift across the frame reads as a deliberate edit.
@@ -240,6 +246,23 @@ SUBTITLE_SIDE_MARGIN_PX = 60
 SUBTITLE_FONT_NAME = "The Bold Font"
 SUBTITLE_OUTLINE = 5
 
+
+def effective_clip_cap(
+    duration: float,
+    clip_count: int,
+    base_cap: float,
+    ceiling: float = MAX_ADAPTIVE_SHOT_SECONDS,
+) -> float:
+    """The per-shot cap to actually use, given how much footage arrived.
+
+    Searching does not always return what the format asked for. Rather than
+    cycling back through the clips, each shot is held longer so the footage
+    stretches to cover the runtime — up to `ceiling`, beyond which a shot
+    outstays its welcome more than a repeat would.
+    """
+    if clip_count <= 0:
+        return base_cap
+    return min(max(base_cap, duration / clip_count), ceiling)
 
 def _fit_rhythm(
     rhythm: Tuple[float, ...], required: float, max_clip_duration: float
@@ -453,9 +476,17 @@ def combine_videos(
     combined_video_path = TEMP_DIR / f"{uuid.uuid4()}.mp4"
 
     sources = [(path, probe_duration(path)) for path in video_paths]
-    segments = plan_clip_segments(
-        sources, float(max_duration), float(fmt.max_clip_duration)
+    cap = effective_clip_cap(
+        float(max_duration), len(sources), float(fmt.max_clip_duration)
     )
+    if cap > fmt.max_clip_duration:
+        log(
+            f"[!] Only {len(sources)} clips for {max_duration:.0f}s; holding each "
+            f"shot up to {cap:.1f}s instead of {fmt.max_clip_duration:.0f}s "
+            f"rather than repeating footage.",
+            "warning",
+        )
+    segments = plan_clip_segments(sources, float(max_duration), cap)
 
     log("[+] Combining videos...", "info")
     log(f"[+] {len(segments)} segments covering {max_duration:.1f}s.", "info")

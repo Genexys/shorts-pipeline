@@ -242,3 +242,34 @@ def test_generate_metadata_appends_hashtags_even_when_the_model_fails(monkeypatc
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: "not json at all")
     _title, description, _tags = gpt.generate_metadata("octopus facts", "script", "model")
     assert "#Shorts" in description
+
+
+def test_long_form_does_not_claim_to_be_a_short():
+    # #Shorts on a three-minute landscape video misleads the viewer and the
+    # platform about what it is.
+    from formats import LONG, SHORT
+
+    assert LONG.always_hashtags == ()
+    assert SHORT.always_hashtags == ("#Shorts",)
+
+
+def test_build_hashtags_honours_the_format(monkeypatch):
+    from formats import LONG
+
+    hashtags = gpt.build_hashtags(["deep ocean"], "subject", LONG.always_hashtags)
+    assert "#Shorts" not in hashtags
+    assert "#DeepOcean" in hashtags
+
+
+def test_long_form_still_gets_topical_hashtags(monkeypatch):
+    from formats import LONG
+
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: '{"title":"T","description":"D","tags":["deep ocean","glow"]}',
+    )
+    _t, description, _k = gpt.generate_metadata(
+        "subject", "script", "model", LONG.always_hashtags
+    )
+    assert "#Shorts" not in description
+    assert "#DeepOcean" in description

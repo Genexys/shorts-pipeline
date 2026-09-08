@@ -15,7 +15,13 @@ from typing import Callable, Optional
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
-from autopilot_config import AutopilotConfig, ConfigError, slot_available
+from autopilot_config import (
+    AutopilotConfig,
+    ConfigError,
+    next_format,
+    slot_available,
+    week_start,
+)
 from db import SessionLocal, init_db
 from gpt import extract_json_object, generate_response
 from logstream import log
@@ -24,6 +30,7 @@ from notify import send_telegram
 from repository import (
     add_topic,
     as_utc,
+    count_longform_since,
     count_topics_used_today,
     get_job,
     has_active_jobs,
@@ -131,7 +138,7 @@ class Autopilot:
         return (
             f"Autopilot started. Niche: {self.config.niche}. "
             f"{self.config.videos_per_day}/day, window {self.config.window_label} "
-            f"{self.config.tz_name}."
+            f"{self.config.tz_name}. Long form: {self.config.longform_per_week}/week."
         )
 
     # -- tick ----------------------------------------------------------------
@@ -229,10 +236,22 @@ class Autopilot:
             if topic is None:
                 return None
 
-            job = queue_topic_job(
-                session, topic, build_payload(self.config, topic.subject), now=now
+            longform_this_week = count_longform_since(
+                session, week_start(now, self.config.tz)
             )
-            log(f"[+] Autopilot queued job {job.id} for topic '{topic.subject}'", "success")
+            format_name = next_format(longform_this_week, self.config)
+
+            job = queue_topic_job(
+                session,
+                topic,
+                build_payload(self.config, topic.subject, format_name),
+                now=now,
+            )
+            log(
+                f"[+] Autopilot queued {format_name} job {job.id} "
+                f"for topic '{topic.subject}'",
+                "success",
+            )
             return job.id
 
     def generate_topic(self, session: Session) -> Optional[Topic]:

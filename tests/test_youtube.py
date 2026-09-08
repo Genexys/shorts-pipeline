@@ -39,7 +39,7 @@ def test_load_credentials_refreshes_expired_token_and_rewrites_file(monkeypatch,
     token_file.write_text(json.dumps({"token": "old"}))
     fake = _FakeCredentials(valid=False, expired=True, refresh_token="r")
     monkeypatch.setattr(
-        youtube.Credentials, "from_authorized_user_file", lambda path, scopes: fake
+        youtube.Credentials, "from_authorized_user_file", lambda path: fake
     )
 
     credentials = youtube.load_credentials(token_file)
@@ -60,7 +60,7 @@ def test_load_credentials_returns_none_when_refresh_fails(monkeypatch, tmp_path:
 
     fake.refresh = failing_refresh
     monkeypatch.setattr(
-        youtube.Credentials, "from_authorized_user_file", lambda path, scopes: fake
+        youtube.Credentials, "from_authorized_user_file", lambda path: fake
     )
 
     assert youtube.load_credentials(token_file) is None
@@ -102,8 +102,58 @@ def test_upload_video_returns_video_id(monkeypatch):
     assert captured["privacyStatus"] == "private"
 
 
-def test_scopes_only_upload():
-    assert youtube.SCOPES == ["https://www.googleapis.com/auth/youtube.upload"]
+def test_scopes_are_exactly_what_the_calls_need():
+    # Every scope here has to be justified: force-ssl allows managing and
+    # deleting channel content, and is only present because captions.insert
+    # accepts nothing narrower.
+    assert youtube.SCOPES == [youtube.UPLOAD_SCOPE, youtube.CAPTION_SCOPE]
+    assert youtube.UPLOAD_SCOPE.endswith("/youtube.upload")
+    assert youtube.CAPTION_SCOPE.endswith("/youtube.force-ssl")
+
+
+def test_existing_tokens_are_loaded_with_their_own_scopes(monkeypatch, tmp_path):
+    # Passing a wider list makes google-auth compare requested against granted
+    # on the next refresh and raise RefreshError, which would stop uploads
+    # within the hour on any deployment whose token predates the caption scope.
+    captured = {}
+
+    class FakeCredentials:
+        valid = True
+        scopes = [youtube.UPLOAD_SCOPE]
+
+    def fake_from_file(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return FakeCredentials()
+
+    token = tmp_path / "token.json"
+    token.write_text("{}")
+    monkeypatch.setattr(youtube.Credentials, "from_authorized_user_file", fake_from_file)
+
+    youtube.load_credentials(token)
+
+    assert len(captured["args"]) == 1
+    assert not captured["kwargs"]
+
+
+def test_upload_captions_refuses_an_upload_only_token(monkeypatch):
+    class FakeCredentials:
+        scopes = [youtube.UPLOAD_SCOPE]
+
+    monkeypatch.setattr(youtube, "load_credentials", lambda *a, **k: FakeCredentials())
+    with pytest.raises(youtube.YouTubeAuthError, match="upload-only"):
+        youtube.upload_captions("vid", "subs.srt")
+
+
+def test_has_scope_reads_the_granted_list():
+    class WithScope:
+        scopes = [youtube.UPLOAD_SCOPE, youtube.CAPTION_SCOPE]
+
+    class WithoutScope:
+        scopes = None
+
+    assert youtube.has_scope(WithScope(), youtube.CAPTION_SCOPE)
+    assert not youtube.has_scope(WithoutScope(), youtube.CAPTION_SCOPE)
 
 
 class _FakeInsertRequest:
