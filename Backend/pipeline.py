@@ -113,6 +113,7 @@ def run_generation_pipeline(
             ai_model,
             voice,
             data["customPrompt"],
+            section_count=fmt.section_count,
         )
     else:
         script = generate_script(

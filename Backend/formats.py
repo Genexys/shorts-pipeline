@@ -21,6 +21,7 @@ class VideoFormat:
     subtitle_font_size: int
     burn_subtitles: bool
     target_words: int
+    section_count: int
     subtitle_max_chars: int
     voice: str
     elevenlabs_voice_id: Optional[str]
@@ -53,6 +54,8 @@ SHORT = VideoFormat(
     # About 48 seconds of speech at 150 wpm. Comfortably inside the Shorts
     # limit, and long enough to make a point rather than state one.
     target_words=120,
+    # One continuous take; the outline machinery is for long form only.
+    section_count=1,
     # Word-by-word captions, the usual Shorts style.
     subtitle_max_chars=10,
     # Not en_us_001. That is the single most recognisable synthetic voice on
@@ -76,14 +79,20 @@ LONG = VideoFormat(
     width=1920,
     height=1080,
     max_clip_duration=12.0,
-    search_term_count=10,
-    clips_per_term=2,
+    # 800 words runs about 5.4 minutes, which needs 28 distinct clips at the
+    # twelve-second cap. Twelve terms of three leaves margin for the overlap
+    # between terms and for clips the duration filter rejects.
+    search_term_count=12,
+    clips_per_term=3,
     # Proportional to SHORT against the shorter frame: 112 * 1080/1920.
     subtitle_font_size=63,
     # Long form ships the .srt as a caption track instead, so YouTube can
     # translate it and viewers can turn it off.
     burn_subtitles=False,
-    target_words=550,
+    target_words=800,
+    # Length has to come from more ground covered, not longer sections: eight
+    # sections of a hundred words each, rather than six of a hundred and thirty.
+    section_count=8,
     # Readable subtitle lines rather than single words.
     subtitle_max_chars=42,
     # Deliberately different from the Shorts voice, so the two formats do not

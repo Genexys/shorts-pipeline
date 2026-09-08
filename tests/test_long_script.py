@@ -154,14 +154,20 @@ def test_generate_long_script_asks_for_a_sane_section_length(monkeypatch):
 
     def generate(prompt, ai_model):
         prompts.append(prompt)
-        return '["A", "B", "C", "D", "E", "F"]' if len(prompts) == 1 else "text."
+        headings = [f'"{chr(65+i)}"' for i in range(LONG.section_count)]
+        return "[" + ", ".join(headings) + "]" if len(prompts) == 1 else "text."
 
     monkeypatch.setattr(gpt, "generate_response", generate)
-    gpt.generate_long_script("subject", LONG.target_words, "model", "en_us_001", "")
+    gpt.generate_long_script(
+        "subject", LONG.target_words, "model", "en_us_001", "",
+        section_count=LONG.section_count,
+    )
 
-    # 550 over 6 sections is ~91 words, the size the model already handles for
-    # Shorts.
-    assert "About 91 words" in prompts[1]
+    # Each section is about the size the model already handles well for a
+    # Short, whatever the total length is set to.
+    per_section = LONG.target_words // LONG.section_count
+    assert f"About {per_section} words" in prompts[1]
+    assert 60 <= per_section <= 150
 
 
 def test_generate_long_script_never_asks_for_a_scrap(monkeypatch):
