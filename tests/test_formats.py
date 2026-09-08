@@ -111,8 +111,10 @@ def test_each_format_names_a_voice_the_tts_actually_has():
         assert fmt.voice in tiktokvoice.VOICES
 
 
-def test_short_keeps_the_voice_it_has_always_used():
-    assert SHORT.voice == "en_us_001"
+def test_short_falls_back_to_a_narration_voice():
+    # Only reached when ElevenLabs is unavailable, so it still has to sound
+    # like the channel rather than like every automated upload on the platform.
+    assert SHORT.voice == "en_male_narration"
 
 
 def test_the_two_formats_do_not_share_a_narrator():
@@ -125,3 +127,23 @@ def test_each_format_targets_a_sensible_runtime():
     # At roughly 150 spoken words a minute.
     assert 20 <= SHORT.target_words / 150 * 60 <= 50
     assert 180 <= LONG.target_words / 150 * 60 <= 240
+
+
+def test_no_format_uses_the_ubiquitous_tiktok_voice():
+    # en_us_001 is the most recognisable synthetic voice on the internet. It
+    # reads as "content farm" before a word of the script lands, which is the
+    # impression the whole pipeline is trying not to give.
+    for fmt in (SHORT, LONG):
+        assert fmt.voice != "en_us_001"
+
+
+def test_both_formats_narrate_through_elevenlabs():
+    assert SHORT.elevenlabs_voice_id
+    assert LONG.elevenlabs_voice_id
+    # Different voices: the two formats should read as two strands of one
+    # channel, not one output run twice.
+    assert SHORT.elevenlabs_voice_id != LONG.elevenlabs_voice_id
+
+
+def test_the_fallback_voices_differ_too():
+    assert SHORT.voice != LONG.voice

@@ -24,6 +24,7 @@ class VideoFormat:
     subtitle_max_chars: int
     voice: str
     elevenlabs_voice_id: Optional[str]
+    elevenlabs_model: str
     build_thumbnail: bool
     always_hashtags: tuple
 
@@ -54,10 +55,16 @@ SHORT = VideoFormat(
     target_words=120,
     # Word-by-word captions, the usual Shorts style.
     subtitle_max_chars=10,
-    voice="en_us_001",
-    # Shorts stay on the free service. Thirty seconds of synthetic narration is
-    # tolerable, and the paid credits are worth more where minutes are at stake.
-    elevenlabs_voice_id=None,
+    # Not en_us_001. That is the single most recognisable synthetic voice on
+    # the internet, and it reads as "content farm" before a word of the script
+    # lands. This is only the fallback for when ElevenLabs is unavailable.
+    voice="en_male_narration",
+    # Max — Elearning and Documentary.
+    elevenlabs_voice_id="Gfpl8Yo74Is0W6cPUWWT",
+    # Flash bills half a credit per character. Across three Shorts a day that
+    # is the difference between fitting a 60k plan and overrunning it, and at
+    # this length the cheaper model is hard to tell apart.
+    elevenlabs_model="eleven_flash_v2_5",
     # Shorts are chosen from a vertical feed, not from a thumbnail grid, and a
     # 16:9 still does not represent them anyway.
     build_thumbnail=False,
@@ -85,6 +92,9 @@ LONG = VideoFormat(
     # George: British, labelled narrative_story. Four minutes of obviously
     # synthetic narration is where retention goes to die.
     elevenlabs_voice_id="JBFqnCBsd6RMkjVDRZzb",
+    # Same price as v2 multilingual and newer. Minutes of narration are where
+    # the better model earns its keep, and long form is few enough to afford it.
+    elevenlabs_model="eleven_v3",
     # For a long video the thumbnail decides whether anyone opens it at all.
     build_thumbnail=True,
     # #Shorts on a three-minute landscape video misleads both the viewer and

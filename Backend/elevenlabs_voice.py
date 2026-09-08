@@ -12,6 +12,7 @@ import requests
 from logstream import log
 
 ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech"
+# Fallback for callers that do not name one; the format normally decides.
 ELEVENLABS_MODEL = "eleven_multilingual_v2"
 ELEVENLABS_TIMEOUT = 120
 
@@ -35,13 +36,16 @@ def scrub(text: str, key: Optional[str] = None) -> str:
     return text.replace(key, "<key>") if key else text
 
 
-def tts(text: str, voice_id: str, filename: str) -> None:
+def tts(
+    text: str, voice_id: str, filename: str, model: str = ELEVENLABS_MODEL
+) -> None:
     """Synthesizes one piece of text to an mp3 file.
 
     Args:
         text (str): What to say.
         voice_id (str): ElevenLabs voice id.
         filename (str): Where to write the mp3.
+        model (str): ElevenLabs model id. Cheaper models bill fewer credits.
 
     Raises:
         RuntimeError: On any failure, with the key removed from the message.
@@ -54,7 +58,7 @@ def tts(text: str, voice_id: str, filename: str) -> None:
         response = requests.post(
             f"{ELEVENLABS_URL}/{voice_id}",
             headers={"xi-api-key": key, "Content-Type": "application/json"},
-            json={"text": text, "model_id": ELEVENLABS_MODEL},
+            json={"text": text, "model_id": model},
             timeout=ELEVENLABS_TIMEOUT,
         )
         response.raise_for_status()
