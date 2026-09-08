@@ -185,6 +185,7 @@ def run_generation_pipeline(
         make_path=lambda: str(TEMP_DIR / f"{uuid4()}.mp3"),
         tiktok_voice=voice,
         elevenlabs_voice_id=fmt.elevenlabs_voice_id,
+        elevenlabs_model=fmt.elevenlabs_model,
         on_log=emit,
     )
     emit(f"[+] Narrated with {provider}", "info")

@@ -63,7 +63,7 @@ def test_narrates_with_elevenlabs_when_configured(monkeypatch, paths):
     monkeypatch.setattr(elevenlabs_voice, "is_configured", lambda: True)
     monkeypatch.setattr(
         elevenlabs_voice, "tts",
-        lambda text, voice_id, filename: spoken.append((text, voice_id)),
+        lambda text, voice_id, filename, model: spoken.append((text, voice_id)),
     )
     result, provider = speech.synthesize_sentences(
         ["one", "two"], paths, "en_us_001", "george"
@@ -142,3 +142,58 @@ def test_tts_refuses_without_a_key(monkeypatch):
     monkeypatch.setattr(elevenlabs_voice, "api_key", lambda: "")
     with pytest.raises(RuntimeError, match="ELEVENLABS_API_KEY"):
         elevenlabs_voice.tts("hello", "voice", "/tmp/x.mp3")
+
+
+# -- model choice -----------------------------------------------------------
+
+
+def test_shorts_use_the_cheaper_model():
+    # Flash bills half a credit per character. Over three Shorts a day that is
+    # the difference between fitting a 60k plan and overrunning it.
+    assert SHORT.elevenlabs_model == "eleven_flash_v2_5"
+
+
+def test_long_form_uses_the_better_model():
+    # Same price as v2 multilingual and newer; minutes of narration are where
+    # it earns its keep.
+    assert LONG.elevenlabs_model == "eleven_v3"
+
+
+def test_the_model_reaches_the_api(monkeypatch, paths):
+    captured = {}
+    monkeypatch.setattr(elevenlabs_voice, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        elevenlabs_voice, "tts",
+        lambda text, voice_id, filename, model: captured.update(model=model),
+    )
+    speech.synthesize_sentences(
+        ["one"], paths, "en_male_narration", "voice", "eleven_flash_v2_5"
+    )
+    assert captured["model"] == "eleven_flash_v2_5"
+
+
+def test_a_missing_model_falls_back_to_the_module_default(monkeypatch, paths):
+    captured = {}
+    monkeypatch.setattr(elevenlabs_voice, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        elevenlabs_voice, "tts",
+        lambda text, voice_id, filename, model: captured.update(model=model),
+    )
+    speech.synthesize_sentences(["one"], paths, "en_male_narration", "voice")
+    assert captured["model"] == elevenlabs_voice.ELEVENLABS_MODEL
+
+
+def test_tts_sends_the_model_it_was_given(monkeypatch):
+    captured = {}
+
+    class Response:
+        content = b"audio"
+        def raise_for_status(self): pass
+
+    monkeypatch.setattr(elevenlabs_voice, "api_key", lambda: "k")
+    monkeypatch.setattr(
+        elevenlabs_voice.requests, "post",
+        lambda url, **kw: captured.update(kw) or Response(),
+    )
+    elevenlabs_voice.tts("hi", "voice", "/tmp/x.mp3", "eleven_v3")
+    assert captured["json"]["model_id"] == "eleven_v3"

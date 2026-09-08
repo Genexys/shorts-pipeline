@@ -26,6 +26,7 @@ def synthesize_sentences(
     make_path: Callable[[], str],
     tiktok_voice: str,
     elevenlabs_voice_id: Optional[str] = None,
+    elevenlabs_model: Optional[str] = None,
     on_log: Optional[Callable[[str, str], None]] = None,
 ) -> Tuple[List[str], str]:
     """Narrates every sentence with one service, falling back as a whole.
@@ -35,6 +36,7 @@ def synthesize_sentences(
         make_path: Returns a fresh path for the next audio file.
         tiktok_voice: Voice id for the TikTok service.
         elevenlabs_voice_id: Voice id for ElevenLabs, or None to skip it.
+        elevenlabs_model: ElevenLabs model id, or None for the module default.
         on_log: Optional progress sink.
 
     Returns:
@@ -55,7 +57,12 @@ def synthesize_sentences(
         try:
             for sentence in sentences:
                 path = make_path()
-                elevenlabs_voice.tts(sentence, elevenlabs_voice_id, path)
+                elevenlabs_voice.tts(
+                    sentence,
+                    elevenlabs_voice_id,
+                    path,
+                    elevenlabs_model or elevenlabs_voice.ELEVENLABS_MODEL,
+                )
                 paths.append(path)
             return paths, ELEVENLABS
         except Exception as err:
