@@ -418,23 +418,34 @@ def list_topics(session: Session, status: Optional[str], limit: int) -> list[Top
 
 
 def count_longform_since(session: Session, since: datetime) -> int:
-    """Long-form jobs created since `since`, whatever state they are in.
+    """Long-form jobs the autopilot queued since `since`, whatever their state.
 
     Counts jobs rather than finished artifacts on purpose: a long video that is
     queued or still rendering has already claimed its slot, and counting only
     completed ones would queue a second before the first finishes.
 
+    Only the autopilot's own jobs count. The budget is a publishing schedule,
+    and a job someone submitted by hand is not part of it — testing a change
+    should not silently cost the channel a week of long-form. Autopilot jobs
+    are exactly those a topic points at; `queue_topic_job` is the only path
+    that makes one, so this cannot drift from reality the way a payload flag
+    could.
+
     Compared in Python for the same reason as count_topics_used_today: SQLite
     stores tz-aware datetimes as naive strings, so a SQL comparison against an
     aware bound is unreliable. The table is small.
     """
+    scheduled = set(
+        session.scalars(select(Topic.job_id).where(Topic.job_id.is_not(None))).all()
+    )
     rows = session.execute(
-        select(GenerationJob.payload, GenerationJob.created_at)
+        select(GenerationJob.id, GenerationJob.payload, GenerationJob.created_at)
     ).all()
     return sum(
         1
-        for payload, created_at in rows
-        if isinstance(payload, dict)
+        for job_id, payload, created_at in rows
+        if job_id in scheduled
+        and isinstance(payload, dict)
         and payload.get("format") == "long"
         and (converted := as_utc(created_at)) is not None
         and converted >= since

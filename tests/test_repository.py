@@ -173,26 +173,30 @@ def test_add_artifact_and_list_artifacts_in_insert_order(session):
 def test_count_longform_since_counts_only_long_jobs(session_factory):
     from datetime import datetime, timedelta, timezone
 
-    from repository import count_longform_since, create_job
+    from repository import add_topic, count_longform_since, queue_topic_job
 
     since = datetime.now(timezone.utc) - timedelta(days=1)
     with session_factory() as session:
-        create_job(session, payload={"videoSubject": "a", "format": "long"})
-        create_job(session, payload={"videoSubject": "b", "format": "short"})
-        create_job(session, payload={"videoSubject": "c"})
+        for subject, payload in (
+            ("a", {"videoSubject": "a", "format": "long"}),
+            ("b", {"videoSubject": "b", "format": "short"}),
+            ("c", {"videoSubject": "c"}),
+        ):
+            queue_topic_job(session, add_topic(session, subject, "n", "ollama"), payload)
         assert count_longform_since(session, since) == 1
 
 
 def test_count_longform_since_counts_jobs_not_yet_finished(session_factory):
     from datetime import datetime, timedelta, timezone
 
-    from repository import count_longform_since, create_job
+    from repository import add_topic, count_longform_since, queue_topic_job
 
     since = datetime.now(timezone.utc) - timedelta(days=1)
     with session_factory() as session:
         # A queued long video has already claimed its slot; counting only
         # finished ones would queue a second before the first completes.
-        job = create_job(session, payload={"videoSubject": "a", "format": "long"})
+        topic = add_topic(session, "a", "niche", "ollama")
+        job = queue_topic_job(session, topic, {"videoSubject": "a", "format": "long"})
         assert job.status == "queued"
         assert count_longform_since(session, since) == 1
 
@@ -200,9 +204,52 @@ def test_count_longform_since_counts_jobs_not_yet_finished(session_factory):
 def test_count_longform_since_ignores_older_weeks(session_factory):
     from datetime import datetime, timedelta, timezone
 
-    from repository import count_longform_since, create_job
+    from repository import add_topic, count_longform_since, queue_topic_job
 
     with session_factory() as session:
-        create_job(session, payload={"videoSubject": "a", "format": "long"})
+        topic = add_topic(session, "a", "niche", "ollama")
+        queue_topic_job(session, topic, {"videoSubject": "a", "format": "long"})
         future = datetime.now(timezone.utc) + timedelta(minutes=1)
         assert count_longform_since(session, future) == 0
+
+
+def test_count_longform_ignores_jobs_submitted_by_hand(session_factory):
+    from datetime import datetime, timedelta, timezone
+
+    from repository import add_topic, count_longform_since, create_job, queue_topic_job
+
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    with session_factory() as session:
+        # Submitted through /api/generate: no topic points at it.
+        create_job(session, payload={"videoSubject": "manual", "format": "long"})
+        # Queued by the autopilot: a topic does.
+        topic = add_topic(session, "scheduled subject", "niche", "ollama")
+        queue_topic_job(session, topic, {"videoSubject": "scheduled", "format": "long"})
+
+        # Testing a change by hand must not cost the channel a week of long form.
+        assert count_longform_since(session, since) == 1
+
+
+def test_count_longform_counts_every_scheduled_long_job(session_factory):
+    from datetime import datetime, timedelta, timezone
+
+    from repository import add_topic, count_longform_since, queue_topic_job
+
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    with session_factory() as session:
+        for index in range(3):
+            topic = add_topic(session, f"subject {index}", "niche", "ollama")
+            queue_topic_job(session, topic, {"videoSubject": "s", "format": "long"})
+        assert count_longform_since(session, since) == 3
+
+
+def test_count_longform_ignores_scheduled_shorts(session_factory):
+    from datetime import datetime, timedelta, timezone
+
+    from repository import add_topic, count_longform_since, queue_topic_job
+
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    with session_factory() as session:
+        topic = add_topic(session, "a short one", "niche", "ollama")
+        queue_topic_job(session, topic, {"videoSubject": "s", "format": "short"})
+        assert count_longform_since(session, since) == 0
