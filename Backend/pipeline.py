@@ -135,7 +135,11 @@ def run_generation_pipeline(
 
     video_urls = []
     it = 15
-    min_dur = 10
+    # A clip shorter than a shot cannot fill one, and the shortfall accumulates
+    # across every such clip until the run needs one shot more than it has
+    # footage for. Measured: seven of twenty clips came in under a twelve-second
+    # cap and the video repeated itself once as a result.
+    min_dur = int(fmt.max_clip_duration)
 
     found_per_term = []
     for search_term in search_terms:

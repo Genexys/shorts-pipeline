@@ -499,3 +499,15 @@ def test_combine_videos_stretches_the_cap_when_clips_are_scarce(monkeypatch):
 
     assert captured["cap"] > LONG.max_clip_duration
     assert captured["cap"] == pytest.approx(201.0 / 13)
+
+
+def test_clips_shorter_than_a_shot_force_an_extra_shot():
+    # Why min_dur follows the shot cap. A clip that cannot fill a shot leaves a
+    # shortfall, and enough of them add up to one shot more than there is
+    # footage for. Measured on a real run: seven of twenty clips came in under
+    # a twelve-second cap and the video repeated itself once.
+    starved = [(f"c{i}.mp4", 10.3 if i < 7 else 30.0) for i in range(20)]
+    assert len(video.plan_clip_segments(starved, 210.2, 12.0)) > 20
+
+    adequate = [(f"c{i}.mp4", 14.0) for i in range(20)]
+    assert len(video.plan_clip_segments(adequate, 210.2, 12.0)) == 20
