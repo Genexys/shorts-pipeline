@@ -47,12 +47,15 @@ ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"
 # Used when minting a new token. Existing tokens are loaded with whatever they
 # were actually granted; see load_credentials.
 #
-# CAPTION_SCOPE is deliberately absent. force-ssl allows managing and deleting
-# channel content, and the pending compliance audit was submitted describing
-# upload-only access; caption tracks are attached by hand in Studio instead,
-# which costs a minute per long video and nothing else. upload_captions stays
-# in place and refuses with a clear message if it is ever called.
-SCOPES = [UPLOAD_SCOPE, ANALYTICS_SCOPE]
+# force-ssl is the widest grant here: it allows managing and deleting channel
+# content, not just uploading. It was left out while the compliance review was
+# open, since that review described upload-only access. The review completed
+# on 2026-09-08, and captions.insert accepts nothing narrower.
+#
+# What keeps this honest is that the code still only ever calls videos.insert,
+# thumbnails.set and captions.insert. There is no list, update or delete
+# anywhere, and adding one should take the same deliberation this did.
+SCOPES = [UPLOAD_SCOPE, CAPTION_SCOPE, ANALYTICS_SCOPE]
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
 

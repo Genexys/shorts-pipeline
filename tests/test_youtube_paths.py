@@ -79,10 +79,13 @@ def test_auth_error_names_token_path(tmp_path):
 def test_minting_asks_for_all_three_scopes():
     import youtube
 
-    # Every scope is deliberate: upload for videos and thumbnails, analytics
-    # read-only for retention. Captions are done by hand rather than widening
-    # the grant to force-ssl.
-    assert youtube.SCOPES == [youtube.UPLOAD_SCOPE, youtube.ANALYTICS_SCOPE]
+    # Every scope is deliberate: upload for videos and thumbnails, force-ssl
+    # for captions, analytics read-only for retention. Nothing else.
+    assert youtube.SCOPES == [
+        youtube.UPLOAD_SCOPE,
+        youtube.CAPTION_SCOPE,
+        youtube.ANALYTICS_SCOPE,
+    ]
 
 
 def test_the_analytics_scope_is_read_only():
