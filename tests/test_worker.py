@@ -47,6 +47,8 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             format_name="short",
             subtitles_path="subtitles/x.srt",
             thumbnail_path=None,
+            narration_provider="elevenlabs",
+            narration_fell_back=False,
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -71,6 +73,8 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             "title": "Great title",
             "uploadError": None,
             "format": "short",
+            "narration": "elevenlabs",
+            "narrationFellBack": False,
         }
         assert artifacts["youtube_video"].path == "https://youtu.be/vid123"
         assert artifacts["youtube_video"].metadata_json == {
@@ -100,6 +104,8 @@ def test_process_next_job_marks_failed_when_bookkeeping_raises(
             format_name="short",
             subtitles_path="subtitles/x.srt",
             thumbnail_path=None,
+            narration_provider="elevenlabs",
+            narration_fell_back=False,
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -141,6 +147,8 @@ def test_process_next_job_records_upload_error_without_youtube_artifact(
             format_name="short",
             subtitles_path="subtitles/x.srt",
             thumbnail_path=None,
+            narration_provider="elevenlabs",
+            narration_fell_back=False,
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -330,6 +338,8 @@ def test_process_next_job_records_a_thumbnail_when_one_was_built(
             format_name="long",
             subtitles_path="subtitles/x.srt",
             thumbnail_path="temp/thumb.jpg",
+            narration_provider="elevenlabs",
+            narration_fell_back=False,
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)

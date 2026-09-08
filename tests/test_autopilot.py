@@ -440,3 +440,52 @@ def test_build_payload_can_ask_for_long_form():
 def test_build_payload_defaults_to_short():
     # Nothing schedules long form yet; the default must keep today's behaviour.
     assert build_payload(_config(), "subject")["format"] == "short"
+
+
+def _completed_job(session, subject: str) -> str:
+    """A finished job with a topic pointing at it, as the autopilot expects."""
+    from repository import add_topic, mark_completed, queue_topic_job
+
+    topic = add_topic(session, subject, "niche", "ollama")
+    job = queue_topic_job(session, topic, {"videoSubject": subject})
+    mark_completed(session, job.id, "output.mp4")
+    return job.id
+
+def test_success_message_warns_when_the_paid_voice_was_unavailable(
+    pilot, session_factory, notifications
+):
+    with session_factory() as session:
+        job_id = _completed_job(session, "Salty seas")
+        add_artifact(
+            session, job_id, "video", f"output/{job_id}.mp4",
+            {"title": "Salty seas", "uploadError": None,
+             "narration": "tiktok", "narrationFellBack": True},
+        )
+        add_artifact(
+            session, job_id, "youtube_video", "https://youtu.be/abc",
+            {"videoId": "abc"},
+        )
+
+    pilot.finish_completed_topics()
+
+    message = notifications[-1]
+    # Running out of credits is otherwise discovered by listening to a video.
+    assert "narrated with tiktok" in message
+    assert "paid voice was unavailable" in message
+    assert "https://youtu.be/abc" in message
+
+
+def test_success_message_says_nothing_when_narration_went_as_planned(
+    pilot, session_factory, notifications
+):
+    with session_factory() as session:
+        job_id = _completed_job(session, "Salty seas")
+        add_artifact(
+            session, job_id, "video", f"output/{job_id}.mp4",
+            {"title": "Salty seas", "uploadError": None,
+             "narration": "elevenlabs", "narrationFellBack": False},
+        )
+
+    pilot.finish_completed_topics()
+
+    assert "⚠️" not in notifications[-1]
