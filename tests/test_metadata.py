@@ -372,3 +372,48 @@ def test_generate_metadata_prompt_names_the_actual_format(monkeypatch):
 
     gpt.generate_metadata("s", "script", "model", SHORT.always_hashtags, SHORT.metadata_label)
     assert "Shorts" in prompts[1]
+
+
+# -- research grounding ------------------------------------------------------
+
+
+def test_research_rules_demands_sources_for_specifics():
+    rules = gpt.research_rules("[1] A study\nTen percent of people.")
+    assert "only source of specifics" in rules
+    assert "Ten percent of people." in rules
+    assert "MUST NOT state any number" in rules
+
+
+def test_research_rules_forbids_invented_precision_without_sources():
+    # The dangerous case. Given nothing, an 8B model writes "a 2019 Stanford
+    # study found 47%" — verifiable-looking and false, which is worse than
+    # vague. So with no brief the instruction is to stay general.
+    rules = gpt.research_rules("")
+    assert "no sources" in rules
+    assert "must not invent the appearance of one" in rules
+    assert "fabricated precision" in rules
+
+
+def test_research_rules_treats_a_blank_brief_as_none():
+    assert gpt.research_rules("   \n  ") == gpt.NO_RESEARCH_RULES
+
+
+def test_generate_script_puts_the_brief_in_the_prompt(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or "A script about hiccups. " * 30,
+    )
+    gpt.generate_script("hiccups", 1, "model", "en_us_001", "", research="[1] Note\nA fact.")
+    assert "A fact." in prompts[0]
+    assert "only source of specifics" in prompts[0]
+
+
+def test_generate_script_without_research_forbids_specifics(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or "A script about hiccups. " * 30,
+    )
+    gpt.generate_script("hiccups", 1, "model", "en_us_001", "")
+    assert "fabricated precision" in prompts[0]

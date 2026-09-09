@@ -11,6 +11,7 @@ Use `.env.example` as your template.
 | `TIKTOK_SESSION_ID` | TikTok session cookie (`sessionid`) used for TTS voice endpoint calls. |
 | `PEXELS_API_KEY` | API key used to fetch stock video clips. |
 | `PIXABAY_API_KEY` | *Optional.* A second stock library, merged with Pexels. Empty uses Pexels alone. Long videos need it — see [Stock footage](#stock-footage). |
+| `FIRECRAWL_API_KEY` | *Optional.* Grounds scripts in real search results and lists the sources in the description — see [Research](#research). Empty writes scripts with no specifics at all. |
 
 ## Optional
 
@@ -182,3 +183,27 @@ ollama pull llama3.1:8b
 - New architecture uses a database-backed job queue. In Docker, use Postgres via `DATABASE_URL`.
 - Under Docker Compose, `OLLAMA_BASE_URL`, `DATABASE_URL`, `IMAGEMAGICK_BINARY`, `YOUTUBE_CLIENT_SECRETS_FILE` and `YOUTUBE_TOKEN_FILE` are set by `docker-compose.yml`.
 - Set `FLASK_DEBUG=1` to enable the Werkzeug debugger and reloader locally; never set it in Docker.
+
+## Research
+
+With `FIRECRAWL_API_KEY` set, the pipeline searches the web for the subject
+before writing the script and passes the results in as numbered notes. The
+prompt then asks for concrete detail — figures, dates, named studies — but
+allows only what appears in those notes, and the sources are listed under the
+video description.
+
+The point is credibility, not caution. "A 2019 study found 47%" is worth more
+to a viewer than "some research suggests", but only if the number is real and
+someone who checks finds it. An invented citation is worse than none: it looks
+verifiable and is not.
+
+With the key empty, research is skipped and the prompt takes the opposite
+instruction — state nothing specific at all, no figure, date, study or
+institution. That is the safe fallback rather than the good one: the model
+given no sources fabricates plausible specifics, which is exactly the failure
+being avoided.
+
+Search bills 2 credits per 10 results against a free 1000 a month, so three
+videos a day costs well under the free tier. A failed search, an exhausted
+balance or a missing key all produce the same thing: an empty brief and a
+video that still gets made.
