@@ -121,13 +121,47 @@ def test_prompt_includes_the_script():
 
 
 def test_choose_post_kind_returns_a_known_kind():
-    assert choose_post_kind(random.Random(0)) in posts.POST_KINDS
+    assert choose_post_kind("a script", random.Random(0)) in posts.POST_KINDS
 
 
 def test_choose_post_kind_is_not_always_the_same():
     rng = random.Random(1)
-    drawn = {choose_post_kind(rng) for _ in range(40)}
+    drawn = {choose_post_kind("a script", rng) for _ in range(40)}
     assert len(drawn) > 1
+
+
+def test_choose_post_kind_never_picks_fact_without_a_script():
+    rng = random.Random(2)
+    drawn = {choose_post_kind("", rng) for _ in range(60)}
+    assert posts.FACT not in drawn
+    assert drawn == {posts.QUESTION, posts.POLL}
+
+
+def test_available_kinds_needs_a_script_for_fact():
+    assert posts.FACT in posts.available_kinds("a script")
+    assert posts.FACT not in posts.available_kinds("   ")
+
+
+def test_generate_post_refuses_a_fact_without_a_script():
+    # A bare "did you know" is a factual claim published in the channel's name.
+    # Ungrounded, the model gets the detail wrong in a way that reads fine.
+    with pytest.raises(ValueError, match="needs the video's script"):
+        generate_post("subject", "title", "", "model", kind=posts.FACT)
+
+
+def test_generate_post_allows_a_fact_when_the_script_is_there(monkeypatch):
+    monkeypatch.setattr(
+        posts, "generate_response", lambda p, m: '{"text":"A grounded detail.","options":[]}'
+    )
+    post = generate_post("subject", "title", "the script", "model", kind=posts.FACT)
+    assert post.kind == posts.FACT
+
+
+def test_poll_brief_forbids_options_that_mean_the_same_thing():
+    # Observed live: a poll offered "Yes, they use the magnetic field" and
+    # "Yes, and it is crucial to navigation" as separate answers, splitting the
+    # yes vote in two. Exact-match dedup cannot catch that.
+    assert "No two options may mean the same thing" in build_prompt(POLL, "s", "t", "script")
 
 
 # -- generation -------------------------------------------------------------

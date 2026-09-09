@@ -17,7 +17,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 
 from db import SessionLocal, init_db
-from posts import POST_KINDS, generate_post
+from posts import POST_KINDS, available_kinds, generate_post
 from repository import get_script, list_published_videos
 from utils import ENV_FILE
 
@@ -85,13 +85,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"Video:   https://youtu.be/{video_id}")
     print(f"Subject: {subject or '(unknown)'}")
     if not script:
-        # Worth saying: posts written from the subject alone tend to restate it.
-        print("Script:  not stored for this job — the post is written from the subject only.")
+        # Worth saying plainly: without the script the model has nothing to
+        # restate, so the kinds that assert a fact are off the table.
+        print(
+            "Script:  not stored for this job. Writing from the subject only, "
+            f"so only these kinds are available: {', '.join(available_kinds(script))}."
+        )
     print()
 
     written = 0
     for _ in range(max(1, args.count)):
-        post = generate_post(subject, title, script, model, kind=args.kind)
+        try:
+            post = generate_post(subject, title, script, model, kind=args.kind)
+        except ValueError as err:
+            print(err)
+            return 1
         if post is None:
             continue
         written += 1

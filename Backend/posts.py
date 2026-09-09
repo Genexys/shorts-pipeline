@@ -30,6 +30,15 @@ FACT = "fact"
 POLL = "poll"
 POST_KINDS: Tuple[str, ...] = (QUESTION, FACT, POLL)
 
+# Kinds that may only be written when the script is available. A "fact" post is
+# a bare verifiable claim published in the channel's name, and an 8B model asked
+# for one with no source produces plausible specifics with the details wrong:
+# on 2026-09-09 it attributed the variation in left-handedness across countries
+# to "social mobility", where the real finding is cultural pressure against
+# writing left-handed. Grounded in a script, the model restates something it was
+# given instead of inventing. Questions and polls have nothing to fabricate.
+GROUNDED_KINDS: Tuple[str, ...] = (FACT,)
+
 # What each kind is for, in the prompt's own words.
 KIND_BRIEFS = {
     QUESTION: (
@@ -45,9 +54,10 @@ KIND_BRIEFS = {
     POLL: (
         "Pose a question with clearly distinct answers. The options must be "
         "genuinely arguable — a poll whose answer is obvious collects no "
-        "signal. The text must not state, hint at or reason towards the "
-        "answer: a viewer who has already been told what to think does not "
-        "vote."
+        "signal. No two options may mean the same thing: a 'yes' split across "
+        "two wordings divides the votes and measures nothing. The text must "
+        "not state, hint at or reason towards the answer: a viewer who has "
+        "already been told what to think does not vote."
     ),
 }
 
@@ -69,13 +79,20 @@ class Post:
         return "\n".join(lines)
 
 
-def choose_post_kind(rng: Optional[random.Random] = None) -> str:
-    """Picks a post kind at random.
+def available_kinds(script: str) -> Tuple[str, ...]:
+    """Kinds that can be written from what is actually known about the video."""
+    if (script or "").strip():
+        return POST_KINDS
+    return tuple(kind for kind in POST_KINDS if kind not in GROUNDED_KINDS)
+
+
+def choose_post_kind(script: str = "", rng: Optional[random.Random] = None) -> str:
+    """Picks a post kind at random, from the ones this video can support.
 
     Rotating rather than always asking the same thing: a feed of nothing but
     polls reads as a bot, which is the whole failure mode being avoided.
     """
-    return (rng or random).choice(list(POST_KINDS))
+    return (rng or random).choice(list(available_kinds(script)))
 
 
 def clean_options(raw: object) -> List[str]:
@@ -168,9 +185,16 @@ def generate_post(
     a terminal who can simply run it again, so there is no fallback text: a
     generated-looking placeholder is worse than no post.
     """
-    kind = kind or choose_post_kind(rng)
+    kind = kind or choose_post_kind(script, rng)
     if kind not in POST_KINDS:
         raise ValueError(f"kind must be one of {', '.join(POST_KINDS)}, got '{kind}'.")
+    if kind not in available_kinds(script):
+        raise ValueError(
+            f"'{kind}' needs the video's script, which is not stored for this "
+            f"job. Without it the model invents the detail rather than "
+            f"restating one. Available here: "
+            f"{', '.join(available_kinds(script))}."
+        )
 
     response = generate_response(build_prompt(kind, subject, title, script), ai_model)
     post = build_post(extract_json_object(response), kind)
