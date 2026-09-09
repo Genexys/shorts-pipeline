@@ -14,6 +14,7 @@ brief and a script written the old way.
 import os
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 
@@ -30,6 +31,27 @@ BRIEF_MAX_SOURCES = 12
 # Sources are listed in the description, which YouTube caps; and a wall of
 # links reads as spam whatever the cap allows.
 DESCRIPTION_MAX_SOURCES = 5
+
+# Dropped before they reach either the brief or the description. Not snobbery
+# about the web: a Facebook group post listed under "Sources:" costs exactly
+# the credibility the citation was there to buy, and as grounding these return
+# somebody's comment rather than a finding. Observed on the first live search,
+# which returned Reddit, Facebook and YouTube among its eight results.
+EXCLUDED_DOMAINS = frozenset(
+    {
+        "facebook.com",
+        "instagram.com",
+        "pinterest.com",
+        "quora.com",
+        "reddit.com",
+        "threads.net",
+        "tiktok.com",
+        "twitter.com",
+        "x.com",
+        "youtube.com",
+        "youtu.be",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -49,12 +71,66 @@ def is_configured() -> bool:
     return bool(api_key())
 
 
+# Tracking parameters, stripped before a URL is shown or compared. They make a
+# cited link look like an affiliate link, and two URLs differing only by one
+# would otherwise survive deduplication as separate sources.
+TRACKING_PARAMS = frozenset(
+    {
+        "fbclid",
+        "gclid",
+        "igshid",
+        "mc_cid",
+        "mc_eid",
+        "msclkid",
+        "srsltid",
+        "yclid",
+    }
+)
+
+
+def clean_url(url: str) -> str:
+    """Drops tracking parameters, keeping everything the page actually needs."""
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return url
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key.lower() not in TRACKING_PARAMS and not key.lower().startswith("utm_")
+    ]
+    return urlunparse(parts._replace(query=urlencode(kept)))
+
+
+def host_of(url: str) -> str:
+    """Lowercased hostname without a leading www., or "" if unparseable."""
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return ""
+    host = host.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def is_allowed(url: str) -> bool:
+    """Whether a result may be used as a source."""
+    host = host_of(url)
+    if not host:
+        return False
+    return not any(
+        host == domain or host.endswith(f".{domain}") for domain in EXCLUDED_DOMAINS
+    )
+
+
 def _to_source(item: object) -> Optional[Source]:
     if not isinstance(item, dict):
         return None
     url = item.get("url")
     if not isinstance(url, str) or not url.startswith("http"):
         return None
+    if not is_allowed(url):
+        return None
+    url = clean_url(url)
     title = item.get("title") if isinstance(item.get("title"), str) else ""
     # `description` is what a plain search returns; `markdown` appears only when
     # scraping was requested, and is far longer than a brief should carry.

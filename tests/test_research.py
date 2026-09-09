@@ -224,3 +224,104 @@ def test_append_sources_puts_them_under_the_description():
 
 def test_append_sources_leaves_the_description_alone_when_there_are_none():
     assert append_sources("Body text.", []) == "Body text."
+
+
+# -- source quality ---------------------------------------------------------
+
+
+def test_host_of_strips_www_and_lowercases():
+    assert research.host_of("https://WWW.Example.ORG/a") == "example.org"
+
+
+def test_host_of_returns_empty_for_junk():
+    assert research.host_of("not a url") == ""
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.facebook.com/groups/123/posts/456",
+        "https://reddit.com/r/space/comments/abc",
+        "https://old.reddit.com/r/space/comments/abc",
+        "https://www.youtube.com/watch?v=abc",
+        "https://youtu.be/abc",
+        "https://x.com/someone/status/1",
+        "https://www.quora.com/Why-do-we-hiccup",
+    ],
+)
+def test_social_sources_are_excluded(url):
+    # A Facebook post under "Sources:" costs exactly the credibility the
+    # citation was there to buy.
+    assert research.is_allowed(url) is False
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.nasa.gov/growing-plants-in-space/",
+        "https://www.ars.usda.gov/oc/utm/growing-plants-in-space/",
+        "https://en.wikipedia.org/wiki/Plants_in_space",
+        "https://space.stackexchange.com/questions/31762/x",
+        "https://notyoutube.com/article",
+    ],
+)
+def test_real_sources_are_kept(url):
+    assert research.is_allowed(url) is True
+
+
+def test_search_drops_excluded_domains(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-abc")
+    payload = {
+        "data": {
+            "web": [
+                {"url": "https://www.nasa.gov/a", "title": "NASA", "description": "Real."},
+                {"url": "https://www.reddit.com/r/x/1", "title": "Thread", "description": "A comment."},
+                {"url": "https://www.facebook.com/groups/1", "title": "Post", "description": "A post."},
+            ]
+        }
+    }
+    _patch_post(monkeypatch, payload)
+
+    assert [s.url for s in search("q")] == ["https://www.nasa.gov/a"]
+
+
+def test_clean_url_strips_tracking_parameters():
+    dirty = "https://e.org/a?srsltid=AfmBOor&utm_source=x&UTM_medium=y&id=7"
+    assert research.clean_url(dirty) == "https://e.org/a?id=7"
+
+
+def test_clean_url_leaves_a_clean_url_alone():
+    assert research.clean_url("https://e.org/a?id=7") == "https://e.org/a?id=7"
+
+
+def test_clean_url_drops_a_query_that_was_only_tracking():
+    assert research.clean_url("https://e.org/a?gclid=abc") == "https://e.org/a"
+
+
+def test_search_cleans_the_urls_it_returns(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-abc")
+    payload = {
+        "data": {
+            "web": [
+                {"url": "https://e.org/a?srsltid=AfmBOor", "title": "t", "description": "real"}
+            ]
+        }
+    }
+    _patch_post(monkeypatch, payload)
+
+    assert search("q")[0].url == "https://e.org/a"
+
+
+def test_gather_deduplicates_urls_that_differ_only_by_tracking(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-abc")
+    payload = {
+        "data": {
+            "web": [
+                {"url": "https://e.org/a?utm_source=one", "title": "t", "description": "x"},
+                {"url": "https://e.org/a?utm_source=two", "title": "t", "description": "x"},
+            ]
+        }
+    }
+    _patch_post(monkeypatch, payload)
+
+    assert len(gather(["q"])) == 1
