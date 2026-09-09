@@ -239,3 +239,117 @@ def test_initialize_upload_keeps_non_empty_tags(tmp_path: Path):
 
     body = fake_youtube._videos.insert_kwargs["body"]
     assert body["snippet"]["tags"] == ["a", "b"]
+
+
+class _FakeCredentialsWithScope:
+    scopes = [youtube.CAPTION_SCOPE]
+    valid = True
+
+
+class _SnippetVideos:
+    def __init__(self, snippet, recorder):
+        self._snippet = snippet
+        self._recorder = recorder
+
+    def list(self, part, id):
+        self._recorder["list"] = {"part": part, "id": id}
+        items = [{"snippet": self._snippet}] if self._snippet is not None else []
+        return _SnippetRequest({"items": items})
+
+    def update(self, part, body):
+        self._recorder["update"] = {"part": part, "body": body}
+        return _SnippetRequest({"snippet": body["snippet"]})
+
+
+class _SnippetRequest:
+    def __init__(self, response):
+        self._response = response
+
+    def execute(self):
+        return self._response
+
+
+class _SnippetYouTube:
+    def __init__(self, snippet, recorder):
+        self._videos = _SnippetVideos(snippet, recorder)
+
+    def videos(self):
+        return self._videos
+
+
+def _patch_service(monkeypatch, snippet):
+    recorder: dict = {}
+    monkeypatch.setattr(youtube, "load_credentials", lambda *a, **k: _FakeCredentialsWithScope())
+    monkeypatch.setattr(
+        youtube, "build", lambda *a, **k: _SnippetYouTube(snippet, recorder)
+    )
+    return recorder
+
+
+CURRENT_SNIPPET = {
+    "title": "Growing Plants in Space",
+    "description": "Original description.",
+    "categoryId": "27",
+    "defaultLanguage": "en",
+    "tags": ["existing"],
+}
+
+
+def test_update_video_metadata_preserves_untouched_snippet_fields(monkeypatch):
+    # videos.update replaces the whole snippet part, so anything the body omits
+    # is cleared. Changing tags must not drop the category or the language.
+    recorder = _patch_service(monkeypatch, dict(CURRENT_SNIPPET))
+
+    youtube.update_video_metadata("vid1", tags=["space", "plants"])
+
+    written = recorder["update"]["body"]["snippet"]
+    assert written["tags"] == ["space", "plants"]
+    assert written["title"] == "Growing Plants in Space"
+    assert written["description"] == "Original description."
+    assert written["categoryId"] == "27"
+    assert written["defaultLanguage"] == "en"
+    assert recorder["update"]["body"]["id"] == "vid1"
+
+
+def test_update_video_metadata_fills_a_missing_category(monkeypatch):
+    snippet = {key: value for key, value in CURRENT_SNIPPET.items() if key != "categoryId"}
+    recorder = _patch_service(monkeypatch, snippet)
+
+    youtube.update_video_metadata("vid1", title="New title")
+
+    assert recorder["update"]["body"]["snippet"]["categoryId"] == youtube.DEFAULT_CATEGORY_ID
+
+
+def test_update_video_metadata_refuses_to_blank_the_title(monkeypatch):
+    recorder = _patch_service(monkeypatch, dict(CURRENT_SNIPPET))
+
+    with pytest.raises(ValueError):
+        youtube.update_video_metadata("vid1", title="   ")
+
+    assert "update" not in recorder
+
+
+def test_update_video_metadata_rejects_an_unknown_video(monkeypatch):
+    recorder = _patch_service(monkeypatch, None)
+
+    with pytest.raises(LookupError):
+        youtube.update_video_metadata("nope", tags=["a"])
+
+    assert "update" not in recorder
+
+
+def test_update_video_metadata_refuses_an_upload_only_token(monkeypatch):
+    class UploadOnly:
+        scopes = [youtube.UPLOAD_SCOPE]
+
+    monkeypatch.setattr(youtube, "load_credentials", lambda *a, **k: UploadOnly())
+
+    with pytest.raises(youtube.YouTubeAuthError):
+        youtube.update_video_metadata("vid1", tags=["a"])
+
+
+def test_get_video_snippet_asks_only_for_the_snippet_part(monkeypatch):
+    recorder = _patch_service(monkeypatch, dict(CURRENT_SNIPPET))
+
+    assert youtube.get_video_snippet("vid1")["title"] == "Growing Plants in Space"
+    assert recorder["list"] == {"part": "snippet", "id": "vid1"}

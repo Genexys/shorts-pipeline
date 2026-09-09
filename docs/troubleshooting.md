@@ -47,3 +47,22 @@ The job still completes; the video stays in `output/`. Check the job events for 
 - `invalid_grant` while refreshing: the OAuth consent screen is still in "Testing" status (refresh tokens expire after 7 days). Publish the app ("In production") and run `youtube_auth.py` again.
 - `quotaExceeded`: the API project used its 10,000 daily units (one upload costs 1,600). Wait for the daily reset.
 - Videos uploaded through an API project that has not passed the YouTube API compliance audit are locked to `private` regardless of `YOUTUBE_PRIVACY_STATUS`.
+
+## A published video has wrong or missing metadata
+
+The pipeline sets title, description and tags when it uploads, so this means a
+bug that has since been fixed, or a generation the model answered badly.
+`Backend/fix_metadata.py` repairs one video in place:
+
+```bash
+uv run python Backend/fix_metadata.py <video_id> --print
+uv run python Backend/fix_metadata.py <video_id> --tags "space farming, botany" --append-hashtags
+```
+
+It is a hand-run tool on purpose and is never called by the pipeline: a
+`videos.update` is the one API call in this project that can degrade a live
+video. It reads the current snippet and overlays only the fields you pass,
+because `videos.update` replaces the whole `snippet` part and would otherwise
+clear everything the body omitted. It refuses to leave a video untitled.
+
+Needs the `youtube.force-ssl` scope, the same one captions already use.
