@@ -41,6 +41,14 @@ class VideoFormat:
     # Silence inserted between sections, in seconds. A documentary narrator
     # lands the end of a thought before starting the next one.
     section_pause_seconds: float
+    # Silence after the last word. Without it the file ends on the final
+    # syllable: the picture is clamped to the audio, so the video stops dead
+    # and the music's fade-out plays underneath the closing sentence instead of
+    # after it.
+    outro_seconds: float
+    # Fades on the picture itself, in seconds. 0 disables.
+    video_fade_in_seconds: float
+    video_fade_out_seconds: float
 
     @property
     def aspect_ratio(self) -> float:
@@ -96,6 +104,14 @@ SHORT = VideoFormat(
     narrate_by_section=False,
     # Shorts live on pace; a pause is dead air in a swipe feed.
     section_pause_seconds=0.0,
+    # Just enough that the last word is not clipped by the file ending, but
+    # short: a Short loops in the feed, and a long tail becomes a visible gap
+    # every time it comes round.
+    outro_seconds=0.5,
+    # No fades. The first frame has to land instantly to survive the swipe,
+    # and fading out fights the loop.
+    video_fade_in_seconds=0.0,
+    video_fade_out_seconds=0.0,
 )
 
 LONG = VideoFormat(
@@ -147,6 +163,11 @@ LONG = VideoFormat(
     # Long enough to read as a deliberate beat between ideas, short enough not
     # to sound like a gap in the file.
     section_pause_seconds=0.9,
+    # Room for the closing line to land and for the music to actually fade out
+    # rather than be cut off mid-decay.
+    outro_seconds=1.8,
+    video_fade_in_seconds=0.5,
+    video_fade_out_seconds=1.2,
 )
 
 FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}
