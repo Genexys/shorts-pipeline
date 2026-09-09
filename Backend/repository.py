@@ -12,6 +12,7 @@ from models import (
     Artifact,
     GenerationEvent,
     GenerationJob,
+    Script,
     Topic,
     VideoMetric,
 )
@@ -564,3 +565,37 @@ def worst_performing_subjects(
     stop making something that demonstrably fails.
     """
     return _ranked_subjects(session, format_name, limit, min_age_days, best=False)
+
+
+def add_script(
+    session: Session,
+    job_id: str,
+    content: str,
+    model_name: Optional[str] = None,
+    commit: bool = True,
+) -> Optional[Script]:
+    """Keeps the narration script for a finished job.
+
+    The table existed from the start and nothing ever wrote to it. Community
+    posts are the first thing that needs the script after the video is made:
+    without it a post can only restate the topic, which is the difference
+    between adding something and repeating yourself.
+    """
+    if not content or not content.strip():
+        return None
+    script = Script(job_id=job_id, content=content, model_name=model_name)
+    session.add(script)
+    if commit:
+        session.commit()
+    return script
+
+
+def get_script(session: Session, job_id: str) -> Optional[str]:
+    """The stored script for a job, newest first, or None."""
+    stmt = (
+        select(Script.content)
+        .where(Script.job_id == job_id)
+        .order_by(Script.id.desc())
+        .limit(1)
+    )
+    return session.scalars(stmt).first()

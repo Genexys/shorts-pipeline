@@ -7,6 +7,7 @@ from logstream import log
 from pipeline import PipelineCancelled, run_generation_pipeline
 from repository import (
     add_artifact,
+    add_script,
     append_event,
     claim_next_queued_job,
     get_job,
@@ -76,6 +77,9 @@ def process_next_job() -> bool:
     else:
         try:
             with SessionLocal() as session:
+                add_script(
+                    session, job_id, result.script, result.ai_model, commit=False
+                )
                 add_artifact(
                     session,
                     job_id,

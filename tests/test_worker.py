@@ -49,6 +49,8 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             thumbnail_path=None,
             narration_provider="elevenlabs",
             narration_fell_back=False,
+            script="A narration script.",
+            ai_model="llama3.1:8b",
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -106,6 +108,8 @@ def test_process_next_job_marks_failed_when_bookkeeping_raises(
             thumbnail_path=None,
             narration_provider="elevenlabs",
             narration_fell_back=False,
+            script="A narration script.",
+            ai_model="llama3.1:8b",
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -149,6 +153,8 @@ def test_process_next_job_records_upload_error_without_youtube_artifact(
             thumbnail_path=None,
             narration_provider="elevenlabs",
             narration_fell_back=False,
+            script="A narration script.",
+            ai_model="llama3.1:8b",
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -340,6 +346,8 @@ def test_process_next_job_records_a_thumbnail_when_one_was_built(
             thumbnail_path="output/thumb.jpg",
             narration_provider="elevenlabs",
             narration_fell_back=False,
+            script="A narration script.",
+            ai_model="llama3.1:8b",
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -349,3 +357,39 @@ def test_process_next_job_records_a_thumbnail_when_one_was_built(
         artifacts = {a.artifact_type: a for a in list_artifacts(session, job.id)}
         assert artifacts["thumbnail"].path == "output/thumb.jpg"
         assert artifacts["thumbnail"].metadata_json == {"format": "long"}
+
+
+def test_process_next_job_stores_the_script(monkeypatch, session_factory):
+    # Community posts read it after the fact; without it a post can only
+    # restate the topic. The table existed from the start and nothing wrote
+    # to it until now.
+    from repository import get_script
+
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "with script"})
+
+    monkeypatch.setattr(worker, "SessionLocal", session_factory)
+    _disable_cleanup(monkeypatch)
+
+    def fake_pipeline(data, is_cancelled, on_log):
+        return PipelineResult(
+            video_path="output.mp4",
+            archived_path=f"output/{job.id}.mp4",
+            title="T",
+            youtube_video_id=None,
+            upload_error=None,
+            privacy_status="private",
+            format_name="long",
+            subtitles_path="subtitles/x.srt",
+            thumbnail_path=None,
+            narration_provider="elevenlabs",
+            narration_fell_back=False,
+            script="The deep sea is mostly unexplored.",
+            ai_model="llama3.1:8b",
+        )
+
+    monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
+    assert worker.process_next_job() is True
+
+    with session_factory() as session:
+        assert get_script(session, job.id) == "The deep sea is mostly unexplored."
