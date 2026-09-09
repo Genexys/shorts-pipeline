@@ -511,3 +511,100 @@ def test_cleanup_output_ages_out_thumbnails_with_their_video(pilot, tmp_path):
     assert pilot.cleanup_output(NOON) == 2
     assert not old_video.exists() and not old_thumb.exists()
     assert fresh_thumb.exists()
+
+
+def test_refresh_metrics_stores_only_videos_with_settled_data(pilot, monkeypatch):
+    # Videos the API has not processed must not be written. A stored zero for a
+    # two-day-old upload would make every fresh video rank as a failure.
+    from analytics import VideoMetrics
+    from models import VideoMetric
+    from repository import add_artifact, create_job
+
+    with pilot.session_factory() as session:
+        for video_id in ("measured", "unprocessed"):
+            job = create_job(session, payload={"videoSubject": video_id, "format": "short"})
+            add_artifact(
+                session, job.id, "youtube_video", "u", {"videoId": video_id}, commit=False
+            )
+        session.commit()
+
+    def fake_fetch(video_ids, since):
+        assert set(video_ids) == {"measured", "unprocessed"}
+        return {
+            "measured": VideoMetrics(
+                video_id="measured", views=800, average_view_percentage=62.5,
+                average_view_duration=31.0, measured_at=NOON,
+            )
+        }
+
+    pilot.fetch_metrics = fake_fetch
+
+    assert pilot.refresh_metrics(NOON) == 1
+    with pilot.session_factory() as session:
+        stored = session.query(VideoMetric).all()
+        assert [row.video_id for row in stored] == ["measured"]
+        assert stored[0].views == 800
+
+
+def test_refresh_metrics_runs_at_most_daily(pilot):
+    calls = []
+
+    def fake_fetch(video_ids, since):
+        calls.append(since)
+        return {}
+
+    pilot.fetch_metrics = fake_fetch
+    from repository import add_artifact, create_job
+
+    with pilot.session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "s", "format": "short"})
+        add_artifact(session, job.id, "youtube_video", "u", {"videoId": "v1"})
+        session.commit()
+
+    pilot.refresh_metrics(NOON)
+    pilot.refresh_metrics(NOON + timedelta(hours=6))
+    assert len(calls) == 1
+
+    pilot.refresh_metrics(NOON + timedelta(hours=25))
+    assert len(calls) == 2
+
+
+def test_refresh_metrics_does_not_call_the_api_without_published_videos(pilot):
+    def explode(video_ids, since):
+        raise AssertionError("should not be called")
+
+    pilot.fetch_metrics = explode
+    assert pilot.refresh_metrics(NOON) == 0
+
+
+def test_refresh_metrics_batches_every_video_into_one_call(pilot):
+    # The quota is shared with uploads, which already take 4 800 units a day.
+    from repository import add_artifact, create_job
+
+    with pilot.session_factory() as session:
+        for index in range(5):
+            job = create_job(session, payload={"videoSubject": f"s{index}", "format": "short"})
+            add_artifact(
+                session, job.id, "youtube_video", "u", {"videoId": f"v{index}"}, commit=False
+            )
+        session.commit()
+
+    calls = []
+    pilot.fetch_metrics = lambda video_ids, since: calls.append(list(video_ids)) or {}
+
+    pilot.refresh_metrics(NOON)
+    assert len(calls) == 1
+    assert len(calls[0]) == 5
+
+
+def test_run_tick_survives_a_failing_metrics_refresh(pilot, monkeypatch, capsys):
+    # Metrics are a nicety; making videos is the job.
+    def explode(now):
+        raise RuntimeError("analytics is down")
+
+    monkeypatch.setattr(pilot, "refresh_metrics", explode)
+    monkeypatch.setattr(pilot, "maybe_create_job", lambda now: None)
+
+    pilot.run_tick(NOON)
+
+    assert "analytics is down" in capsys.readouterr().out

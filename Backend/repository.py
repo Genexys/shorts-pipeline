@@ -1,13 +1,23 @@
 import re
-from datetime import datetime, timezone, tzinfo
-from typing import Optional
+from datetime import datetime, timedelta, timezone, tzinfo
+from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
 from sqlalchemy import and_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import Artifact, GenerationEvent, GenerationJob, Topic
+from formats import resolve_format
+from models import (
+    Artifact,
+    GenerationEvent,
+    GenerationJob,
+    Topic,
+    VideoMetric,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to type checkers
+    from analytics import VideoMetrics
 
 
 def utcnow() -> datetime:
@@ -450,3 +460,107 @@ def count_longform_since(session: Session, since: datetime) -> int:
         and (converted := as_utc(created_at)) is not None
         and converted >= since
     )
+
+
+def list_published_videos(session: Session) -> list[tuple[str, str, str, datetime]]:
+    """(video_id, job_id, format_name, published_at) for everything uploaded.
+
+    published_at is the artifact row's creation time, i.e. when the pipeline
+    finished the upload. Close enough to the publication time for an age
+    threshold measured in days.
+    """
+    stmt = (
+        select(Artifact, GenerationJob.payload)
+        .join(GenerationJob, GenerationJob.id == Artifact.job_id)
+        .where(Artifact.artifact_type == "youtube_video")
+        .order_by(Artifact.created_at)
+    )
+    rows: list[tuple[str, str, str, datetime]] = []
+    for artifact, payload in session.execute(stmt):
+        video_id = (artifact.metadata_json or {}).get("videoId")
+        if not video_id:
+            continue
+        format_name = (payload or {}).get("format") or "short"
+        created = as_utc(artifact.created_at)
+        if created is None:
+            continue
+        rows.append((str(video_id), artifact.job_id, str(format_name), created))
+    return rows
+
+
+def upsert_metrics(
+    session: Session,
+    metrics: "VideoMetrics",
+    job_id: Optional[str],
+    format_name: str,
+    published_at: datetime,
+    commit: bool = True,
+) -> VideoMetric:
+    """Writes one video's numbers, replacing any earlier reading."""
+    record = session.get(VideoMetric, metrics.video_id)
+    if record is None:
+        record = VideoMetric(video_id=metrics.video_id, published_at=published_at)
+        session.add(record)
+    record.job_id = job_id
+    record.format_name = format_name
+    record.published_at = published_at
+    record.views = metrics.views
+    record.average_view_percentage = metrics.average_view_percentage
+    record.average_view_duration = metrics.average_view_duration
+    record.measured_at = metrics.measured_at
+    if commit:
+        session.commit()
+    return record
+
+
+def _ranked_subjects(
+    session: Session,
+    format_name: str,
+    limit: int,
+    min_age_days: int,
+    best: bool,
+    now: Optional[datetime] = None,
+) -> list[str]:
+    """Subjects of the best or worst videos of one format.
+
+    Ranked on the column the format nominates: percentage for Shorts, seconds
+    for long form. Comparing the two would be meaningless.
+
+    `min_age_days` is not optional and not caution. A video younger than that
+    has no settled data — the API reports nothing for it, which reads as zero
+    rather than as unknown — and the recommender has not finished placing it.
+    """
+    fmt = resolve_format(format_name)
+    column = getattr(VideoMetric, fmt.ranking_metric)
+    cutoff = (now or utcnow()) - timedelta(days=min_age_days)
+    stmt = (
+        select(Topic.subject)
+        .join(VideoMetric, VideoMetric.job_id == Topic.job_id)
+        .where(
+            and_(
+                VideoMetric.format_name == fmt.name,
+                VideoMetric.published_at <= cutoff,
+            )
+        )
+        .order_by(column.desc() if best else column.asc())
+        .limit(limit)
+    )
+    return [subject for subject in session.scalars(stmt)]
+
+
+def top_performing_subjects(
+    session: Session, format_name: str, limit: int, min_age_days: int
+) -> list[str]:
+    """Subjects that held attention best, within one format."""
+    return _ranked_subjects(session, format_name, limit, min_age_days, best=True)
+
+
+def worst_performing_subjects(
+    session: Session, format_name: str, limit: int, min_age_days: int
+) -> list[str]:
+    """Subjects that lost viewers earliest, within one format.
+
+    Worth as much as the winners and cheaper to act on: it costs nothing to
+    stop making something that demonstrably fails.
+    """
+    return _ranked_subjects(session, format_name, limit, min_age_days, best=False)
