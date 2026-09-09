@@ -387,3 +387,48 @@ def test_generate_script_ignores_blank_blocks(monkeypatch):
     body = "A real paragraph with enough words in it to count as the script body."
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: f"\n\n   \n\n{body}")
     assert gpt.generate_script("s", 1, "m", "en_us_001", "") == body
+
+
+# -- section continuity ------------------------------------------------------
+
+
+def test_clean_script_text_strips_a_section_preamble():
+    # Published on 2026-09-09: the narrator said 'Here's the script for section
+    # 1: "The Stench of Ignorance".' out loud before the script began.
+    raw = 'Here\'s the script for section 1: "The Stench of Ignorance".\n\nWhen we think about smell.'
+    assert gpt.clean_script_text(raw).strip() == "When we think about smell."
+
+
+def test_clean_script_text_strips_an_announcement_on_its_own_line():
+    for raw in (
+        "Here is the narration:\nReal prose begins.",
+        "Below is the script for section 2.\nReal prose begins.",
+    ):
+        assert gpt.clean_script_text(raw).strip() == "Real prose begins."
+
+
+def test_clean_script_text_does_not_eat_a_line_that_continues():
+    # The rule only fires when the announcement is the whole line. An inline
+    # one survives rather than risk swallowing narration with it.
+    raw = "Below is the script for this section. Real prose begins."
+    assert "Real prose begins." in gpt.clean_script_text(raw)
+
+
+def test_clean_script_text_leaves_real_prose_alone():
+    prose = "Here is what surprises people about the deep sea: it is not empty."
+    # No 'script'/'section' keyword, so the preamble rule must not fire.
+    assert gpt.clean_script_text(prose).strip() == prose
+
+
+def test_figures_used_collects_numbers_across_sections():
+    used = gpt.figures_used(["Detected in 2014.", "About 400 receptors."])
+    assert used == {"2014", "400"}
+
+
+def test_figures_used_ignores_single_digits():
+    # A bare "1" in "1 trillion" is noise; the memorable figure is the word.
+    assert gpt.figures_used(["one of 5 senses", "about 400 receptors"]) == {"400"}
+
+
+def test_figures_used_is_empty_for_no_sections():
+    assert gpt.figures_used([]) == set()
