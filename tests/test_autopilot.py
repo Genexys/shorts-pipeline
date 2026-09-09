@@ -489,3 +489,25 @@ def test_success_message_says_nothing_when_narration_went_as_planned(
     pilot.finish_completed_topics()
 
     assert "⚠️" not in notifications[-1]
+
+
+def test_cleanup_output_ages_out_thumbnails_with_their_video(pilot, tmp_path):
+    # Thumbnails are archived beside the video now, so retention has to cover
+    # them; otherwise output/ grows a JPEG per long video forever.
+    import os
+
+    output = tmp_path / "output"
+    output.mkdir()
+    old_video = output / "old.mp4"
+    old_thumb = output / "old.jpg"
+    fresh_thumb = output / "fresh.jpg"
+    for path in (old_video, old_thumb, fresh_thumb):
+        path.write_bytes(b"x")
+
+    eight_days_ago = (NOON - timedelta(days=8)).timestamp()
+    os.utime(old_video, (eight_days_ago, eight_days_ago))
+    os.utime(old_thumb, (eight_days_ago, eight_days_ago))
+
+    assert pilot.cleanup_output(NOON) == 2
+    assert not old_video.exists() and not old_thumb.exists()
+    assert fresh_thumb.exists()

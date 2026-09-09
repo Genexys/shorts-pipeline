@@ -59,7 +59,7 @@ class PipelineResult:
     privacy_status: str
     format_name: str
     subtitles_path: str
-    thumbnail_path: Optional[str]
+    thumbnail_path: Optional[str]  # "output/<job_id>.jpg" relative to PROJECT_ROOT
     narration_provider: str
     narration_fell_back: bool
 
@@ -263,10 +263,10 @@ def run_generation_pipeline(
         ) from err
 
     title, description, keywords = generate_metadata(
-        data["videoSubject"], script, ai_model, fmt.always_hashtags
+        data["videoSubject"], script, ai_model, fmt.always_hashtags, fmt.metadata_label
     )
 
-    emit("[-] Metadata for YouTube upload:", "info")
+    emit("[+] Metadata for YouTube upload:", "info")
     emit("   Title:", "info")
     emit(f"   {title}", "info")
     emit("   Description:", "info")
@@ -335,11 +335,15 @@ def run_generation_pipeline(
 
     thumbnail_path: Optional[str] = None
     if fmt.build_thumbnail:
+        # Archived next to the video, not left in temp/: the worker wipes temp/
+        # at the start of the next job, which would leave the artifact row
+        # pointing at a deleted file within hours of the upload.
+        archived_thumbnail = f"{OUTPUT_DIR.name}/{job_id}.jpg"
         try:
-            thumbnail_path = build_thumbnail(
+            build_thumbnail(
                 str(PROJECT_ROOT / archived_path),
                 title,
-                str(TEMP_DIR / f"{job_id}.jpg"),
+                str(PROJECT_ROOT / archived_thumbnail),
                 duration=probe_duration(str(PROJECT_ROOT / archived_path)),
                 work_dir=TEMP_DIR / "thumbnail",
                 ffmpeg=os.getenv("FFMPEG_BINARY", "").strip() or "ffmpeg",
@@ -347,6 +351,8 @@ def run_generation_pipeline(
         except Exception as err:
             # A missing thumbnail costs clicks; a failed job costs the video.
             emit(f"[!] Could not build a thumbnail ({err}).", "warning")
+        else:
+            thumbnail_path = archived_thumbnail
 
     privacy_status, privacy_warning = resolve_privacy_status(
         os.getenv("YOUTUBE_PRIVACY_STATUS")
@@ -373,7 +379,9 @@ def run_generation_pipeline(
             emit(f"[+] Uploaded: https://youtu.be/{youtube_video_id}", "success")
             if thumbnail_path:
                 try:
-                    upload_thumbnail(youtube_video_id, thumbnail_path)
+                    upload_thumbnail(
+                        youtube_video_id, str(PROJECT_ROOT / thumbnail_path)
+                    )
                     emit("[+] Thumbnail set.", "success")
                 except Exception as err:
                     # Needs a phone-verified channel; the video is already live.

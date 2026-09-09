@@ -164,7 +164,9 @@ def test_generate_metadata_falls_back_when_response_is_not_json(monkeypatch):
     assert title == "Ocean facts"
     assert description.startswith("Ocean facts")
     assert "#Shorts" in description
-    assert tags == []
+    # Derived from the subject rather than left empty: an unparseable answer
+    # used to publish a video with no tags at all.
+    assert tags == ["ocean", "facts"]
 
 
 # -- hashtags ---------------------------------------------------------------
@@ -298,3 +300,75 @@ def test_metadata_prompt_asks_for_spaced_tags(monkeypatch):
     )
     gpt.generate_metadata("subject", "script", "model")
     assert "No hyphens" in prompts[0]
+
+
+def test_keywords_from_subject_drops_question_scaffolding():
+    assert gpt.keywords_from_subject("Can plants grow in space without light?") == [
+        "plants",
+        "grow",
+        "space",
+        "light",
+    ]
+
+
+def test_keywords_from_subject_deduplicates_and_caps():
+    keywords = gpt.keywords_from_subject(
+        "Space space rockets engines fuel orbit gravity", limit=3
+    )
+    assert keywords == ["space", "rockets", "engines"]
+
+
+def test_keywords_from_subject_survives_an_empty_subject():
+    assert gpt.keywords_from_subject("") == []
+
+
+def test_build_hashtags_falls_back_past_an_overlong_subject():
+    # The real 2026-09-09 failure: "#CanPlantsGrowInSpaceWithoutLight" is 33
+    # characters, to_hashtag returns "", and long form forces no hashtags, so
+    # the video published with none at all.
+    subject = "Can plants grow in space without light?"
+    assert gpt.to_hashtag(subject) == ""
+    hashtags = gpt.build_hashtags([], subject, ())
+    assert hashtags == ["#Plants", "#Grow", "#Space"]
+
+
+def test_build_hashtags_prefers_the_whole_subject_when_it_fits():
+    assert gpt.build_hashtags([], "Why do we hiccup?", ())[0] == "#WhyDoWeHiccup"
+
+
+def test_generate_metadata_derives_tags_when_the_model_returns_none(monkeypatch):
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: '{"title":"T","description":"D","tags":[]}',
+    )
+    _t, description, tags = gpt.generate_metadata(
+        "Can plants grow in space without light?", "script", "model", ()
+    )
+    assert tags == ["plants", "grow", "space", "light"]
+    assert "#Plants" in description
+
+
+def test_generate_metadata_derives_tags_when_the_model_returns_junk(monkeypatch):
+    monkeypatch.setattr(
+        gpt, "generate_response", lambda p, m: "not json at all"
+    )
+    _t, _d, tags = gpt.generate_metadata(
+        "How do octopuses taste with their arms?", "script", "model", ()
+    )
+    assert tags == ["octopuses", "taste", "arms"]
+
+
+def test_generate_metadata_prompt_names_the_actual_format(monkeypatch):
+    from formats import LONG, SHORT
+
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or '{"title":"T","description":"D","tags":["a"]}',
+    )
+    gpt.generate_metadata("s", "script", "model", LONG.always_hashtags, LONG.metadata_label)
+    assert "Shorts" not in prompts[0]
+    assert "landscape" in prompts[0]
+
+    gpt.generate_metadata("s", "script", "model", SHORT.always_hashtags, SHORT.metadata_label)
+    assert "Shorts" in prompts[1]

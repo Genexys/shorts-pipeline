@@ -405,6 +405,19 @@ HASHTAG_MAX_COUNT = 5
 HASHTAG_MAX_CHARS = 30
 # Kept for callers that do not name a format; the format overrides it.
 ALWAYS_HASHTAGS = ("#Shorts",)
+# Question scaffolding, not subject matter. Autopilot topics are whole
+# questions ("Can plants grow in space without light?"), and the words a viewer
+# would actually search for are the ones left after these come out.
+SUBJECT_STOPWORDS = frozenset(
+    """a an and are as at be been but by can could did do does for from get
+    had has have how in into is it its like make more new not of on or our so
+    than that the their them then there these they this to up was we were what
+    when where which who why will with without you your""".split()
+)
+SUBJECT_KEYWORD_COUNT = 5
+# YouTube renders the first three hashtags above the title, so three is what a
+# subject-derived fallback can actually show.
+SUBJECT_HASHTAG_COUNT = 3
 MAX_JSON_CANDIDATES = 32
 
 # A leading fragment this short is a title, not a paragraph. The prompt forbids
@@ -552,6 +565,31 @@ def validate_metadata(
     return title, description, tags
 
 
+def keywords_from_subject(
+    subject: str, limit: int = SUBJECT_KEYWORD_COUNT
+) -> List[str]:
+    """Content words of a topic, in order, for when the model returns no tags.
+
+    Pure and deterministic: this is the floor under an Ollama answer that came
+    back without usable tags, and a video with four topical keywords is worth
+    considerably more than one with none.
+    """
+    words = re.findall(r"[A-Za-z0-9]+", subject or "")
+    keywords: List[str] = []
+    seen: set[str] = set()
+    for word in words:
+        lowered = word.lower()
+        if lowered in SUBJECT_STOPWORDS or len(word) < 3 or lowered in seen:
+            continue
+        if len(word) > TAG_MAX_CHARS:
+            continue
+        keywords.append(lowered)
+        seen.add(lowered)
+        if len(keywords) >= limit:
+            break
+    return keywords
+
+
 def to_hashtag(text: str) -> str:
     """Turns a tag into a hashtag, or "" when nothing usable is left.
 
@@ -587,9 +625,27 @@ def build_hashtags(
     # Tags can all be unusable (empty, punctuation-only, too long); fall back to
     # the subject so the video still carries something topical.
     if len(hashtags) == len(always):
+        # The whole subject reads best and stays the first choice. But autopilot
+        # topics are 4-12 word questions, whose CamelCase form usually blows past
+        # HASHTAG_MAX_CHARS, and to_hashtag then returns "" — a silent nothing
+        # that left long-form videos with no hashtags at all. Content words are
+        # the fallback under the fallback.
         from_subject = to_hashtag(subject)
-        if from_subject and from_subject.lower() not in seen:
-            hashtags.append(from_subject)
+        candidates = (
+            [from_subject]
+            if from_subject
+            else [
+                to_hashtag(word)
+                for word in keywords_from_subject(subject, SUBJECT_HASHTAG_COUNT)
+            ]
+        )
+        for candidate in candidates:
+            if not candidate or candidate.lower() in seen:
+                continue
+            hashtags.append(candidate)
+            seen.add(candidate.lower())
+            if len(hashtags) >= HASHTAG_MAX_COUNT:
+                break
 
     return hashtags
 
@@ -611,6 +667,7 @@ def generate_metadata(
     script: str,
     ai_model: str,
     always_hashtags: tuple = ALWAYS_HASHTAGS,
+    format_label: str = "short vertical YouTube video (YouTube Shorts)",
 ) -> Tuple[str, str, List[str]]:
     """
     Generate YouTube title, description and tags with a single JSON request.
@@ -619,7 +676,7 @@ def generate_metadata(
         Tuple[str, str, List[str]]: validated (title, description, tags).
     """
     prompt = f"""
-    You write metadata for a short vertical YouTube video (YouTube Shorts).
+    You write metadata for a {format_label}.
 
     Subject: {video_subject}
 
@@ -646,6 +703,15 @@ def generate_metadata(
         log(response[:500], "info")
 
     title, description, tags = validate_metadata(raw, video_subject)
+    if not tags:
+        # snippet.tags goes up empty otherwise. Shorts hid this behind the
+        # "#Shorts" floor in the description; long form, which forces no
+        # hashtags, published with neither tags nor hashtags.
+        tags = keywords_from_subject(video_subject)
+        log(
+            f"[!] Model returned no usable tags; derived {len(tags)} from the subject.",
+            "warning",
+        )
     hashtags = build_hashtags(tags, video_subject, always_hashtags)
     description = append_hashtags(description, hashtags)
     log(

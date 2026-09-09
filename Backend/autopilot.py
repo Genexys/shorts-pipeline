@@ -54,6 +54,7 @@ TOPIC_MIN_WORDS = 4
 TOPIC_MAX_WORDS = 12
 ERROR_TEXT_LIMIT = 500
 STALL_WARNING_SECONDS = 3 * 3600
+OUTPUT_RETENTION_PATTERNS = ("*.mp4", "*.jpg")
 
 
 def build_payload(
@@ -321,15 +322,17 @@ class Autopilot:
             return 0
         cutoff = now.timestamp() - self.config.output_retention_days * 86400
         deleted = 0
-        for path in self.output_dir.glob("*.mp4"):
-            try:
-                if path.is_file() and path.stat().st_mtime < cutoff:
-                    path.unlink()
-                    deleted += 1
-            except OSError as err:
-                log(f"[-] Could not delete {path}: {err}", "warning")
+        # Thumbnails are archived beside their video, so they age out with it.
+        for pattern in OUTPUT_RETENTION_PATTERNS:
+            for path in self.output_dir.glob(pattern):
+                try:
+                    if path.is_file() and path.stat().st_mtime < cutoff:
+                        path.unlink()
+                        deleted += 1
+                except OSError as err:
+                    log(f"[-] Could not delete {path}: {err}", "warning")
         if deleted:
-            log(f"[+] Autopilot deleted {deleted} old video(s) from {self.output_dir}", "info")
+            log(f"[+] Autopilot deleted {deleted} old file(s) from {self.output_dir}", "info")
         return deleted
 
 
