@@ -75,6 +75,9 @@ VOICE_LANGUAGE_MAP = {
     "de": "de",
 }
 DEFAULT_LANGUAGE = "en"
+# 28 = Science & Technology, matching the pipeline's own default. Only used to
+# fill a categoryId that videos.update requires but a list response omitted.
+DEFAULT_CATEGORY_ID = "28"
 
 
 def resolve_language(voice: Optional[str]) -> str:
@@ -319,3 +322,117 @@ def upload_captions(
     caption_id = str(response["id"])
     log(f"[+] Caption track {caption_id} added to {video_id}", "success")
     return caption_id
+
+
+def _service_for(operation: str) -> Resource:
+    """Authenticated client for a call that needs more than upload-only access.
+
+    videos.list and videos.update both sit behind CAPTION_SCOPE
+    (youtube.force-ssl), the same grant captions.insert already uses, so a
+    token minted for captions needs no re-authorisation.
+    """
+    credentials = load_credentials()
+    if credentials is None:
+        raise YouTubeAuthError("No valid YouTube credentials.")
+    if not has_scope(credentials, CAPTION_SCOPE):
+        raise YouTubeAuthError(
+            f"The saved token was granted upload-only access, which does not "
+            f"cover {operation}. Re-run Backend/youtube_auth.py to mint a "
+            f"token with the {CAPTION_SCOPE} scope."
+        )
+    return build(
+        YOUTUBE_API_SERVICE_NAME,
+        YOUTUBE_API_VERSION,
+        credentials=credentials,
+        cache_discovery=False,
+    )
+
+
+def get_video_snippet(video_id: str) -> dict:
+    """The current snippet of one video.
+
+    Read-only, and the necessary first half of any metadata edit: see
+    update_video_metadata for why an update cannot be a blind write.
+
+    Raises:
+        YouTubeAuthError: If the saved token lacks the wider scope.
+        LookupError: If the id matches nothing this account can see.
+    """
+    youtube = _service_for("videos.list")
+    response = youtube.videos().list(part="snippet", id=video_id).execute()
+    items = response.get("items") or []
+    if not items:
+        raise LookupError(
+            f"No video {video_id} visible to this account. Check the id, and "
+            f"that the token belongs to the channel that owns it."
+        )
+    return items[0].get("snippet") or {}
+
+
+def update_video_metadata(
+    video_id: str,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+) -> dict:
+    """Edits the metadata of a video that is already published.
+
+    Repair only. The pipeline sets metadata at insert time; this exists for
+    videos published before a metadata bug was fixed.
+
+    videos.update REPLACES the whole snippet part rather than patching it:
+    every field absent from the body is cleared, so an update built from just
+    the fields a caller wants to change would silently wipe the title,
+    category and language of the video it was meant to improve. This reads the
+    current snippet first and overlays only what was passed.
+
+    Args:
+        video_id (str): The video to edit.
+        title (Optional[str]): New title, or None to keep the current one.
+        description (Optional[str]): New description, or None to keep it.
+        tags (Optional[List[str]]): New tag list, or None to keep it.
+
+    Returns:
+        dict: The snippet as written.
+
+    Raises:
+        YouTubeAuthError: If the saved token lacks the wider scope.
+        LookupError: If the id matches nothing this account can see.
+        ValueError: If the result would have no title, which YouTube rejects
+            and which would be an unrecoverable edit to make by accident.
+    """
+    snippet = dict(get_video_snippet(video_id))
+    before = {
+        "title": snippet.get("title"),
+        "tags": list(snippet.get("tags") or []),
+        "description_chars": len(snippet.get("description") or ""),
+    }
+
+    if title is not None:
+        snippet["title"] = title
+    if description is not None:
+        snippet["description"] = description
+    if tags is not None:
+        snippet["tags"] = list(tags)
+
+    if not (snippet.get("title") or "").strip():
+        raise ValueError(f"Refusing to leave video {video_id} with an empty title.")
+    # categoryId is required by videos.update and is not always present in a
+    # list response; falling back keeps the call from being rejected.
+    snippet.setdefault("categoryId", DEFAULT_CATEGORY_ID)
+
+    youtube = _service_for("videos.update")
+    response = (
+        youtube.videos()
+        .update(part="snippet", body={"id": video_id, "snippet": snippet})
+        .execute()
+    )
+    written = response.get("snippet") or snippet
+    log(
+        f"[+] Updated {video_id}: title '{before['title']}' -> "
+        f"'{written.get('title')}', {len(before['tags'])} -> "
+        f"{len(written.get('tags') or [])} tags, description "
+        f"{before['description_chars']} -> {len(written.get('description') or '')} chars",
+        "success",
+    )
+    return written
