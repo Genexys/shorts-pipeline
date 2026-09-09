@@ -467,3 +467,75 @@ def test_generate_response_falls_back_for_an_old_client(monkeypatch):
 
     assert gpt.generate_response("hi", "llama3.1:8b") == "an answer"
     assert "think" not in calls[0]
+
+
+# -- script length -----------------------------------------------------------
+
+
+TWO_PARAGRAPHS = (
+    "First paragraph with plenty of words in it to carry the point along nicely here. "
+    * 2
+    + "\n\n"
+    + "Second paragraph adding the rest of the words the model was asked for today. " * 2
+)
+
+
+def test_a_word_target_keeps_every_paragraph(monkeypatch):
+    # The real failure: the model wrote 167 words in two paragraphs, obeying the
+    # target, and paragraphs[:1] threw the second away leaving 89.
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: TWO_PARAGRAPHS)
+
+    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=30)
+
+    assert "Second paragraph" in script
+
+
+def test_without_a_word_target_the_paragraph_count_still_applies(monkeypatch):
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: TWO_PARAGRAPHS)
+
+    script = gpt.generate_script("s", 1, "model", "en_us_001", "")
+
+    assert "Second paragraph" not in script
+
+
+def test_the_prompt_never_asks_for_words_and_paragraphs_at_once(monkeypatch):
+    # Rival instructions are what caused the truncation in the first place.
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response", lambda p, m: prompts.append(p) or TWO_PARAGRAPHS
+    )
+
+    # A target the sample script clears, so the retry does not add a prompt.
+    gpt.generate_script("s", 3, "model", "en_us_001", "", target_words=30)
+    assert "Number of paragraphs" not in prompts[0]
+    assert "about 30 words" in prompts[0]
+
+    gpt.generate_script("s", 3, "model", "en_us_001", "")
+    assert "Number of paragraphs: 3" in prompts[1]
+
+
+def test_a_short_script_is_retried_once(monkeypatch):
+    drafts = ["Too short entirely.", TWO_PARAGRAPHS]
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: drafts.pop(0))
+
+    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=30)
+
+    assert "Second paragraph" in script
+    assert drafts == []
+
+
+def test_the_retry_happens_only_once(monkeypatch):
+    calls = {"n": 0}
+
+    def always_short(prompt, model):
+        calls["n"] += 1
+        return "Far too short."
+
+    monkeypatch.setattr(gpt, "generate_response", always_short)
+
+    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=120)
+
+    # Two attempts, and the short draft is still returned rather than nothing:
+    # a thin video beats a failed job.
+    assert calls["n"] == 2
+    assert script == "Far too short."

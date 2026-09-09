@@ -263,6 +263,7 @@ def generate_script(
     angle: Optional[str] = None,
     target_words: Optional[int] = None,
     research: str = "",
+    _retry: bool = True,
 ) -> Optional[str]:
     """
     Generate a script for a video, depending on the subject of the video, the number of paragraphs, and the AI model.
@@ -319,18 +320,22 @@ def generate_script(
     # "One paragraph" is whatever the model feels like: measured across real
     # runs it produced anything from 11 to 33 seconds of speech. A word count
     # is the only instruction that actually pins the length down.
+    # A word count and a paragraph count are rival instructions, and asking for
+    # both is how a 167-word script became an 89-word one: the model obeyed the
+    # words, wrote two paragraphs, and the paragraph cap threw the second away.
+    # Where a word target exists it is the only length instruction given.
     if target_words:
         floor = int(target_words * SCRIPT_WORD_FLOOR_RATIO)
         length = (
             f"    Length: about {target_words} words, and no fewer than {floor}.\n"
+            f"    Use as many paragraphs as that takes.\n"
         )
     else:
-        length = ""
+        length = f"    Number of paragraphs: {paragraph_number}\n"
 
     prompt += f"""
     
     Subject: {video_subject}
-    Number of paragraphs: {paragraph_number}
 {length}    Language: {voice}
 {research_rules(research)}
     """
@@ -356,14 +361,41 @@ def generate_script(
             dropped = paragraphs.pop(0).strip()
             log(f"[*] Dropped a title-like opening line: {dropped[:60]}", "warning")
 
-        # Select the specified number of paragraphs
-        selected_paragraphs = paragraphs[:paragraph_number]
+        # Keep everything when a word target set the length; the paragraph
+        # count is only an instrument when no target exists.
+        selected_paragraphs = paragraphs if target_words else paragraphs[:paragraph_number]
 
         # Join the selected paragraphs into a single string
         final_script = "\n\n".join(selected_paragraphs)
 
-        # Print to console the number of paragraphs used
         log(f"Number of paragraphs used: {len(selected_paragraphs)}", "success")
+
+        # The floor was only ever a sentence in the prompt; nothing measured
+        # whether it was met, so a short script shipped silently. One retry:
+        # the second draft is usually closer, and looping on an uncooperative
+        # model would cost more than the words are worth.
+        if target_words:
+            written = len(final_script.split())
+            floor = int(target_words * SCRIPT_WORD_FLOOR_RATIO)
+            if written < floor:
+                log(
+                    f"[!] Script came back {written} words, under the {floor} floor "
+                    f"for a {target_words}-word target."
+                    + (" Retrying once." if _retry else ""),
+                    "warning",
+                )
+                if _retry:
+                    return generate_script(
+                        video_subject,
+                        paragraph_number,
+                        ai_model,
+                        voice,
+                        customPrompt,
+                        angle=angle,
+                        target_words=target_words,
+                        research=research,
+                        _retry=False,
+                    ) or final_script
 
         return final_script
     else:
