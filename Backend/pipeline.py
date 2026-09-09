@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from moviepy import AudioFileClip, concatenate_audioclips
 
+import research
 from formats import LONG, resolve_format
 from gpt import (
     generate_long_script,
@@ -108,6 +109,19 @@ def run_generation_pipeline(
         emit(f'[!] No voice was selected. Using "{voice}"', "warning")
     voice_prefix = voice[:2]
 
+    sources = []
+    if research.is_configured():
+        sources = research.gather(
+            [data["videoSubject"]], limit=fmt.research_results
+        )
+        if sources:
+            emit(f"[+] Research: {len(sources)} source(s) found.", "info")
+        else:
+            # Said out loud: without it the script falls back to writing with
+            # no specifics at all, and the difference is invisible otherwise.
+            emit("[!] Research returned nothing. Writing without specifics.", "warning")
+    brief = research.format_brief(sources)
+
     if fmt is LONG:
         script = generate_long_script(
             data["videoSubject"],
@@ -116,6 +130,7 @@ def run_generation_pipeline(
             voice,
             data["customPrompt"],
             section_count=fmt.section_count,
+            research=brief,
         )
     else:
         script = generate_script(
@@ -125,6 +140,7 @@ def run_generation_pipeline(
             voice,
             data["customPrompt"],
             target_words=target_words or fmt.target_words,
+            research=brief,
         )
 
     if not script:
@@ -267,6 +283,8 @@ def run_generation_pipeline(
     title, description, keywords = generate_metadata(
         data["videoSubject"], script, ai_model, fmt.always_hashtags, fmt.metadata_label
     )
+
+    description = research.append_sources(description, sources)
 
     emit("[+] Metadata for YouTube upload:", "info")
     emit("   Title:", "info")

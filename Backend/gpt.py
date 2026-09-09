@@ -224,6 +224,7 @@ def generate_script(
     customPrompt: str,
     angle: Optional[str] = None,
     target_words: Optional[int] = None,
+    research: str = "",
 ) -> Optional[str]:
     """
     Generate a script for a video, depending on the subject of the video, the number of paragraphs, and the AI model.
@@ -293,7 +294,7 @@ def generate_script(
     Subject: {video_subject}
     Number of paragraphs: {paragraph_number}
 {length}    Language: {voice}
-
+{research_rules(research)}
     """
 
     # Generate script
@@ -415,6 +416,33 @@ SUBJECT_STOPWORDS = frozenset(
     when where which who why will with without you your""".split()
 )
 SUBJECT_KEYWORD_COUNT = 5
+
+# The instruction that makes concrete detail safe. Specifics are what make a
+# script worth trusting — a real figure a viewer can check beats "some research
+# suggests" — but an 8B model asked for one with no source invents it, and an
+# invented citation is worse than no citation: it looks verifiable and is not.
+RESEARCH_RULES = """
+    Use the numbered research notes below as your only source of specifics.
+    Concrete detail is wanted: figures, dates, place names and named studies
+    make the script worth trusting, so use the ones the notes give you.
+    You MUST NOT state any number, date, percentage, institution, researcher
+    or study that does not appear in the notes. Where the notes do not support
+    a specific, write the general statement instead. Do not cite the notes by
+    number, and do not mention that notes exist.
+"""
+NO_RESEARCH_RULES = """
+    You have no sources, so you must not invent the appearance of one. Do not
+    state any specific figure, percentage, date, named study, named researcher
+    or named institution. Write what is generally established, without
+    fabricated precision.
+"""
+
+
+def research_rules(brief: str) -> str:
+    """The specifics rule that matches what the writer actually has."""
+    if brief and brief.strip():
+        return f"{RESEARCH_RULES}\n    Research notes:\n{brief}\n"
+    return NO_RESEARCH_RULES
 # YouTube renders the first three hashtags above the title, so three is what a
 # subject-derived fallback can actually show.
 SUBJECT_HASHTAG_COUNT = 3
@@ -820,6 +848,7 @@ def generate_long_script(
     custom_prompt: str,
     section_count: int = 6,
     angle: Optional[str] = None,
+    research: str = "",
 ) -> Optional[str]:
     """
     Writes a long script one section at a time.
@@ -836,6 +865,8 @@ def generate_long_script(
         voice (str): Voice id, used to name the language.
         custom_prompt (str): Extra instruction applied to every section.
         section_count (int): How many sections to plan.
+        research (str): Numbered source notes; every section sees the same
+            brief, so a figure used in one section is available to the next.
 
     Returns:
         Optional[str]: The joined script, or None if nothing usable came back.
@@ -870,6 +901,7 @@ def generate_long_script(
         - Plain spoken prose. No heading, no markdown, no stage directions.
         - Do not mention sections, the outline, or this prompt.
         {custom_prompt}
+        {research_rules(research)}
         """
 
         try:

@@ -1,0 +1,140 @@
+"""Web research that grounds a script in sources it can cite.
+
+The point is not caution, it is credibility. A script that says "a 2019
+Stanford study found 47%" is worth more than one that says "some research
+suggests" — but only if the number is real and a viewer who checks finds it.
+So the specifics come from search results, and the sources go in the video
+description for anyone who wants to verify them.
+
+Never fatal. Research is an improvement to a video, not a precondition for
+one: no key, a timeout, a bad response and a rate limit all produce an empty
+brief and a script written the old way.
+"""
+
+import os
+from dataclasses import dataclass
+from typing import List, Optional, Sequence
+
+import requests
+
+from logstream import log
+
+SEARCH_URL = "https://api.firecrawl.dev/v2/search"
+REQUEST_TIMEOUT_SECONDS = 30
+
+# Search bills 2 credits per 10 results, and the free tier is 1000 a month. At
+# three videos a day one query each, that is under 200 credits a month.
+DEFAULT_RESULT_COUNT = 8
+SNIPPET_MAX_CHARS = 500
+BRIEF_MAX_SOURCES = 12
+# Sources are listed in the description, which YouTube caps; and a wall of
+# links reads as spam whatever the cap allows.
+DESCRIPTION_MAX_SOURCES = 5
+
+
+@dataclass(frozen=True)
+class Source:
+    """One search result, reduced to what a script can be written from."""
+
+    title: str
+    url: str
+    snippet: str
+
+
+def api_key() -> str:
+    return os.getenv("FIRECRAWL_API_KEY", "").strip()
+
+
+def is_configured() -> bool:
+    return bool(api_key())
+
+
+def _to_source(item: object) -> Optional[Source]:
+    if not isinstance(item, dict):
+        return None
+    url = item.get("url")
+    if not isinstance(url, str) or not url.startswith("http"):
+        return None
+    title = item.get("title") if isinstance(item.get("title"), str) else ""
+    # `description` is what a plain search returns; `markdown` appears only when
+    # scraping was requested, and is far longer than a brief should carry.
+    body = item.get("description") or item.get("markdown") or ""
+    snippet = " ".join(str(body).split())[:SNIPPET_MAX_CHARS]
+    if not snippet:
+        return None
+    return Source(title=" ".join(title.split()), url=url, snippet=snippet)
+
+
+def search(query: str, limit: int = DEFAULT_RESULT_COUNT) -> List[Source]:
+    """One Firecrawl search. Returns [] on any failure, and says why."""
+    key = api_key()
+    if not key:
+        return []
+    try:
+        response = requests.post(
+            SEARCH_URL,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={"query": query, "limit": limit},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as err:
+        # Deliberately broad: a network error, a rate limit, an exhausted
+        # credit balance and malformed JSON all mean the same thing here.
+        log(f"[!] Research search failed ({err}). Writing without sources.", "warning")
+        return []
+
+    web = (payload.get("data") or {}).get("web") if isinstance(payload, dict) else None
+    if not isinstance(web, list):
+        return []
+    sources = [source for source in (_to_source(item) for item in web) if source]
+    return sources
+
+
+def gather(queries: Sequence[str], limit: int = DEFAULT_RESULT_COUNT) -> List[Source]:
+    """Searches each query and merges the results, first occurrence winning."""
+    collected: List[Source] = []
+    seen: set = set()
+    for query in queries:
+        if not query or not query.strip():
+            continue
+        for source in search(query.strip(), limit):
+            if source.url in seen:
+                continue
+            collected.append(source)
+            seen.add(source.url)
+            if len(collected) >= BRIEF_MAX_SOURCES:
+                return collected
+    return collected
+
+
+def format_brief(sources: Sequence[Source]) -> str:
+    """The sources as prompt text. Empty string when there are none."""
+    if not sources:
+        return ""
+    blocks = [
+        f"[{index}] {source.title or source.url}\n{source.snippet}"
+        for index, source in enumerate(sources, 1)
+    ]
+    return "\n\n".join(blocks)
+
+
+def source_lines(sources: Sequence[Source]) -> List[str]:
+    """Lines for the video description, so a viewer can check the claims."""
+    lines = []
+    for source in sources[:DESCRIPTION_MAX_SOURCES]:
+        title = source.title or source.url
+        lines.append(f"{title} — {source.url}")
+    return lines
+
+
+def append_sources(description: str, sources: Sequence[Source]) -> str:
+    """Puts the sources under the description, after the hashtags."""
+    lines = source_lines(sources)
+    if not lines:
+        return description
+    return "\n".join([description, "", "Sources:", *lines])
