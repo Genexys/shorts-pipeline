@@ -28,6 +28,8 @@ class VideoFormat:
     elevenlabs_model: str
     build_thumbnail: bool
     always_hashtags: tuple
+    # How to describe this format to the model writing YouTube metadata.
+    metadata_label: str
 
     @property
     def aspect_ratio(self) -> float:
@@ -72,6 +74,7 @@ SHORT = VideoFormat(
     # 16:9 still does not represent them anyway.
     build_thumbnail=False,
     always_hashtags=("#Shorts",),
+    metadata_label="short vertical YouTube video (YouTube Shorts)",
 )
 
 LONG = VideoFormat(
@@ -109,6 +112,9 @@ LONG = VideoFormat(
     # #Shorts on a three-minute landscape video misleads both the viewer and
     # the platform about what it is.
     always_hashtags=(),
+    # Calling this a Short in the metadata prompt was costing tag quality: the
+    # model wrote for a format the video is not.
+    metadata_label="five-minute landscape YouTube video",
 )
 
 FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}

@@ -337,7 +337,7 @@ def test_process_next_job_records_a_thumbnail_when_one_was_built(
             privacy_status="private",
             format_name="long",
             subtitles_path="subtitles/x.srt",
-            thumbnail_path="temp/thumb.jpg",
+            thumbnail_path="output/thumb.jpg",
             narration_provider="elevenlabs",
             narration_fell_back=False,
         )
@@ -347,5 +347,5 @@ def test_process_next_job_records_a_thumbnail_when_one_was_built(
 
     with session_factory() as session:
         artifacts = {a.artifact_type: a for a in list_artifacts(session, job.id)}
-        assert artifacts["thumbnail"].path == "temp/thumb.jpg"
+        assert artifacts["thumbnail"].path == "output/thumb.jpg"
         assert artifacts["thumbnail"].metadata_json == {"format": "long"}
