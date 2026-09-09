@@ -15,6 +15,7 @@ from typing import Callable, Optional
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
+from analytics import fetch_metrics
 from autopilot_config import (
     AutopilotConfig,
     ConfigError,
@@ -31,6 +32,8 @@ from repository import (
     add_topic,
     as_utc,
     count_longform_since,
+    list_published_videos,
+    upsert_metrics,
     count_topics_used_today,
     get_job,
     has_active_jobs,
@@ -55,6 +58,12 @@ TOPIC_MAX_WORDS = 12
 ERROR_TEXT_LIMIT = 500
 STALL_WARNING_SECONDS = 3 * 3600
 OUTPUT_RETENTION_PATTERNS = ("*.mp4", "*.jpg")
+# Daily is plenty: the numbers move slowly, the API runs about three days
+# behind anyway, and its quota is shared with uploads.
+METRICS_REFRESH_INTERVAL_SECONDS = 24 * 3600
+# How far back to ask. Comfortably longer than the channel's history, and the
+# window costs nothing extra — one query covers every video in it.
+METRICS_LOOKBACK_DAYS = 90
 
 
 def build_payload(
@@ -122,15 +131,18 @@ class Autopilot:
         notify: Callable[[str], bool] = send_telegram,
         generate: Callable[[str, str], str] = generate_response,
         output_dir: Path = OUTPUT_DIR,
+        fetch_metrics: Callable = fetch_metrics,
     ) -> None:
         self.config = config
         self.session_factory = session_factory
         self.notify = notify
         self.generate = generate
         self.output_dir = Path(output_dir)
+        self.fetch_metrics = fetch_metrics
         self.failed_topic_ticks = 0
         self.topic_failure_notified = False
         self.last_cleanup_at: Optional[datetime] = None
+        self.last_metrics_at: Optional[datetime] = None
         self.stall_notified: set[int] = set()
 
     # -- messages ------------------------------------------------------------
@@ -149,6 +161,7 @@ class Autopilot:
             lambda: self.finish_completed_topics(),
             lambda: self.warn_stalled_topics(now),
             lambda: self.maybe_create_job(now),
+            lambda: self.refresh_metrics(now),
             lambda: self.cleanup_output(now),
         ):
             try:
@@ -311,6 +324,54 @@ class Autopilot:
         return None
 
     # -- step 3 --------------------------------------------------------------
+
+    def refresh_metrics(self, now: datetime) -> int:
+        """Pulls settled performance numbers for everything published.
+
+        Returns the number of videos that had processed data. Videos the API
+        has not finished processing are simply not written: absent is not zero,
+        and storing a zero for a two-day-old video would make every fresh
+        upload rank as a failure.
+
+        Like every autopilot step this must not raise; run_tick isolates it,
+        and metrics are a nicety while making videos is the job.
+        """
+        if self.last_metrics_at is not None and (
+            now - self.last_metrics_at
+        ) < timedelta(seconds=METRICS_REFRESH_INTERVAL_SECONDS):
+            return 0
+        self.last_metrics_at = now
+
+        with self.session_factory() as session:
+            published = list_published_videos(session)
+        if not published:
+            return 0
+
+        since = (now - timedelta(days=METRICS_LOOKBACK_DAYS)).date()
+        # One request for every video, not one per video: the query is cheap
+        # next to videos.insert but it is not free, and the quota is shared.
+        measured = self.fetch_metrics([row[0] for row in published], since)
+        if not measured:
+            log(
+                f"[*] No settled analytics yet for any of {len(published)} "
+                f"published video(s).",
+                "info",
+            )
+            return 0
+
+        with self.session_factory() as session:
+            for video_id, job_id, format_name, published_at in published:
+                metrics = measured.get(video_id)
+                if metrics is None:
+                    continue
+                upsert_metrics(
+                    session, metrics, job_id, format_name, published_at, commit=False
+                )
+            session.commit()
+        log(f"[+] Refreshed metrics for {len(measured)} video(s).", "success")
+        return len(measured)
+
+    # -- step 4 --------------------------------------------------------------
 
     def cleanup_output(self, now: datetime) -> int:
         if self.last_cleanup_at is not None and (

@@ -30,6 +30,9 @@ class VideoFormat:
     always_hashtags: tuple
     # How to describe this format to the model writing YouTube metadata.
     metadata_label: str
+    # Which VideoMetric column ranks this format. Percentage flatters short
+    # videos and punishes long ones, so the two cannot share a metric.
+    ranking_metric: str
 
     @property
     def aspect_ratio(self) -> float:
@@ -75,6 +78,9 @@ SHORT = VideoFormat(
     build_thumbnail=False,
     always_hashtags=("#Shorts",),
     metadata_label="short vertical YouTube video (YouTube Shorts)",
+    # The Shorts feed is a swipe test: a viewer either stays past the first
+    # seconds or does not, and nothing else about the video matters if they go.
+    ranking_metric="average_view_percentage",
 )
 
 LONG = VideoFormat(
@@ -115,6 +121,9 @@ LONG = VideoFormat(
     # Calling this a Short in the metadata prompt was costing tag quality: the
     # model wrote for a format the video is not.
     metadata_label="five-minute landscape YouTube video",
+    # Seconds, not percent. Click-through rate would be the natural second
+    # criterion; the Analytics API does not expose it. See Backend/analytics.py.
+    ranking_metric="average_view_duration",
 )
 
 FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}

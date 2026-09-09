@@ -1,7 +1,17 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db import Base
@@ -142,3 +152,33 @@ class Topic(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class VideoMetric(Base):
+    """Latest settled performance of one published video.
+
+    Refreshed in place rather than appended: only the newest reading is used,
+    and a history table would grow steadily with nobody reading it.
+
+    `published_at` is stored alongside the numbers because every ranking query
+    needs it. A video measured a day after upload is noise — the recommender
+    has not finished deciding what to do with it, and the Analytics API has no
+    processed data for it either — so callers filter on age, and the age has to
+    be answerable without joining back through artifacts.
+    """
+
+    __tablename__ = "video_metrics"
+
+    video_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    job_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("generation_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    format_name: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    views: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    average_view_percentage: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    average_view_duration: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

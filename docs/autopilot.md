@@ -4,7 +4,8 @@
 
 1. Checks topics whose job finished: `completed` marks the topic `done`, `failed` or `cancelled` marks it `failed`, and sends a Telegram message; and warns once when a job has been queued or running for more than 3 hours.
 2. Decides whether to queue a new job (see below) using a manually added topic first, otherwise a topic invented by Ollama for `AUTOPILOT_NICHE`.
-3. Once an hour deletes `output/*.mp4` and `output/*.jpg` older than `OUTPUT_RETENTION_DAYS`.
+3. Once a day pulls settled performance numbers for every published video into `video_metrics`.
+4. Once an hour deletes `output/*.mp4` and `output/*.jpg` older than `OUTPUT_RETENTION_DAYS`.
 
 Run locally:
 
