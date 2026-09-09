@@ -511,3 +511,45 @@ def test_clips_shorter_than_a_shot_force_an_extra_shot():
 
     adequate = [(f"c{i}.mp4", 14.0) for i in range(20)]
     assert len(video.plan_clip_segments(adequate, 210.2, 12.0)) == 20
+
+
+# -- endings -----------------------------------------------------------------
+
+
+def test_short_gets_no_picture_fade():
+    # A Short loops in the feed: fading out fights the loop, and fading in
+    # wastes the frame that decides whether the viewer stays.
+    assert video.build_fade_filter(SHORT, 45.0) == ""
+
+
+def test_long_fades_in_and_out():
+    fades = video.build_fade_filter(LONG, 100.0)
+    assert "fade=t=in:st=0:d=0.500" in fades
+    assert "fade=t=out:st=98.800:d=1.200" in fades
+
+
+def test_fade_out_never_starts_before_the_video_does():
+    # A clip shorter than the fade would otherwise produce a negative start.
+    fades = video.build_fade_filter(LONG, 0.4)
+    assert "fade=t=out:st=0.000" in fades
+
+
+def test_concat_filter_appends_the_fades_for_long_form():
+    graph = video.build_concat_filter(2, LONG, durations=[10.0, 10.0])
+    assert "[vfaded]" in graph
+    assert graph.endswith("[vout]")
+    assert "fade=t=out:st=18.800" in graph
+
+
+def test_concat_filter_leaves_shorts_unfaded():
+    graph = video.build_concat_filter(2, SHORT, durations=[5.0, 5.0])
+    assert "[vfaded]" not in graph
+    assert "fade=" not in graph
+    assert graph.endswith("[vout]")
+
+
+def test_every_format_ends_on_silence_not_a_syllable():
+    # The complaint that started this: the file ended on the last word, and the
+    # music's fade-out played under the closing sentence instead of after it.
+    assert SHORT.outro_seconds > 0
+    assert LONG.outro_seconds > SHORT.outro_seconds

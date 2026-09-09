@@ -276,6 +276,12 @@ def run_generation_pipeline(
 
     # Silence between sections, so one thought lands before the next starts.
     spoken_paths = _with_section_pauses(plan, audio_paths, fmt.section_pause_seconds)
+    if fmt.outro_seconds > 0:
+        # The picture is clamped to the audio, so this is what stops the video
+        # ending on the final syllable.
+        spoken_paths.append(
+            make_silence(fmt.outro_seconds, str(TEMP_DIR / f"{uuid4()}.mp3"))
+        )
 
     paths = [AudioFileClip(path) for path in spoken_paths]
 

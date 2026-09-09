@@ -416,6 +416,25 @@ def build_motion_filter(style: str, fmt: VideoFormat, frames: int) -> str:
     return f"zoompan=z='{zoom}':x='{x}':y='{y}':d=1:s={fmt.width}x{fmt.height}:fps=30"
 
 
+def build_fade_filter(fmt: VideoFormat, duration: float) -> str:
+    """Fade in from and out to black, or "" when this format wants neither.
+
+    Applied here rather than in the final render because this pass already
+    re-encodes; long form copies its video stream afterwards, and adding a fade
+    there would mean re-encoding five minutes of finished footage for the sake
+    of two seconds of it.
+    """
+    parts = []
+    if fmt.video_fade_in_seconds > 0:
+        parts.append(f"fade=t=in:st=0:d={fmt.video_fade_in_seconds:.3f}")
+    if fmt.video_fade_out_seconds > 0:
+        start = max(0.0, duration - fmt.video_fade_out_seconds)
+        parts.append(
+            f"fade=t=out:st={start:.3f}:d={fmt.video_fade_out_seconds:.3f}"
+        )
+    return ",".join(parts)
+
+
 def build_concat_filter(
     segment_count: int,
     fmt: VideoFormat = SHORT,
@@ -445,7 +464,12 @@ def build_concat_filter(
             f"{motion},setsar=1,setpts=PTS-STARTPTS[v{index}]"
         )
     inputs = "".join(f"[v{index}]" for index in range(segment_count))
-    chains.append(f"{inputs}concat=n={segment_count}:v=1:a=0[vout]")
+    total = sum(durations) if durations else segment_count * 4.0
+    fades = build_fade_filter(fmt, total)
+    label = "[vfaded]" if fades else "[vout]"
+    chains.append(f"{inputs}concat=n={segment_count}:v=1:a=0{label}")
+    if fades:
+        chains.append(f"[vfaded]{fades}[vout]")
     return ";".join(chains)
 
 
