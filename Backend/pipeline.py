@@ -62,6 +62,8 @@ class PipelineResult:
     thumbnail_path: Optional[str]  # "output/<job_id>.jpg" relative to PROJECT_ROOT
     narration_provider: str
     narration_fell_back: bool
+    script: str                # persisted by the worker; community posts read it
+    ai_model: str
 
 
 def run_generation_pipeline(
@@ -403,6 +405,8 @@ def run_generation_pipeline(
             emit(f"[!] YouTube upload skipped: {upload_error}", "warning")
 
     return PipelineResult(
+        script=script,
+        ai_model=ai_model,
         video_path=final_video_path,
         archived_path=archived_path,
         title=title,

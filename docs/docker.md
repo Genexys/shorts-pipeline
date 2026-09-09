@@ -54,7 +54,7 @@ curl -X POST http://localhost:8080/api/topics -H "Content-Type: application/json
 
 | Path | Mounted into | Purpose |
 |---|---|---|
-| `./secrets/` | `worker` | `client_secret.json`, `youtube_token.json`; the refreshed access token is written back here |
+| `./secrets/` | `worker`, `autopilot` (read-only) | `client_secret.json`, `youtube_token.json`; the refreshed access token is written back here |
 | `./output/` | `worker`, `autopilot` | `<job_id>.mp4` archives and `<job_id>.jpg` thumbnails, pruned after `OUTPUT_RETENTION_DAYS` |
 | `./Songs/` | `api`, `worker` | background music uploaded via the UI |
 | `postgres_data` | `postgres` | database |

@@ -66,3 +66,14 @@ because `videos.update` replaces the whole `snippet` part and would otherwise
 clear everything the body omitted. It refuses to leave a video untitled.
 
 Needs the `youtube.force-ssl` scope, the same one captions already use.
+
+## `Autopilot step failed: No valid YouTube credentials.`
+
+The daily metrics refresh reads the OAuth token, so `autopilot` needs
+`./secrets` mounted. It is mounted read-only there on purpose: only the worker
+should rewrite a refreshed token, since two processes writing the same file
+could truncate it and take uploads down. Autopilot logs a warning when it
+cannot persist a refresh and carries on with the in-memory credential.
+
+Nothing else is affected when this appears — the step is isolated, and video
+generation continues.

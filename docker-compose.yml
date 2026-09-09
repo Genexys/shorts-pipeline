@@ -100,6 +100,12 @@ services:
     command: python Backend/autopilot.py
     volumes:
       - ./output:/app/output
+      # Read-only on purpose. The daily metrics refresh needs the OAuth token,
+      # but only the worker should ever rewrite it: load_credentials persists a
+      # refreshed token, and two processes writing the same file could truncate
+      # it and take uploads down. A failed write here is already handled as a
+      # warning, so autopilot refreshes in memory and carries on.
+      - ./secrets:/app/secrets:ro
     depends_on:
       api:
         condition: service_healthy
