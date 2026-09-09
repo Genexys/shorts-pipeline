@@ -20,7 +20,7 @@ from gpt import (
 from logstream import log
 from search import search_for_stock_videos
 from thumbnail import build_thumbnail
-from speech import ELEVENLABS, synthesize_sentences
+from speech import ELEVENLABS, narration_plan, synthesize_sentences
 from utils import (
     OUTPUT_DIR,
     PROJECT_ROOT,
@@ -30,6 +30,7 @@ from utils import (
 )
 from video import (
     combine_videos,
+    make_silence,
     probe_duration,
     generate_subtitles,
     generate_video,
@@ -48,6 +49,29 @@ from youtube import (
 
 class PipelineCancelled(Exception):
     pass
+
+
+def _with_section_pauses(
+    plan: list, audio_paths: list, pause_seconds: float
+) -> list:
+    """Interleaves silence between sections, leaving none at either end.
+
+    `plan` groups the chunks by section, so the boundaries are known without
+    re-parsing the script.
+    """
+    if pause_seconds <= 0 or len(plan) < 2:
+        return list(audio_paths)
+
+    combined: list = []
+    cursor = 0
+    for index, section in enumerate(plan):
+        if index:
+            combined.append(
+                make_silence(pause_seconds, str(TEMP_DIR / f"{uuid4()}.mp3"))
+            )
+        combined.extend(audio_paths[cursor : cursor + len(section)])
+        cursor += len(section)
+    return combined
 
 
 @dataclass
@@ -110,10 +134,25 @@ def run_generation_pipeline(
     voice_prefix = voice[:2]
 
     sources = []
+    section_research = None
     if research.is_configured():
         sources = research.gather(
             [data["videoSubject"]], limit=fmt.research_results
         )
+
+        def section_research(heading: str) -> str:
+            """A brief for one section, so eight sections do not share one fact.
+
+            Collected into `sources` as well, so the description cites what the
+            script was actually written from.
+            """
+            found = research.gather(
+                [f'{data["videoSubject"]} {heading}'], limit=fmt.research_results
+            )
+            for source in found:
+                if all(source.url != existing.url for existing in sources):
+                    sources.append(source)
+            return research.format_brief(found)
         if sources:
             emit(f"[+] Research: {len(sources)} source(s) found.", "info")
         else:
@@ -131,6 +170,7 @@ def run_generation_pipeline(
             data["customPrompt"],
             section_count=fmt.section_count,
             research=brief,
+            section_research=section_research,
         )
     else:
         script = generate_script(
@@ -201,8 +241,23 @@ def run_generation_pipeline(
 
     guard_cancelled()
 
-    sentences = script.split(". ")
-    sentences = list(filter(lambda x: x != "", sentences))
+    # One chunk per section needs AssemblyAI: the local subtitle fallback times
+    # cues from each clip's length, and a whole paragraph in one clip would give
+    # a single cue lasting a minute.
+    by_section = fmt.narrate_by_section and bool(
+        os.getenv("ASSEMBLY_AI_API_KEY", "").strip()
+    )
+    if fmt.narrate_by_section and not by_section:
+        emit(
+            "[!] ASSEMBLY_AI_API_KEY is not set, so narration falls back to one "
+            "chunk per sentence to keep subtitle timing usable.",
+            "warning",
+        )
+
+    plan = narration_plan(script, by_section)
+    sentences = [chunk for section in plan for chunk in section]
+    if not sentences:
+        raise RuntimeError("The script produced nothing to narrate.")
 
     guard_cancelled()
     audio_paths, provider = synthesize_sentences(
@@ -219,7 +274,10 @@ def run_generation_pipeline(
     narration_fell_back = bool(fmt.elevenlabs_voice_id) and provider != ELEVENLABS
     emit(f"[+] Narrated with {provider}", "warning" if narration_fell_back else "info")
 
-    paths = [AudioFileClip(path) for path in audio_paths]
+    # Silence between sections, so one thought lands before the next starts.
+    spoken_paths = _with_section_pauses(plan, audio_paths, fmt.section_pause_seconds)
+
+    paths = [AudioFileClip(path) for path in spoken_paths]
 
     final_audio = concatenate_audioclips(paths)
     tts_path = str(TEMP_DIR / f"{uuid4()}.mp3")

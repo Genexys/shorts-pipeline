@@ -36,8 +36,37 @@ def scrub(text: str, key: Optional[str] = None) -> str:
     return text.replace(key, "<key>") if key else text
 
 
+# Request stitching gives each chunk the neighbouring text so prosody carries
+# across a join instead of restarting. ElevenLabs does not offer it on v3, and
+# sending the fields anyway is a request the API may reject, so it is asked for
+# only where it exists.
+STITCHING_UNSUPPORTED_PREFIXES = ("eleven_v3",)
+
+
+def _body(
+    text: str, model: str, previous_text: Optional[str], next_text: Optional[str]
+) -> dict:
+    body = {"text": text, "model_id": model}
+    if supports_stitching(model):
+        if previous_text:
+            body["previous_text"] = previous_text
+        if next_text:
+            body["next_text"] = next_text
+    return body
+
+
+def supports_stitching(model: str) -> bool:
+    """Whether this model accepts previous_text / next_text."""
+    return not (model or "").startswith(STITCHING_UNSUPPORTED_PREFIXES)
+
+
 def tts(
-    text: str, voice_id: str, filename: str, model: str = ELEVENLABS_MODEL
+    text: str,
+    voice_id: str,
+    filename: str,
+    model: str = ELEVENLABS_MODEL,
+    previous_text: Optional[str] = None,
+    next_text: Optional[str] = None,
 ) -> None:
     """Synthesizes one piece of text to an mp3 file.
 
@@ -46,6 +75,10 @@ def tts(
         voice_id (str): ElevenLabs voice id.
         filename (str): Where to write the mp3.
         model (str): ElevenLabs model id. Cheaper models bill fewer credits.
+        previous_text (Optional[str]): What is spoken just before this chunk.
+        next_text (Optional[str]): What is spoken just after it. Both are
+            context only — never synthesized — and are ignored by models that
+            do not support stitching.
 
     Raises:
         RuntimeError: On any failure, with the key removed from the message.
@@ -58,7 +91,7 @@ def tts(
         response = requests.post(
             f"{ELEVENLABS_URL}/{voice_id}",
             headers={"xi-api-key": key, "Content-Type": "application/json"},
-            json={"text": text, "model_id": model},
+            json=_body(text, model, previous_text, next_text),
             timeout=ELEVENLABS_TIMEOUT,
         )
         response.raise_for_status()

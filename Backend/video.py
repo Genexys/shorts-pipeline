@@ -1000,3 +1000,29 @@ def mix_background_music(
         "success",
     )
     return output_path
+
+
+def make_silence(seconds: float, output_path: str) -> str:
+    """Writes a silent mp3 of the given length.
+
+    Used between narrated sections. Generated rather than shipped as an asset
+    so the length is free to change, and encoded as mp3 so it concatenates with
+    the narration without a format conversion.
+    """
+    command = [
+        _ffmpeg_binary(),
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"anullsrc=r=44100:cl=mono",
+        "-t",
+        f"{max(seconds, 0.01):.3f}",
+        "-c:a",
+        "libmp3lame",
+        "-q:a",
+        "9",
+        output_path,
+    ]
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    return output_path

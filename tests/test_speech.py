@@ -63,7 +63,7 @@ def test_narrates_with_elevenlabs_when_configured(monkeypatch, paths):
     monkeypatch.setattr(elevenlabs_voice, "is_configured", lambda: True)
     monkeypatch.setattr(
         elevenlabs_voice, "tts",
-        lambda text, voice_id, filename, model: spoken.append((text, voice_id)),
+        lambda text, voice_id, filename, model, **kwargs: spoken.append((text, voice_id)),
     )
     result, provider = speech.synthesize_sentences(
         ["one", "two"], paths, "en_us_001", "george"
@@ -164,7 +164,7 @@ def test_the_model_reaches_the_api(monkeypatch, paths):
     monkeypatch.setattr(elevenlabs_voice, "is_configured", lambda: True)
     monkeypatch.setattr(
         elevenlabs_voice, "tts",
-        lambda text, voice_id, filename, model: captured.update(model=model),
+        lambda text, voice_id, filename, model, **kwargs: captured.update(model=model),
     )
     speech.synthesize_sentences(
         ["one"], paths, "en_male_narration", "voice", "eleven_flash_v2_5"
@@ -177,7 +177,7 @@ def test_a_missing_model_falls_back_to_the_module_default(monkeypatch, paths):
     monkeypatch.setattr(elevenlabs_voice, "is_configured", lambda: True)
     monkeypatch.setattr(
         elevenlabs_voice, "tts",
-        lambda text, voice_id, filename, model: captured.update(model=model),
+        lambda text, voice_id, filename, model, **kwargs: captured.update(model=model),
     )
     speech.synthesize_sentences(["one"], paths, "en_male_narration", "voice")
     assert captured["model"] == elevenlabs_voice.ELEVENLABS_MODEL
@@ -197,3 +197,72 @@ def test_tts_sends_the_model_it_was_given(monkeypatch):
     )
     elevenlabs_voice.tts("hi", "voice", "/tmp/x.mp3", "eleven_v3")
     assert captured["json"]["model_id"] == "eleven_v3"
+
+
+# -- narration planning ------------------------------------------------------
+
+
+SCRIPT = "First section. It has two sentences.\n\nSecond section here.\n\nThird one."
+
+
+def test_split_sections_finds_the_paragraph_blocks():
+    assert speech.split_sections(SCRIPT) == [
+        "First section. It has two sentences.",
+        "Second section here.",
+        "Third one.",
+    ]
+
+
+def test_split_sentences_never_spans_a_paragraph():
+    # The old `script.split(". ")` merged the last sentence of one section with
+    # the first of the next, so the join was narrated without a break.
+    plan = speech.narration_plan(SCRIPT, by_section=False)
+    assert plan == [
+        ["First section.", "It has two sentences."],
+        ["Second section here."],
+        ["Third one."],
+    ]
+    assert all("\n" not in chunk for section in plan for chunk in section)
+
+
+def test_narration_plan_by_section_keeps_a_paragraph_whole():
+    assert speech.narration_plan(SCRIPT, by_section=True) == [
+        ["First section. It has two sentences."],
+        ["Second section here."],
+        ["Third one."],
+    ]
+
+
+def test_split_sentences_handles_questions_and_exclamations():
+    assert speech.split_sentences("Why? Because it works! Truly.") == [
+        "Why?",
+        "Because it works!",
+        "Truly.",
+    ]
+
+
+def test_narration_plan_of_an_empty_script_is_empty():
+    assert speech.narration_plan("   \n\n  ", by_section=True) == []
+
+
+def test_elevenlabs_gets_neighbouring_text_for_continuity(monkeypatch, paths):
+    calls = []
+
+    def fake_tts(text, voice_id, path, model, previous_text=None, next_text=None):
+        calls.append((text, previous_text, next_text))
+        open(path, "w").close()
+
+    monkeypatch.setattr(speech.elevenlabs_voice, "tts", fake_tts)
+    monkeypatch.setattr(speech.elevenlabs_voice, "is_configured", lambda: True)
+
+    paths, provider = speech.synthesize_sentences(
+        ["One.", "Two.", "Three."],
+        make_path=paths,
+        tiktok_voice="en_us_001",
+        elevenlabs_voice_id="v1",
+    )
+
+    assert provider == speech.ELEVENLABS
+    assert calls[0][1] is None and calls[0][2] == "Two."
+    assert calls[1][1] == "One." and calls[1][2] == "Three."
+    assert calls[2][1] == "Two." and calls[2][2] is None

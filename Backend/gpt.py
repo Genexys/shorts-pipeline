@@ -6,7 +6,7 @@ from ollama import Client, ResponseError
 
 from dotenv import load_dotenv
 from logstream import log
-from typing import Tuple, List, Optional
+from typing import Callable, List, Optional, Tuple
 from utils import ENV_FILE, MUSIC_MOODS
 
 # Load environment variables
@@ -16,6 +16,20 @@ load_dotenv(ENV_FILE)
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "180"))
+
+# Reasoning models emit a long chain of thought before answering, and put it in
+# a separate `thinking` field that never reaches `content`. Measured on this
+# box: qwen3.5:4b spent 521 seconds producing 12 151 characters of reasoning
+# and returned an empty answer, where the same request with thinking off took
+# 17 seconds. The pipeline needs the answer, not the reasoning. Models that
+# cannot reason accept the flag and ignore it, so it is sent unconditionally.
+THINKING_DISABLED = os.getenv("OLLAMA_THINKING", "").strip().lower() in (
+    "",
+    "0",
+    "off",
+    "false",
+    "no",
+)
 
 
 def _ollama_client() -> Client:
@@ -65,6 +79,15 @@ def list_ollama_models() -> Tuple[List[str], str]:
     return unique_names, default_model
 
 
+def _chat(client, model_name: str, messages: list, disable_thinking):
+    """One chat call, optionally asking the model not to think out loud."""
+    if disable_thinking is None:
+        return client.chat(model=model_name, messages=messages, stream=False)
+    return client.chat(
+        model=model_name, messages=messages, stream=False, think=not disable_thinking
+    )
+
+
 def generate_response(prompt: str, ai_model: str) -> str:
     """
     Generate a script for a video, depending on the subject of the video.
@@ -84,12 +107,14 @@ def generate_response(prompt: str, ai_model: str) -> str:
 
     try:
         client = _ollama_client()
+        messages = [{"role": "user", "content": prompt}]
         try:
-            response = client.chat(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                stream=False,
-            )
+            try:
+                response = _chat(client, model_name, messages, THINKING_DISABLED)
+            except TypeError:
+                # An ollama client too old to know the parameter. Reasoning
+                # models will be slow rather than broken.
+                response = _chat(client, model_name, messages, None)
         except ResponseError as err:
             if err.status_code == 404:
                 try:
@@ -205,6 +230,18 @@ def parse_string_array(response: str) -> List[str]:
     return [item.strip() for item in quoted if item.strip()]
 
 
+# The model announces itself despite being told not to: a published video
+# opened with the narrator saying 'Here is the script for section 1: "The Stench
+# of Ignorance".' Anchored to the start of a line and required to end at a
+# sentence break, so it cannot eat real prose.
+SCRIPT_PREAMBLE_RE = re.compile(
+    r"^[ \t]*(?:here(?:'s| is)|below is|this is)"
+    r"[^\n:.]{0,60}\b(?:script|section|narration)\b[^\n:.]{0,60}"
+    r"[:.][ \t]*(?:\"[^\"\n]*\"[. \t]*)?$\n*",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
 def clean_script_text(response: str) -> str:
     """Removes the formatting the model is told not to produce but sometimes does.
 
@@ -214,7 +251,8 @@ def clean_script_text(response: str) -> str:
     """
     cleaned = (response or "").replace("*", "").replace("#", "")
     cleaned = re.sub(r"\[.*\]", "", cleaned)
-    return re.sub(r"\(.*\)", "", cleaned)
+    cleaned = re.sub(r"\(.*\)", "", cleaned)
+    return SCRIPT_PREAMBLE_RE.sub("", cleaned)
 
 def generate_script(
     video_subject: str,
@@ -436,6 +474,22 @@ NO_RESEARCH_RULES = """
     or named institution. Write what is generally established, without
     fabricated precision.
 """
+
+
+def figures_used(sections: List[str]) -> set:
+    """Numbers already stated across the sections written so far.
+
+    Bare digits are matched rather than parsed: the point is to stop the same
+    headline figure appearing in every section, and "1 trillion", "400" and
+    "2014" all count equally for that.
+    """
+    used: set = set()
+    for section in sections:
+        for match in re.findall(r"\b\d[\d.,]*\b", section):
+            cleaned = match.rstrip(".,")
+            if len(cleaned) > 1:
+                used.add(cleaned)
+    return used
 
 
 def research_rules(brief: str) -> str:
@@ -849,6 +903,7 @@ def generate_long_script(
     section_count: int = 6,
     angle: Optional[str] = None,
     research: str = "",
+    section_research: Optional[Callable[[str], str]] = None,
 ) -> Optional[str]:
     """
     Writes a long script one section at a time.
@@ -865,8 +920,11 @@ def generate_long_script(
         voice (str): Voice id, used to name the language.
         custom_prompt (str): Extra instruction applied to every section.
         section_count (int): How many sections to plan.
-        research (str): Numbered source notes; every section sees the same
-            brief, so a figure used in one section is available to the next.
+        research (str): Numbered source notes used when no per-section
+            research is supplied.
+        section_research (Optional[Callable[[str], str]]): Given a section
+            heading, returns a brief for that section alone. Injected rather
+            than imported so this module stays free of the research client.
 
     Returns:
         Optional[str]: The joined script, or None if nothing usable came back.
@@ -883,6 +941,31 @@ def generate_long_script(
     sections: List[str] = []
 
     for index, heading in enumerate(outline, 1):
+        # The outline alone was not enough. Every section independently reached
+        # for the brief's headline figure, and one published video stated "1
+        # trillion odours" in six sections out of eight. A section has to see
+        # what was actually written, not just what was planned.
+        previous = sections[-1] if sections else ""
+        used = figures_used(sections)
+        continuity = ""
+        if previous:
+            continuity = (
+                f"\n        The previous section ended like this:\n"
+                f"        \"{previous[-400:]}\"\n\n"
+                f"        - Open by carrying that thought forward. No summary of it, no\n"
+                f"          'in this section', no restating the subject. One sentence that\n"
+                f"          follows from the line above, then move on to your own material.\n"
+            )
+        if used:
+            continuity += (
+                f"        - These figures have already been said out loud and MUST NOT be\n"
+                f"          repeated: {', '.join(sorted(used))}. Find something else to say.\n"
+            )
+
+        section_brief = research
+        if section_research is not None:
+            section_brief = section_research(heading) or research
+
         prompt = f"""
         You are writing one section of a spoken video script.
 
@@ -899,9 +982,10 @@ def generate_long_script(
         - Continue naturally from the earlier sections; do not recap them.
         - Do not cover what later sections will cover.
         - Plain spoken prose. No heading, no markdown, no stage directions.
+        - Do not announce what you are writing. Begin with the narration itself.
         - Do not mention sections, the outline, or this prompt.
-        {custom_prompt}
-        {research_rules(research)}
+        {continuity}{custom_prompt}
+        {research_rules(section_brief)}
         """
 
         try:

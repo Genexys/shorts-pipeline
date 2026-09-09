@@ -417,3 +417,53 @@ def test_generate_script_without_research_forbids_specifics(monkeypatch):
     )
     gpt.generate_script("hiccups", 1, "model", "en_us_001", "")
     assert "fabricated precision" in prompts[0]
+
+
+# -- reasoning models --------------------------------------------------------
+
+
+class _FakeChatClient:
+    """Records the kwargs of each chat call and returns a fixed answer."""
+
+    def __init__(self, calls, reject_think=False):
+        self.calls = calls
+        self.reject_think = reject_think
+
+    def chat(self, **kwargs):
+        if self.reject_think and "think" in kwargs:
+            raise TypeError("chat() got an unexpected keyword argument 'think'")
+        self.calls.append(kwargs)
+        return {"message": {"content": "an answer"}}
+
+
+def test_generate_response_asks_the_model_not_to_think(monkeypatch):
+    # qwen3.5:4b left to itself spent 521s on 12k characters of reasoning and
+    # returned an empty answer. The pipeline needs the answer.
+    calls: list = []
+    monkeypatch.setattr(gpt, "THINKING_DISABLED", True)
+    monkeypatch.setattr(gpt, "_ollama_client", lambda: _FakeChatClient(calls))
+
+    assert gpt.generate_response("hi", "qwen3.5:4b") == "an answer"
+    assert calls[0]["think"] is False
+
+
+def test_generate_response_can_leave_thinking_on(monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(gpt, "THINKING_DISABLED", False)
+    monkeypatch.setattr(gpt, "_ollama_client", lambda: _FakeChatClient(calls))
+
+    gpt.generate_response("hi", "qwen3.5:4b")
+    assert calls[0]["think"] is True
+
+
+def test_generate_response_falls_back_for_an_old_client(monkeypatch):
+    # A client that predates the parameter must still work; reasoning models
+    # are then slow rather than broken.
+    calls: list = []
+    monkeypatch.setattr(gpt, "THINKING_DISABLED", True)
+    monkeypatch.setattr(
+        gpt, "_ollama_client", lambda: _FakeChatClient(calls, reject_think=True)
+    )
+
+    assert gpt.generate_response("hi", "llama3.1:8b") == "an answer"
+    assert "think" not in calls[0]

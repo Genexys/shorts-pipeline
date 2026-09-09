@@ -36,6 +36,11 @@ class VideoFormat:
     # How many search results to ground the script in. Billed at 2 credits per
     # 10 results against a 1000-a-month free tier, so this is cheap either way.
     research_results: int
+    # Narrate a whole section per request rather than a sentence per request.
+    narrate_by_section: bool
+    # Silence inserted between sections, in seconds. A documentary narrator
+    # lands the end of a thought before starting the next one.
+    section_pause_seconds: float
 
     @property
     def aspect_ratio(self) -> float:
@@ -86,6 +91,11 @@ SHORT = VideoFormat(
     ranking_metric="average_view_percentage",
     # 120 words has room for one or two real specifics, not eight.
     research_results=5,
+    # One sentence per request, so the subtitle fallback can time each clip.
+    # A Short is a single section anyway, so nothing is lost.
+    narrate_by_section=False,
+    # Shorts live on pace; a pause is dead air in a swipe feed.
+    section_pause_seconds=0.0,
 )
 
 LONG = VideoFormat(
@@ -131,6 +141,12 @@ LONG = VideoFormat(
     ranking_metric="average_view_duration",
     # Eight sections across 800 words, each needing something concrete.
     research_results=10,
+    # A paragraph per request: the voice then shapes the rhythm inside it,
+    # instead of ending every sentence as though it were the last.
+    narrate_by_section=True,
+    # Long enough to read as a deliberate beat between ideas, short enough not
+    # to sound like a gap in the file.
+    section_pause_seconds=0.9,
 )
 
 FORMATS = {fmt.name: fmt for fmt in (SHORT, LONG)}

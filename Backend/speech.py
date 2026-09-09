@@ -5,6 +5,7 @@ the other service would splice two different narrators into one video, which
 is worse than the cheaper voice throughout.
 """
 
+import re
 from typing import Callable, List, Optional, Tuple
 
 import elevenlabs_voice
@@ -12,6 +13,40 @@ import tiktokvoice
 
 TIKTOK = "tiktok"
 ELEVENLABS = "elevenlabs"
+
+
+def split_sections(script: str) -> List[str]:
+    """The script's paragraph blocks, in order."""
+    return [block.strip() for block in re.split(r"\n\s*\n", script or "") if block.strip()]
+
+
+def split_sentences(block: str) -> List[str]:
+    """Sentences within one block.
+
+    Splits on sentence-ending punctuation followed by whitespace, so a chunk
+    never spans a paragraph break. The old `script.split(". ")` did: a section
+    ending in ".\n\n" did not match the separator, so the last sentence of one
+    section and the first of the next were narrated as a single unbroken
+    utterance — which is what made the joins sound abrupt.
+    """
+    parts = re.split(r"(?<=[.!?])\s+", block.strip())
+    return [part.strip() for part in parts if part.strip()]
+
+
+def narration_plan(script: str, by_section: bool) -> List[List[str]]:
+    """The script as chunks to narrate, grouped by section.
+
+    One chunk per section reads far better than one per sentence: sent a whole
+    paragraph, the voice shapes the rhythm inside it, where sentence-by-sentence
+    synthesis gives every sentence the falling intonation of a final one and
+    the result sounds clipped. Sentence chunks stay the default for Shorts,
+    whose subtitles are timed from the individual clips when AssemblyAI is not
+    configured.
+    """
+    sections = split_sections(script)
+    if by_section:
+        return [[section] for section in sections]
+    return [split_sentences(section) for section in sections]
 
 
 def choose_provider(elevenlabs_voice_id: Optional[str]) -> str:
@@ -55,13 +90,19 @@ def synthesize_sentences(
     if provider == ELEVENLABS:
         paths: List[str] = []
         try:
-            for sentence in sentences:
+            for index, sentence in enumerate(sentences):
                 path = make_path()
                 elevenlabs_voice.tts(
                     sentence,
                     elevenlabs_voice_id,
                     path,
                     elevenlabs_model or elevenlabs_voice.ELEVENLABS_MODEL,
+                    # Context, never synthesized: it carries prosody across the
+                    # join so the next chunk does not restart from silence.
+                    previous_text=sentences[index - 1] if index else None,
+                    next_text=(
+                        sentences[index + 1] if index + 1 < len(sentences) else None
+                    ),
                 )
                 paths.append(path)
             return paths, ELEVENLABS
