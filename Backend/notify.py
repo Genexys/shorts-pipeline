@@ -46,3 +46,38 @@ def send_telegram(
     except Exception as err:
         log(f"[-] Telegram notification failed: {scrub_token(str(err), token)}", "warning")
         return False
+
+
+# Telegram caps a photo caption well below a message body. A post that does not
+# fit is sent as a separate message rather than truncated: the whole point is
+# that the text can be copied and pasted unchanged.
+TELEGRAM_MAX_CAPTION = 1024
+
+
+def send_telegram_photo(
+    photo_path: str,
+    caption: str = "",
+    token: Optional[str] = None,
+    chat_id: Optional[str] = None,
+) -> bool:
+    """Send a photo with an optional caption. Returns False on any problem, never raises."""
+    token = token if token is not None else os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = chat_id if chat_id is not None else os.getenv("TELEGRAM_CHAT_ID", "")
+
+    if not token or not chat_id:
+        log(f"[telegram disabled] photo {photo_path}", "info")
+        return False
+
+    try:
+        with open(photo_path, "rb") as handle:
+            response = requests.post(
+                f"https://api.telegram.org/bot{token}/sendPhoto",
+                data={"chat_id": chat_id, "caption": caption[:TELEGRAM_MAX_CAPTION]},
+                files={"photo": handle},
+                timeout=TELEGRAM_TIMEOUT,
+            )
+        response.raise_for_status()
+        return True
+    except Exception as err:
+        log(f"[-] Telegram photo failed: {scrub_token(str(err), token)}", "warning")
+        return False

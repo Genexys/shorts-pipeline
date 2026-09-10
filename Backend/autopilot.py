@@ -27,7 +27,7 @@ from db import SessionLocal, init_db
 from gpt import extract_json_object, generate_response
 from logstream import log
 from models import Topic
-from notify import send_telegram
+from notify import TELEGRAM_MAX_CAPTION, send_telegram, send_telegram_photo
 from repository import (
     add_topic,
     as_utc,
@@ -38,6 +38,8 @@ from repository import (
     get_job,
     has_active_jobs,
     last_topic_used_at,
+    get_research_sources,
+    get_script,
     list_artifacts,
     mark_topic_finished,
     next_planned_topic,
@@ -46,7 +48,10 @@ from repository import (
     recent_topic_subjects,
     topics_awaiting_result,
 )
-from utils import ENV_FILE, OUTPUT_DIR
+from posts import generate_post
+from thumbnail import pick_still
+from utils import ENV_FILE, OUTPUT_DIR, PROJECT_ROOT, TEMP_DIR
+from video import probe_duration
 
 TICK_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 3600
@@ -64,6 +69,10 @@ METRICS_REFRESH_INTERVAL_SECONDS = 24 * 3600
 # How far back to ask. Comfortably longer than the channel's history, and the
 # window costs nothing extra — one query covers every video in it.
 METRICS_LOOKBACK_DAYS = 90
+# A still lifts a community post's reach, and the post is meant to be pasted
+# into Studio, so the caption is the post text and nothing else — a prefix
+# would be copied along with it.
+POST_STILL_NAME = "post_still.jpg"
 
 
 def build_payload(
@@ -132,6 +141,8 @@ class Autopilot:
         generate: Callable[[str, str], str] = generate_response,
         output_dir: Path = OUTPUT_DIR,
         fetch_metrics: Callable = fetch_metrics,
+        generate_post: Callable = generate_post,
+        send_photo: Callable = send_telegram_photo,
     ) -> None:
         self.config = config
         self.session_factory = session_factory
@@ -139,6 +150,8 @@ class Autopilot:
         self.generate = generate
         self.output_dir = Path(output_dir)
         self.fetch_metrics = fetch_metrics
+        self.generate_post = generate_post
+        self.send_photo = send_photo
         self.failed_topic_ticks = 0
         self.topic_failure_notified = False
         self.last_cleanup_at: Optional[datetime] = None
@@ -185,6 +198,16 @@ class Autopilot:
                 if job.status == "completed":
                     message = self._success_message(session, topic, job.id)
                     mark_topic_finished(session, topic.id, "done")
+                    self.notify(message)
+                    finished += 1
+                    # After the result, never instead of it: a post that cannot
+                    # be written must not cost the notification that the video
+                    # is live.
+                    try:
+                        self.send_post_draft(session, topic, job)
+                    except Exception as err:
+                        log(f"[-] Could not draft a post: {err}", "warning")
+                    continue
                 elif job.status == "failed":
                     error = (job.error_message or "unknown error")[:ERROR_TEXT_LIMIT]
                     message = f"❌ {topic.subject}\n{error}\njob {job.id}, attempts {job.attempt_count}"
@@ -219,6 +242,62 @@ class Autopilot:
             elif artifact.artifact_type == "youtube_video":
                 second_line = artifact.path
         return f"✅ {title}\n{second_line}{warning}\njob {job_id}"
+
+    def send_post_draft(self, session: Session, topic: Topic, job) -> bool:
+        """Sends a ready-to-paste community post, with a still from the video.
+
+        The caption is the post text alone. Telegram copies a caption whole, so
+        anything added around it — a heading, the video link — would be pasted
+        into Studio too.
+        """
+        script = get_script(session, job.id) or ""
+        notes = "\n\n".join(
+            f"[{index}] {row.title or row.url}\n{row.snippet}"
+            for index, row in enumerate(get_research_sources(session, job.id), 1)
+        )
+        title = topic.subject
+        video_path = None
+        for artifact in list_artifacts(session, job.id):
+            if artifact.artifact_type == "video":
+                video_path = PROJECT_ROOT / artifact.path
+                title = (artifact.metadata_json or {}).get("title") or title
+
+        post = self.generate_post(
+            topic.subject, title, script, self.config.model, research=notes
+        )
+        if post is None:
+            log("[!] No usable post text for this video.", "warning")
+            return False
+
+        text = post.render()
+        still = self._still_for(job.id, video_path)
+        sent = False
+        if still and len(text) <= TELEGRAM_MAX_CAPTION:
+            sent = self.send_photo(still, text)
+        elif still:
+            # Too long to ride along with the picture; both are still wanted.
+            self.send_photo(still, "")
+            sent = self.notify(text)
+        else:
+            sent = self.notify(text)
+        log(f"[+] Drafted a {post.kind} post for job {job.id}", "success")
+        return bool(sent)
+
+    def _still_for(self, job_id: str, video_path: Optional[Path]) -> Optional[str]:
+        """A frame from the finished video, or None if one cannot be read."""
+        if not video_path or not Path(video_path).exists():
+            return None
+        try:
+            return pick_still(
+                str(video_path),
+                str(TEMP_DIR / f"{job_id}-{POST_STILL_NAME}"),
+                duration=probe_duration(str(video_path)),
+                work_dir=TEMP_DIR / f"{job_id}-still",
+                ffmpeg=os.getenv("FFMPEG_BINARY", "").strip() or "ffmpeg",
+            )
+        except Exception as err:
+            log(f"[!] Could not take a still ({err}).", "warning")
+            return None
 
     def warn_stalled_topics(self, now: datetime) -> int:
         """Notify once per topic when its job has been queued/running for too long."""

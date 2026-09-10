@@ -2,7 +2,7 @@
 
 `Backend/autopilot.py` runs next to the API and the worker. Every minute it:
 
-1. Checks topics whose job finished: `completed` marks the topic `done`, `failed` or `cancelled` marks it `failed`, and sends a Telegram message; and warns once when a job has been queued or running for more than 3 hours.
+1. Checks topics whose job finished: `completed` marks the topic `done`, `failed` or `cancelled` marks it `failed`, and sends a Telegram message; and warns once when a job has been queued or running for more than 3 hours. A published video is followed by a second message: a ready-to-paste community post, captioned onto a still from the video (see [Community posts](#community-posts)).
 2. Decides whether to queue a new job (see below) using a manually added topic first, otherwise a topic invented by Ollama for `AUTOPILOT_NICHE`.
 3. Once a day pulls settled performance numbers for every published video into `video_metrics`.
 4. Once an hour deletes `output/*.mp4` and `output/*.jpg` older than `OUTPUT_RETENTION_DAYS`.
@@ -60,3 +60,24 @@ If the token or chat id is empty, messages are printed to the log with a `[teleg
 ## Pausing
 
 Set `AUTOPILOT_ENABLED=false` and restart the autopilot process. Finished jobs are still reported. In Docker, see the pause command in `docs/docker.md`.
+
+## Community posts
+
+YouTube has no API for creating community posts, so after each upload the
+autopilot sends one to Telegram to be pasted into Studio by hand.
+
+The caption **is the post text and nothing else**. Telegram copies a caption
+whole, so a heading or the video link would be pasted into Studio along with
+it. The video link is in the preceding success message instead.
+
+A still from the video rides along, because a community post with a picture
+reaches further than one without. It is a plain frame — `pick_still`, not
+`build_thumbnail` — since the post carries its own words and a title burned
+into the image would only repeat them.
+
+A post that cannot be written is logged and dropped. It never costs the
+notification that the video is live, and there is no placeholder text: an
+obviously generated post is worse than no post.
+
+Posts of the `fact` kind need the video's research notes, which are stored from
+2026-09-10 onward. Older videos get a question or a poll.
