@@ -51,6 +51,7 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             narration_fell_back=False,
             script="A narration script.",
             ai_model="llama3.1:8b",
+            sources=[],
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -110,6 +111,7 @@ def test_process_next_job_marks_failed_when_bookkeeping_raises(
             narration_fell_back=False,
             script="A narration script.",
             ai_model="llama3.1:8b",
+            sources=[],
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -155,6 +157,7 @@ def test_process_next_job_records_upload_error_without_youtube_artifact(
             narration_fell_back=False,
             script="A narration script.",
             ai_model="llama3.1:8b",
+            sources=[],
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -348,6 +351,7 @@ def test_process_next_job_records_a_thumbnail_when_one_was_built(
             narration_fell_back=False,
             script="A narration script.",
             ai_model="llama3.1:8b",
+            sources=[],
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
@@ -386,6 +390,7 @@ def test_process_next_job_stores_the_script(monkeypatch, session_factory):
             narration_fell_back=False,
             script="The deep sea is mostly unexplored.",
             ai_model="llama3.1:8b",
+            sources=[],
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)

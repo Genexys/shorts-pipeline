@@ -182,3 +182,30 @@ class VideoMetric(Base):
     average_view_duration: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ResearchSource(Base):
+    """One search result a video's script was written from.
+
+    Kept because the leftovers are the valuable part. A 120-word Short uses a
+    handful of facts out of four to eight sources; the rest is discarded, and
+    it is exactly the material a community post needs — something true about
+    the subject that the video did not already say. Without it a "fact" post
+    can only restate the script or invent.
+    """
+
+    __tablename__ = "research_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    snippet: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

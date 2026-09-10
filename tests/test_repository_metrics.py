@@ -177,3 +177,51 @@ def test_ranking_returns_nothing_when_no_video_is_old_enough(session_factory):
         _seed_ranked(session, "short", [("fresh", 95.0)], age_days=1)
 
         assert top_performing_subjects(session, "short", 5, min_age_days=7) == []
+
+
+# -- research sources --------------------------------------------------------
+
+
+class _Source:
+    def __init__(self, title, url, snippet):
+        self.title, self.url, self.snippet = title, url, snippet
+
+
+def test_research_sources_round_trip(session_factory):
+    from repository import add_research_sources, get_research_sources
+
+    with session_factory() as session:
+        job_id = _published(session, "Jellyfish", "short", "vid1")
+
+        kept = add_research_sources(
+            session,
+            job_id,
+            [
+                _Source("NHM", "https://nhm.ac.uk/a", "It is 4.5 mm across."),
+                _Source("AMNH", "https://amnh.org/b", "Transdifferentiation."),
+            ],
+        )
+
+        assert kept == 2
+        stored = get_research_sources(session, job_id)
+        assert [s.url for s in stored] == ["https://nhm.ac.uk/a", "https://amnh.org/b"]
+        assert stored[0].snippet == "It is 4.5 mm across."
+
+
+def test_research_sources_skip_entries_without_a_url(session_factory):
+    from repository import add_research_sources, get_research_sources
+
+    with session_factory() as session:
+        job_id = _published(session, "Jellyfish", "short", "vid1")
+
+        kept = add_research_sources(session, job_id, [_Source("t", "", "s")])
+
+        assert kept == 0
+        assert get_research_sources(session, job_id) == []
+
+
+def test_research_sources_are_empty_for_an_unknown_job(session_factory):
+    from repository import get_research_sources
+
+    with session_factory() as session:
+        assert get_research_sources(session, "no-such-job") == []

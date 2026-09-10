@@ -7,6 +7,7 @@ from logstream import log
 from pipeline import PipelineCancelled, run_generation_pipeline
 from repository import (
     add_artifact,
+    add_research_sources,
     add_script,
     append_event,
     claim_next_queued_job,
@@ -80,6 +81,7 @@ def process_next_job() -> bool:
                 add_script(
                     session, job_id, result.script, result.ai_model, commit=False
                 )
+                add_research_sources(session, job_id, result.sources, commit=False)
                 add_artifact(
                     session,
                     job_id,

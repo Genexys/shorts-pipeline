@@ -89,6 +89,9 @@ class PipelineResult:
     narration_fell_back: bool
     script: str                # persisted by the worker; community posts read it
     ai_model: str
+    # Everything research found, not only what the script used. The leftovers
+    # are what a community post can say that the video did not.
+    sources: list
 
 
 def run_generation_pipeline(
@@ -489,6 +492,7 @@ def run_generation_pipeline(
     return PipelineResult(
         script=script,
         ai_model=ai_model,
+        sources=sources,
         video_path=final_video_path,
         archived_path=archived_path,
         title=title,
