@@ -42,6 +42,7 @@ def init_db() -> None:
         GenerationEvent,
         GenerationJob,
         Project,
+        ResearchSource,
         Script,
         Topic,
         VideoMetric,

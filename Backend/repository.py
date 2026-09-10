@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timedelta, timezone, tzinfo
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Sequence
 from uuid import uuid4
 
 from sqlalchemy import and_, select, text
@@ -12,6 +12,7 @@ from models import (
     Artifact,
     GenerationEvent,
     GenerationJob,
+    ResearchSource,
     Script,
     Topic,
     VideoMetric,
@@ -19,6 +20,7 @@ from models import (
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to type checkers
     from analytics import VideoMetrics
+    from research import Source
 
 
 def utcnow() -> datetime:
@@ -599,3 +601,44 @@ def get_script(session: Session, job_id: str) -> Optional[str]:
         .limit(1)
     )
     return session.scalars(stmt).first()
+
+
+def add_research_sources(
+    session: Session,
+    job_id: str,
+    sources: "Sequence[Source]",
+    commit: bool = True,
+) -> int:
+    """Keeps the sources a script was written from. Returns how many were kept.
+
+    The leftovers matter more than the ones that made it in: a 120-word Short
+    uses a few facts out of several sources, and what it left behind is what a
+    community post can say that the video did not.
+    """
+    kept = 0
+    for source in sources or []:
+        url = getattr(source, "url", "")
+        if not url:
+            continue
+        session.add(
+            ResearchSource(
+                job_id=job_id,
+                title=(getattr(source, "title", "") or "")[:512],
+                url=url[:1024],
+                snippet=getattr(source, "snippet", "") or "",
+            )
+        )
+        kept += 1
+    if commit:
+        session.commit()
+    return kept
+
+
+def get_research_sources(session: Session, job_id: str) -> list[ResearchSource]:
+    """Sources stored for a job, in the order they were found."""
+    stmt = (
+        select(ResearchSource)
+        .where(ResearchSource.job_id == job_id)
+        .order_by(ResearchSource.id)
+    )
+    return list(session.scalars(stmt))

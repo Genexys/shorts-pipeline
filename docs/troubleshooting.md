@@ -77,3 +77,14 @@ cannot persist a refresh and carries on with the in-memory credential.
 
 Nothing else is affected when this appears — the step is isolated, and video
 generation continues.
+
+## A community post just repeats the video
+
+`fact` posts are written from the **research notes**, not from the script. The
+script is what the video already said, so it is the one thing such a post must
+not restate — and a 120-word Short exhausts its own subject, leaving a model
+given only the script no room to add anything true.
+
+Notes are stored per job in `research_sources` from 2026-09-10 onward. Videos
+published before that have none, so `make_post.py` offers only `question` and
+`poll` for them and says so.

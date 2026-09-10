@@ -30,13 +30,17 @@ FACT = "fact"
 POLL = "poll"
 POST_KINDS: Tuple[str, ...] = (QUESTION, FACT, POLL)
 
-# Kinds that may only be written when the script is available. A "fact" post is
-# a bare verifiable claim published in the channel's name, and an 8B model asked
-# for one with no source produces plausible specifics with the details wrong:
-# on 2026-09-09 it attributed the variation in left-handedness across countries
-# to "social mobility", where the real finding is cultural pressure against
-# writing left-handed. Grounded in a script, the model restates something it was
-# given instead of inventing. Questions and polls have nothing to fabricate.
+# Kinds that need grounding to be written at all. A "fact" post is a bare
+# verifiable claim published in the channel's name, and an 8B model asked for
+# one with no source produces plausible specifics with the details wrong: on
+# 2026-09-09 it attributed the variation in left-handedness across countries to
+# "social mobility", where the real finding is cultural pressure against writing
+# left-handed. Questions and polls have nothing to fabricate.
+#
+# Research notes are the grounding that actually works. The script alone is not
+# enough: a 120-word Short exhausts its own subject, so a model given only the
+# script can restate it or invent, and nothing else. The notes hold everything
+# research found — including the majority that never reached the video.
 GROUNDED_KINDS: Tuple[str, ...] = (FACT,)
 
 # What each kind is for, in the prompt's own words.
@@ -47,9 +51,12 @@ KIND_BRIEFS = {
         "expertise, so that answering costs a viewer nothing."
     ),
     FACT: (
-        "State one concrete detail connected to the subject that the video "
-        "itself does not cover. It must add something, not summarise what was "
-        "already said."
+        "State one concrete detail from the research notes that the script does "
+        "NOT already say. Read the script first and rule out anything it "
+        "covers, however differently worded. Restating the video's own point is "
+        "the failure to avoid: on 2026-09-10 a post about the immortal "
+        "jellyfish said only that it is biologically immortal, which was the "
+        "video's opening line. Use nothing that is not in the notes."
     ),
     POLL: (
         "Pose a question with clearly distinct answers. The options must be "
@@ -79,20 +86,26 @@ class Post:
         return "\n".join(lines)
 
 
-def available_kinds(script: str) -> Tuple[str, ...]:
-    """Kinds that can be written from what is actually known about the video."""
-    if (script or "").strip():
+def available_kinds(script: str, research: str = "") -> Tuple[str, ...]:
+    """Kinds that can be written from what is actually known about the video.
+
+    A fact needs the research notes, not the script: the script is what the
+    video already said, so it is the one thing a fact post must not repeat.
+    """
+    if (research or "").strip():
         return POST_KINDS
     return tuple(kind for kind in POST_KINDS if kind not in GROUNDED_KINDS)
 
 
-def choose_post_kind(script: str = "", rng: Optional[random.Random] = None) -> str:
+def choose_post_kind(
+    script: str = "", rng: Optional[random.Random] = None, research: str = ""
+) -> str:
     """Picks a post kind at random, from the ones this video can support.
 
     Rotating rather than always asking the same thing: a feed of nothing but
     polls reads as a bot, which is the whole failure mode being avoided.
     """
-    return (rng or random).choice(list(available_kinds(script)))
+    return (rng or random).choice(list(available_kinds(script, research)))
 
 
 def clean_options(raw: object) -> List[str]:
@@ -145,8 +158,11 @@ def build_post(raw: Optional[dict], kind: str) -> Optional[Post]:
     return Post(kind=POLL, text=text, options=tuple(options))
 
 
-def build_prompt(kind: str, subject: str, title: str, script: str) -> str:
+def build_prompt(
+    kind: str, subject: str, title: str, script: str, research: str = ""
+) -> str:
     source = script.strip() or "(the script is not available; work from the subject)"
+    notes = research.strip() or "(no research notes were kept for this video)"
     poll_rule = (
         f'- options: {POLL_MIN_OPTIONS} to {POLL_MAX_OPTIONS} answers, each at '
         f"most {POLL_OPTION_MAX_CHARS} characters.\n"
@@ -158,7 +174,8 @@ def build_prompt(kind: str, subject: str, title: str, script: str) -> str:
         "educational explainers.\n\n"
         f"Video title: {title}\n"
         f"Subject: {subject}\n\n"
-        f"Script:\n{source}\n\n"
+        f"What the video already said (the script):\n{source}\n\n"
+        f"Research notes, most of which did not reach the video:\n{notes}\n\n"
         f"Task: {KIND_BRIEFS[kind]}\n\n"
         'Return ONLY a JSON object: {"text": "...", "options": ["...", "..."]}\n\n'
         "Rules:\n"
@@ -178,6 +195,7 @@ def generate_post(
     ai_model: str,
     kind: Optional[str] = None,
     rng: Optional[random.Random] = None,
+    research: str = "",
 ) -> Optional[Post]:
     """Writes one community post.
 
@@ -185,18 +203,20 @@ def generate_post(
     a terminal who can simply run it again, so there is no fallback text: a
     generated-looking placeholder is worse than no post.
     """
-    kind = kind or choose_post_kind(script, rng)
+    kind = kind or choose_post_kind(script, rng, research)
     if kind not in POST_KINDS:
         raise ValueError(f"kind must be one of {', '.join(POST_KINDS)}, got '{kind}'.")
-    if kind not in available_kinds(script):
+    if kind not in available_kinds(script, research):
         raise ValueError(
-            f"'{kind}' needs the video's script, which is not stored for this "
-            f"job. Without it the model invents the detail rather than "
-            f"restating one. Available here: "
-            f"{', '.join(available_kinds(script))}."
+            f"'{kind}' needs the video's research notes, which are not stored for this "
+            f"job. Without them the model can only repeat the script or "
+            f"invent. Available here: "
+            f"{', '.join(available_kinds(script, research))}."
         )
 
-    response = generate_response(build_prompt(kind, subject, title, script), ai_model)
+    response = generate_response(
+        build_prompt(kind, subject, title, script, research), ai_model
+    )
     post = build_post(extract_json_object(response), kind)
     if post is None:
         log("[!] The model returned no usable post text.", "warning")

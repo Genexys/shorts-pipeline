@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 from db import SessionLocal, init_db
 from posts import POST_KINDS, available_kinds, generate_post
-from repository import get_script, list_published_videos
+from repository import get_research_sources, get_script, list_published_videos
 from utils import ENV_FILE
 
 
@@ -80,23 +80,34 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(err)
             return 1
         script = get_script(session, job_id) or ""
+        stored = get_research_sources(session, job_id)
+    notes = "\n\n".join(
+        f"[{index}] {row.title or row.url}\n{row.snippet}"
+        for index, row in enumerate(stored, 1)
+    )
 
     title = subject or video_id
     print(f"Video:   https://youtu.be/{video_id}")
     print(f"Subject: {subject or '(unknown)'}")
     if not script:
-        # Worth saying plainly: without the script the model has nothing to
-        # restate, so the kinds that assert a fact are off the table.
+        print("Script:  not stored for this job; writing from the subject only.")
+    if not notes:
+        # Worth saying plainly: without the notes a fact post can only repeat
+        # the script or invent, so that kind is off the table.
         print(
-            "Script:  not stored for this job. Writing from the subject only, "
-            f"so only these kinds are available: {', '.join(available_kinds(script))}."
+            "Sources: none stored for this job, so only these kinds are "
+            f"available: {', '.join(available_kinds(script, notes))}."
         )
+    else:
+        print(f"Sources: {len(stored)} stored.")
     print()
 
     written = 0
     for _ in range(max(1, args.count)):
         try:
-            post = generate_post(subject, title, script, model, kind=args.kind)
+            post = generate_post(
+                subject, title, script, model, kind=args.kind, research=notes
+            )
         except ValueError as err:
             print(err)
             return 1
