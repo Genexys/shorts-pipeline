@@ -480,12 +480,13 @@ TWO_PARAGRAPHS = (
 )
 
 
-def test_a_word_target_keeps_every_paragraph(monkeypatch):
+def test_a_word_target_reaches_past_the_first_paragraph(monkeypatch):
     # The real failure: the model wrote 167 words in two paragraphs, obeying the
-    # target, and paragraphs[:1] threw the second away leaving 89.
+    # target, and paragraphs[:1] threw the second away leaving 89. A target that
+    # needs both paragraphs must now get both.
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: TWO_PARAGRAPHS)
 
-    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=30)
+    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=45)
 
     assert "Second paragraph" in script
 
@@ -518,7 +519,7 @@ def test_a_short_script_is_retried_once(monkeypatch):
     drafts = ["Too short entirely.", TWO_PARAGRAPHS]
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: drafts.pop(0))
 
-    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=30)
+    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=45)
 
     assert "Second paragraph" in script
     assert drafts == []
@@ -539,3 +540,51 @@ def test_the_retry_happens_only_once(monkeypatch):
     # a thin video beats a failed job.
     assert calls["n"] == 2
     assert script == "Far too short."
+
+
+def test_trim_to_words_cuts_on_sentence_boundaries():
+    # The real shape: paragraphs of 37/63/68/52 words, so 120 falls in the gap
+    # between two paragraphs (100) and three (168).
+    script = "\n\n".join(
+        " ".join(f"w{i}" for i in range(10)) + "." for _ in range(8)
+    )
+    trimmed = gpt.trim_to_words(script, 25)
+    words = len(trimmed.split())
+    assert 25 <= words < 35
+    assert trimmed.endswith(".")
+
+
+def test_trim_to_words_leaves_a_short_script_alone():
+    script = "One two three four five."
+    assert gpt.trim_to_words(script, 100) == script
+
+
+def test_trim_to_words_keeps_the_sentence_that_crosses_the_target():
+    # At or just over, never under: undershooting is what the retry is for.
+    script = "A a a a a. B b b b b. C c c c c."
+    assert len(gpt.trim_to_words(script, 7).split()) >= 7
+
+
+def test_trim_to_words_preserves_paragraph_breaks():
+    script = "One two three. Four five six.\n\nSeven eight nine. Ten eleven twelve."
+    trimmed = gpt.trim_to_words(script, 9)
+    assert "\n\n" in trimmed
+
+
+def test_trim_to_words_ignores_a_useless_target():
+    script = "Some words here."
+    assert gpt.trim_to_words(script, 0) == script
+
+
+def test_generate_script_trims_an_overlong_draft(monkeypatch):
+    # Published 2026-09-10: 220 words against a 120 target, a 94-second Short
+    # where 50 was intended. Removing the paragraph cap fixed the undershoot
+    # and introduced this.
+    long_draft = "\n\n".join(
+        " ".join(f"word{i}" for i in range(40)) + "." for _ in range(5)
+    )
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: long_draft)
+
+    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=60)
+
+    assert 60 <= len(script.split()) < 110

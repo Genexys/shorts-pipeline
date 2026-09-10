@@ -6,6 +6,7 @@ from ollama import Client, ResponseError
 
 from dotenv import load_dotenv
 from logstream import log
+from speech import split_sentences
 from typing import Callable, List, Optional, Tuple
 from utils import ENV_FILE, MUSIC_MOODS
 
@@ -242,6 +243,40 @@ SCRIPT_PREAMBLE_RE = re.compile(
 )
 
 
+def trim_to_words(script: str, target: int) -> str:
+    """Cuts a script back to about `target` words, on sentence boundaries.
+
+    Paragraph granularity is too coarse to land on a word count. A real script
+    came back as paragraphs of 37, 63, 68 and 52 words: two paragraphs give 100
+    and three give 168, and the 120 asked for falls in the gap. Keeping all four
+    shipped a 94-second Short where 50 was intended.
+
+    Sentences are the same boundaries the narration is chunked on, so a cut here
+    never lands mid-utterance. The sentence that crosses the target is kept, so
+    the result is at or just over it rather than under — undershooting is what
+    the retry in generate_script is for.
+    """
+    if target <= 0 or len(script.split()) <= target:
+        return script
+
+    kept: List[str] = []
+    words = 0
+    for block in re.split(r"\n\s*\n", script):
+        if not block.strip():
+            continue
+        sentences = []
+        for sentence in split_sentences(block):
+            sentences.append(sentence)
+            words += len(sentence.split())
+            if words >= target:
+                break
+        if sentences:
+            kept.append(" ".join(sentences))
+        if words >= target:
+            break
+    return "\n\n".join(kept)
+
+
 def clean_script_text(response: str) -> str:
     """Removes the formatting the model is told not to produce but sometimes does.
 
@@ -367,6 +402,17 @@ def generate_script(
 
         # Join the selected paragraphs into a single string
         final_script = "\n\n".join(selected_paragraphs)
+
+        if target_words:
+            before = len(final_script.split())
+            final_script = trim_to_words(final_script, target_words)
+            after = len(final_script.split())
+            if after < before:
+                log(
+                    f"[*] Trimmed the script from {before} to {after} words "
+                    f"for a {target_words}-word target.",
+                    "info",
+                )
 
         log(f"Number of paragraphs used: {len(selected_paragraphs)}", "success")
 
