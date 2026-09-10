@@ -182,3 +182,30 @@ def build_thumbnail(
     compose(best, wrap_title(title), output_path)
     log(f"[+] Thumbnail written to {output_path}", "success")
     return output_path
+
+
+def pick_still(
+    video_path: str,
+    output_path: str,
+    duration: float,
+    work_dir: Path,
+    ffmpeg: str = "ffmpeg",
+) -> Optional[str]:
+    """Saves the best-looking frame from a video, with nothing drawn on it.
+
+    build_thumbnail lays the title over the frame, which is right for a
+    thumbnail and wrong for a community post: the post carries its own text,
+    and a title burned into the image only repeats it.
+    """
+    frames = extract_candidates(video_path, duration, work_dir, ffmpeg)
+    best = pick_best_frame(frames)
+    if best is None:
+        log("[!] No usable frame for a still.", "warning")
+        return None
+    try:
+        with Image.open(best) as image:
+            image.convert("RGB").save(output_path, "JPEG", quality=88)
+    except OSError as err:
+        log(f"[!] Could not write the still ({err}).", "warning")
+        return None
+    return output_path

@@ -608,3 +608,138 @@ def test_run_tick_survives_a_failing_metrics_refresh(pilot, monkeypatch, capsys)
     pilot.run_tick(NOON)
 
     assert "analytics is down" in capsys.readouterr().out
+
+
+# -- community post drafts ---------------------------------------------------
+
+
+class _FakePost:
+    kind = "fact"
+
+    def __init__(self, text="A detail the video skipped."):
+        self._text = text
+
+    def render(self):
+        return self._text
+
+
+def _completed_job_with_video(pilot, subject="Jellyfish", text="A stored script."):
+    from repository import add_artifact, add_research_sources, add_script, add_topic, create_job
+
+    class _Source:
+        title, url, snippet = "NHM", "https://nhm.ac.uk/a", "It is 4.5 mm across."
+
+    with pilot.session_factory() as session:
+        job = create_job(session, payload={"videoSubject": subject, "format": "short"})
+        job.status = "completed"
+        topic = add_topic(session, subject, niche=None, source="ollama")
+        topic.job_id = job.id
+        topic.status = "queued"
+        add_script(session, job.id, text, "llama3.1:8b", commit=False)
+        add_research_sources(session, job.id, [_Source()], commit=False)
+        add_artifact(session, job.id, "video", "output/x.mp4", {"title": "T"}, commit=False)
+        session.commit()
+        return job.id
+
+
+def test_post_caption_is_the_post_text_alone(pilot, monkeypatch):
+    # Telegram copies a caption whole, so a heading or a link would be pasted
+    # into Studio along with the post.
+    sent: list = []
+    pilot.generate_post = lambda *a, **k: _FakePost()
+    pilot.send_photo = lambda path, caption: sent.append((path, caption)) or True
+    monkeypatch.setattr(pilot, "_still_for", lambda job_id, path: "/tmp/still.jpg")
+    job_id = _completed_job_with_video(pilot)
+
+    with pilot.session_factory() as session:
+        from repository import get_job, topics_awaiting_result
+
+        topic = topics_awaiting_result(session)[0]
+        assert pilot.send_post_draft(session, topic, get_job(session, job_id)) is True
+
+    assert sent[0][1] == "A detail the video skipped."
+
+
+def test_a_long_post_is_sent_as_text_beside_the_picture(pilot, monkeypatch):
+    from notify import TELEGRAM_MAX_CAPTION
+
+    messages: list = []
+    photos: list = []
+    pilot.generate_post = lambda *a, **k: _FakePost("x" * (TELEGRAM_MAX_CAPTION + 10))
+    pilot.send_photo = lambda path, caption: photos.append(caption) or True
+    pilot.notify = lambda text: messages.append(text) or True
+    monkeypatch.setattr(pilot, "_still_for", lambda job_id, path: "/tmp/still.jpg")
+    job_id = _completed_job_with_video(pilot)
+
+    with pilot.session_factory() as session:
+        from repository import get_job, topics_awaiting_result
+
+        topic = topics_awaiting_result(session)[0]
+        pilot.send_post_draft(session, topic, get_job(session, job_id))
+
+    # The picture still goes, and the text is not truncated to fit it.
+    assert photos == [""]
+    assert len(messages[0]) > TELEGRAM_MAX_CAPTION
+
+
+def test_a_post_without_a_still_is_still_sent(pilot, monkeypatch):
+    messages: list = []
+    pilot.generate_post = lambda *a, **k: _FakePost()
+    pilot.notify = lambda text: messages.append(text) or True
+    monkeypatch.setattr(pilot, "_still_for", lambda job_id, path: None)
+    job_id = _completed_job_with_video(pilot)
+
+    with pilot.session_factory() as session:
+        from repository import get_job, topics_awaiting_result
+
+        topic = topics_awaiting_result(session)[0]
+        assert pilot.send_post_draft(session, topic, get_job(session, job_id)) is True
+
+    assert messages == ["A detail the video skipped."]
+
+
+def test_no_post_text_is_not_an_error(pilot, monkeypatch):
+    pilot.generate_post = lambda *a, **k: None
+    monkeypatch.setattr(pilot, "_still_for", lambda job_id, path: None)
+    job_id = _completed_job_with_video(pilot)
+
+    with pilot.session_factory() as session:
+        from repository import get_job, topics_awaiting_result
+
+        topic = topics_awaiting_result(session)[0]
+        assert pilot.send_post_draft(session, topic, get_job(session, job_id)) is False
+
+
+def test_a_failing_post_does_not_cost_the_success_notification(pilot, monkeypatch):
+    messages: list = []
+    pilot.notify = lambda text: messages.append(text) or True
+    monkeypatch.setattr(
+        pilot, "send_post_draft",
+        lambda session, topic, job: (_ for _ in ()).throw(RuntimeError("ollama down")),
+    )
+    _completed_job_with_video(pilot)
+
+    assert pilot.finish_completed_topics() == 1
+    assert messages and messages[0].startswith("✅")
+
+
+def test_the_post_prompt_gets_the_stored_notes(pilot, monkeypatch):
+    seen: dict = {}
+
+    def fake_post(subject, title, script, model, research=""):
+        seen.update(subject=subject, script=script, research=research)
+        return _FakePost()
+
+    pilot.generate_post = fake_post
+    monkeypatch.setattr(pilot, "_still_for", lambda job_id, path: None)
+    pilot.notify = lambda text: True
+    job_id = _completed_job_with_video(pilot)
+
+    with pilot.session_factory() as session:
+        from repository import get_job, topics_awaiting_result
+
+        topic = topics_awaiting_result(session)[0]
+        pilot.send_post_draft(session, topic, get_job(session, job_id))
+
+    assert seen["script"] == "A stored script."
+    assert "4.5 mm" in seen["research"]
