@@ -34,6 +34,13 @@ DEFAULT_RESULT_COUNT = 8
 # what survives costs the same two credits as asking for five, so `limit` means
 # usable sources wanted, not results requested.
 SEARCH_PAGE_SIZE = 10
+
+# Below this, a script is better off written with no specifics at all. One
+# thin source is worse than none: it is enough to make the model feel grounded
+# and not enough to hold it up, which is how a video came to explain mushroom
+# "umbrellas" as waxy filaments that reflect sunlight — a mechanism its single
+# source, one sentence about spores spreading in damp air, never mentioned.
+MIN_USABLE_SOURCES = 2
 SNIPPET_MAX_CHARS = 500
 BRIEF_MAX_SOURCES = 12
 # Sources are listed in the description, which YouTube caps; and a wall of

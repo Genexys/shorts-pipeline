@@ -542,15 +542,24 @@ RESEARCH_RULES = """
     Concrete detail is wanted: figures, dates, place names and named studies
     make the script worth trusting, so use the ones the notes give you.
     You MUST NOT state any number, date, percentage, institution, researcher
-    or study that does not appear in the notes. Where the notes do not support
-    a specific, write the general statement instead. Do not cite the notes by
-    number, and do not mention that notes exist.
+    or study that does not appear in the notes.
+    You MUST NOT invent how something works. Any mechanism, structure, cause or
+    process you describe has to come from the notes. If the notes do not explain
+    the subject, say what they do support and stop — do not fill the gap with a
+    plausible-sounding explanation.
+    If the subject itself is not borne out by the notes, write about what the
+    notes actually show rather than defending the premise.
+    Where the notes do not support a specific, write the general statement
+    instead. Do not cite the notes by number, and do not mention that notes
+    exist.
 """
 NO_RESEARCH_RULES = """
     You have no sources, so you must not invent the appearance of one. Do not
     state any specific figure, percentage, date, named study, named researcher
-    or named institution. Write what is generally established, without
-    fabricated precision.
+    or named institution, and do not describe any mechanism, structure or
+    process you are not certain of. Write what is generally established, in
+    general terms, without fabricated precision and without inventing an
+    explanation to fill the length.
 """
 
 
