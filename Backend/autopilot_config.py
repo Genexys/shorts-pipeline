@@ -1,4 +1,5 @@
 import os
+import random
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone, tzinfo
 from typing import Mapping, Optional
@@ -70,6 +71,7 @@ class AutopilotConfig:
     use_music: bool
     custom_prompt: str
     longform_per_week: int
+    curio_share: int
     output_retention_days: int
     telegram_bot_token: str
     telegram_chat_id: str
@@ -132,6 +134,9 @@ class AutopilotConfig:
             custom_prompt=get("AUTOPILOT_CUSTOM_PROMPT"),
             longform_per_week=_parse_int(
                 "AUTOPILOT_LONGFORM_PER_WEEK", get("AUTOPILOT_LONGFORM_PER_WEEK"), 0, 0, 7
+            ),
+            curio_share=_parse_int(
+                "AUTOPILOT_CURIO_SHARE", get("AUTOPILOT_CURIO_SHARE"), 33, 0, 100
             ),
             output_retention_days=_parse_int("OUTPUT_RETENTION_DAYS", get("OUTPUT_RETENTION_DAYS"), 7, 1, 365),
             telegram_bot_token=get("TELEGRAM_BOT_TOKEN").strip(),
@@ -199,3 +204,18 @@ def next_format(longform_this_week: int, config: AutopilotConfig) -> str:
     if config.longform_per_week <= 0:
         return "short"
     return "long" if longform_this_week < config.longform_per_week else "short"
+
+
+def choose_register(config: AutopilotConfig, roll: Optional[int] = None) -> str:
+    """Whether the next video explains something or reports something absurd.
+
+    A share rather than an alternation: a channel that reliably alternates is
+    as templated as one that never varies, and the monetization policy is about
+    exactly that.
+    """
+    from gpt import CURIO, EXPLAINER
+
+    if config.curio_share <= 0:
+        return EXPLAINER
+    drawn = random.randint(1, 100) if roll is None else roll
+    return CURIO if drawn <= config.curio_share else EXPLAINER

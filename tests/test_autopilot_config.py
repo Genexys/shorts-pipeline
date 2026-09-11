@@ -232,3 +232,40 @@ def test_week_start_on_monday_is_that_morning():
 def test_week_start_is_returned_as_utc():
     tz = ZoneInfo("Asia/Tbilisi")
     assert week_start(datetime(2026, 9, 10, 15, 30, tzinfo=tz), tz).tzinfo is timezone.utc
+
+
+# -- registers ---------------------------------------------------------------
+
+
+def test_curio_share_defaults_to_a_third():
+    from autopilot_config import AutopilotConfig
+
+    config = AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n"})
+    assert config.curio_share == 33
+
+
+def test_curio_share_is_bounded():
+    import pytest
+    from autopilot_config import AutopilotConfig, ConfigError
+
+    with pytest.raises(ConfigError):
+        AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n", "AUTOPILOT_CURIO_SHARE": "101"})
+
+
+def test_choose_register_follows_the_share():
+    from autopilot_config import AutopilotConfig, choose_register
+    from gpt import CURIO, EXPLAINER
+
+    config = AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n", "AUTOPILOT_CURIO_SHARE": "33"})
+    assert choose_register(config, roll=1) == CURIO
+    assert choose_register(config, roll=33) == CURIO
+    assert choose_register(config, roll=34) == EXPLAINER
+    assert choose_register(config, roll=100) == EXPLAINER
+
+
+def test_a_zero_share_never_draws_a_curio():
+    from autopilot_config import AutopilotConfig, choose_register
+    from gpt import EXPLAINER
+
+    config = AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n", "AUTOPILOT_CURIO_SHARE": "0"})
+    assert choose_register(config, roll=1) == EXPLAINER

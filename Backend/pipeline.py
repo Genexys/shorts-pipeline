@@ -117,6 +117,7 @@ def run_generation_pipeline(
     n_threads = data.get("threads")
     subtitles_position = data.get("subtitlesPosition")
     text_color = data.get("color")
+    register = data.get("register")
     use_music = data.get("useMusic", False)
     automate_youtube_upload = data.get("automateYoutubeUpload", False)
     job_id = str(data.get("jobId") or uuid4())
@@ -125,6 +126,7 @@ def run_generation_pipeline(
     emit("   Subject: " + data["videoSubject"], "info")
     emit("   AI Model: " + str(ai_model), "info")
     emit(f"   Format: {fmt.name} ({fmt.width}x{fmt.height})", "info")
+    emit(f"   Register: {register or 'explainer'}", "info")
     emit("   Custom Prompt: " + data["customPrompt"], "info")
 
     guard_cancelled()
@@ -192,6 +194,7 @@ def run_generation_pipeline(
             section_count=fmt.section_count,
             research=brief,
             section_research=section_research,
+            register=register,
         )
     else:
         script = generate_script(
@@ -202,6 +205,7 @@ def run_generation_pipeline(
             data["customPrompt"],
             target_words=target_words or fmt.target_words,
             research=brief,
+            register=register,
         )
 
     if not script:

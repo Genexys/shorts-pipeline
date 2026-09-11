@@ -19,12 +19,13 @@ from analytics import fetch_metrics
 from autopilot_config import (
     AutopilotConfig,
     ConfigError,
+    choose_register,
     next_format,
     slot_available,
     week_start,
 )
 from db import SessionLocal, init_db
-from gpt import extract_json_object, generate_response
+from gpt import EXPLAINER, TOPIC_BRIEFS, extract_json_object, generate_response
 from logstream import log
 from models import Topic
 from notify import TELEGRAM_MAX_CAPTION, send_telegram, send_telegram_photo
@@ -76,12 +77,16 @@ POST_STILL_NAME = "post_still.jpg"
 
 
 def build_payload(
-    config: AutopilotConfig, subject: str, format_name: str = "short"
+    config: AutopilotConfig,
+    subject: str,
+    format_name: str = "short",
+    register: str = EXPLAINER,
 ) -> dict:
     """Same shape as Frontend/app.js sends, plus upload flag and thread count."""
     return {
         "videoSubject": subject,
         "format": format_name,
+        "register": register,
         "aiModel": config.model,
         "voice": config.voice,
         "paragraphNumber": config.paragraphs,
@@ -100,7 +105,7 @@ def build_notifier(config: AutopilotConfig) -> Callable[[str], bool]:
     )
 
 
-def build_topic_prompt(niche: str, recent: list[str]) -> str:
+def build_topic_prompt(niche: str, recent: list[str], register: str = EXPLAINER) -> str:
     # Substitution happens after dedent/strip (via .format, not an f-string): recent
     # subjects are unindented, and interpolating them before dedent would drag the
     # whole block's common-indent calculation down to zero, leaving every other line
@@ -115,7 +120,7 @@ def build_topic_prompt(niche: str, recent: list[str]) -> str:
         Propose ONE new video topic. Requirements:
         - Written in English.
         - Between {min_words} and {max_words} words.
-        - A concrete fact, question or claim, not a broad category.
+        - {brief}
         - Must not repeat or rephrase any of the topics already used below.
 
         Topics already used (do not repeat, do not paraphrase):
@@ -129,6 +134,7 @@ def build_topic_prompt(niche: str, recent: list[str]) -> str:
         min_words=TOPIC_MIN_WORDS,
         max_words=TOPIC_MAX_WORDS,
         recent_block=recent_block,
+        brief=TOPIC_BRIEFS[register],
     )
 
 
@@ -334,7 +340,10 @@ class Autopilot:
                 log("[*] Autopilot: a job is already queued or running, waiting.", "info")
                 return None
 
-            topic = next_planned_topic(session) or self.generate_topic(session)
+            register = choose_register(self.config)
+            topic = next_planned_topic(session) or self.generate_topic(
+                session, register
+            )
             if topic is None:
                 return None
 
@@ -346,19 +355,21 @@ class Autopilot:
             job = queue_topic_job(
                 session,
                 topic,
-                build_payload(self.config, topic.subject, format_name),
+                build_payload(self.config, topic.subject, format_name, register),
                 now=now,
             )
             log(
-                f"[+] Autopilot queued {format_name} job {job.id} "
+                f"[+] Autopilot queued {format_name} {register} job {job.id} "
                 f"for topic '{topic.subject}'",
                 "success",
             )
             return job.id
 
-    def generate_topic(self, session: Session) -> Optional[Topic]:
+    def generate_topic(
+        self, session: Session, register: str = EXPLAINER
+    ) -> Optional[Topic]:
         recent = recent_topic_subjects(session, RECENT_TOPICS_LIMIT)
-        prompt = build_topic_prompt(self.config.niche, recent)
+        prompt = build_topic_prompt(self.config.niche, recent, register)
         last_problem = "no response"
         for attempt in range(1, TOPIC_ATTEMPTS + 1):
             try:

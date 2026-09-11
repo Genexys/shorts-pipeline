@@ -610,3 +610,47 @@ def test_no_research_rules_also_forbid_inventing_a_mechanism():
     rules = " ".join(gpt.research_rules("").split())
     assert "do not describe any mechanism" in rules
     assert "inventing an explanation to fill the length" in rules
+
+
+# -- registers ---------------------------------------------------------------
+
+
+def test_curio_register_asks_for_a_deadpan_delivery():
+    # Asking an 8B model to be funny produces strained puns. Asking it to
+    # report something absurd plainly lets the subject do the work.
+    rules = " ".join(gpt.register_rules(gpt.CURIO).split())
+    assert "Tone: completely straight" in rules
+    assert "Do not make jokes, puns or asides" in rules
+    assert "do not use exclamation marks" in rules
+
+
+def test_explainer_register_adds_nothing():
+    assert gpt.register_rules(gpt.EXPLAINER) == ""
+    assert gpt.register_rules(None) == ""
+
+
+def test_curio_topic_brief_demands_a_verifiable_absurdity():
+    brief = " ".join(gpt.TOPIC_BRIEFS[gpt.CURIO].split())
+    assert "absurd" in brief
+    assert "verifiable" in brief
+    assert "urban legend" in brief
+
+
+def test_generate_script_carries_the_register_into_the_prompt(monkeypatch):
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or ("word " * 130),
+    )
+    gpt.generate_script("s", 1, "m", "en_us_001", "", target_words=120, register=gpt.CURIO)
+    assert "Tone: completely straight" in prompts[0]
+
+
+def test_curio_brief_forbids_overselling():
+    # Observed on the first live run: "a jellyfish that is literally
+    # un-killable". Immortal means it does not die of ageing, not that nothing
+    # can kill it — and an overstated premise is one the script then defends by
+    # inventing, which is how the mushroom "umbrellas" happened.
+    brief = " ".join(gpt.TOPIC_BRIEFS[gpt.CURIO].split())
+    assert "without overselling" in brief
+    assert "no 'literally'" in brief

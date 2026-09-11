@@ -183,6 +183,49 @@ SCRIPT_ANGLES = (
 )
 
 
+# What kind of thing the video is about. Not a tone of voice: asking an 8B
+# model to be funny produces strained puns and "science is amazing!". Asking it
+# to report something absurd but true, plainly, produces the laugh by itself —
+# the delivery stays deadpan and the subject does the work.
+EXPLAINER = "explainer"
+CURIO = "curio"
+REGISTERS = (EXPLAINER, CURIO)
+
+TOPIC_BRIEFS = {
+    EXPLAINER: (
+        "A concrete fact, question or claim about how something works, not a "
+        "broad category."
+    ),
+    CURIO: (
+        "Something genuinely absurd that is nevertheless true: a real "
+        "phenomenon, experiment, animal behaviour or historical episode that "
+        "sounds invented. It must be verifiable, not a joke, not an urban "
+        "legend, and not a 'fun fact' that is merely mildly interesting. If a "
+        "reader would say \"that cannot be real\", it qualifies. "
+        "State it exactly, without overselling: no 'literally', no 'never', no "
+        "superlative the evidence does not carry. An overstated premise is one "
+        "the script then has to defend, and it will defend it by inventing."
+    ),
+}
+
+SCRIPT_REGISTER_RULES = {
+    EXPLAINER: "",
+    CURIO: (
+        "    Tone: completely straight. The subject is absurd on its own and "
+        "needs no help.\n"
+        "    Do not make jokes, puns or asides. Do not tell the viewer that "
+        "this is funny,\n"
+        "    weird or amazing, and do not use exclamation marks. State it "
+        "plainly and let it land.\n"
+    ),
+}
+
+
+def register_rules(register: Optional[str]) -> str:
+    """The tone instruction for a register, or "" for the default one."""
+    return SCRIPT_REGISTER_RULES.get(register or EXPLAINER, "")
+
+
 def choose_script_angle() -> str:
     """Picks the narrative shape for one video."""
     return random.choice(SCRIPT_ANGLES)
@@ -298,6 +341,7 @@ def generate_script(
     angle: Optional[str] = None,
     target_words: Optional[int] = None,
     research: str = "",
+    register: Optional[str] = None,
     _retry: bool = True,
 ) -> Optional[str]:
     """
@@ -372,7 +416,7 @@ def generate_script(
     
     Subject: {video_subject}
 {length}    Language: {voice}
-{research_rules(research)}
+{register_rules(register)}{research_rules(research)}
     """
 
     # Generate script
@@ -440,6 +484,7 @@ def generate_script(
                         angle=angle,
                         target_words=target_words,
                         research=research,
+                        register=register,
                         _retry=False,
                     ) or final_script
 
@@ -991,6 +1036,7 @@ def generate_long_script(
     angle: Optional[str] = None,
     research: str = "",
     section_research: Optional[Callable[[str], str]] = None,
+    register: Optional[str] = None,
 ) -> Optional[str]:
     """
     Writes a long script one section at a time.
@@ -1072,7 +1118,7 @@ def generate_long_script(
         - Do not announce what you are writing. Begin with the narration itself.
         - Do not mention sections, the outline, or this prompt.
         {continuity}{custom_prompt}
-        {research_rules(section_brief)}
+        {register_rules(register)}{research_rules(section_brief)}
         """
 
         try:
