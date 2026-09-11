@@ -356,6 +356,7 @@ def generate_script(
     target_words: Optional[int] = None,
     research: str = "",
     register: Optional[str] = None,
+    lead_with_payoff: bool = False,
     _retry: bool = True,
 ) -> Optional[str]:
     """
@@ -430,7 +431,7 @@ def generate_script(
     
     Subject: {video_subject}
 {length}    Language: {voice}
-{register_rules(register)}{research_rules(research)}
+{OPENING_RULES if lead_with_payoff else ""}{register_rules(register)}{research_rules(research)}
     """
 
     # Generate script
@@ -474,33 +475,42 @@ def generate_script(
 
         log(f"Number of paragraphs used: {len(selected_paragraphs)}", "success")
 
-        # The floor was only ever a sentence in the prompt; nothing measured
-        # whether it was met, so a short script shipped silently. One retry:
-        # the second draft is usually closer, and looping on an uncooperative
-        # model would cost more than the words are worth.
+        # Two ways a draft can be wrong, and one retry covers both. The floor
+        # was only ever a sentence in the prompt, and a weak opening is what
+        # the retention numbers actually punish.
+        problem = None
         if target_words:
             written = len(final_script.split())
             floor = int(target_words * SCRIPT_WORD_FLOOR_RATIO)
             if written < floor:
-                log(
-                    f"[!] Script came back {written} words, under the {floor} floor "
-                    f"for a {target_words}-word target."
-                    + (" Retrying once." if _retry else ""),
-                    "warning",
+                problem = (
+                    f"came back {written} words, under the {floor} floor "
+                    f"for a {target_words}-word target"
                 )
-                if _retry:
-                    return generate_script(
-                        video_subject,
-                        paragraph_number,
-                        ai_model,
-                        voice,
-                        customPrompt,
-                        angle=angle,
-                        target_words=target_words,
-                        research=research,
-                        register=register,
-                        _retry=False,
-                    ) or final_script
+        if problem is None and lead_with_payoff and opens_weakly(final_script):
+            opening = (split_sentences(final_script) or [""])[0]
+            problem = f'opens on setup rather than the fact: "{opening[:80]}"'
+
+        if problem:
+            log(
+                f"[!] Script {problem}."
+                + (" Retrying once." if _retry else ""),
+                "warning",
+            )
+            if _retry:
+                return generate_script(
+                    video_subject,
+                    paragraph_number,
+                    ai_model,
+                    voice,
+                    customPrompt,
+                    angle=angle,
+                    target_words=target_words,
+                    research=research,
+                    register=register,
+                    lead_with_payoff=lead_with_payoff,
+                    _retry=False,
+                ) or final_script
 
         return final_script
     else:
@@ -591,6 +601,43 @@ SUBJECT_STOPWORDS = frozenset(
     when where which who why will with without you your""".split()
 )
 SUBJECT_KEYWORD_COUNT = 5
+
+# What the first sentence must do. Measured on the channel's first week: the
+# average view was 5.6 seconds against a 38-second video, and the opening
+# sentence of five videos out of six was pure setup — "Sleep is a vital part of
+# our lives", "Animals migrate to find more abundant food sources". At roughly
+# 2.5 words a second, twelve words of preamble is five seconds. Viewers were
+# leaving exactly when the interesting part would have started.
+OPENING_RULES = """
+    Your FIRST sentence must contain the surprising thing itself. Not a
+    definition of the subject, not why it matters, not that scientists have
+    wondered about it, not what the video will cover. If the first sentence
+    would still make sense with the subject swapped for another, it is wasted.
+    Say the fact, then explain it.
+"""
+
+# Openings that say nothing, each taken from a published video's first
+# sentence. A blocklist is a heuristic and will not catch every evasion — the
+# instruction above does the work; this catches the ones it misses.
+WEAK_OPENING_PATTERNS = (
+    r"\bis (?:a |an )?(?:vital|essential|important|fascinating|complex|common|remarkable)\b",
+    r"\b(?:have|has) (?:long )?(?:puzzled|fascinated|intrigued|baffled)\b",
+    r"\bscientists have (?:long )?\b",
+    r"\b(?:have|has) adapted to\b",
+    r"\bplays? (?:a|an) (?:vital|important|key|crucial|significant) role\b",
+    r"\bin this video\b",
+    r"\b(?:have|has) you ever wondered\b",
+    r"\bone of the most (?:fascinating|interesting|common|remarkable)\b",
+    r"\bfor centuries\b",
+    r"\bwhen it comes to\b",
+)
+_WEAK_OPENING_RE = re.compile("|".join(WEAK_OPENING_PATTERNS), re.IGNORECASE)
+
+
+def opens_weakly(script: str) -> bool:
+    """Whether the first sentence spends itself on setup instead of the fact."""
+    first = (split_sentences(script or "") or [""])[0]
+    return bool(_WEAK_OPENING_RE.search(first))
 
 # The instruction that makes concrete detail safe. Specifics are what make a
 # script worth trusting — a real figure a viewer can check beats "some research

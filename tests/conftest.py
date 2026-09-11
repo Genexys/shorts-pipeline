@@ -43,3 +43,17 @@ def session_factory(tmp_path: Path):
 def session(session_factory):
     with session_factory() as db_session:
         yield db_session
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """No test may reach a paid API.
+
+    gpt.py loads the project .env at import, so a configured ANTHROPIC_API_KEY
+    or FIRECRAWL_API_KEY leaks into the suite: write_creative went to Claude
+    instead of the patched generate_response, which cost money, made the run
+    non-deterministic and took it from 40 seconds to seven minutes. Tests that
+    want either key set it themselves.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "")
