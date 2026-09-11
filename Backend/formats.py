@@ -36,6 +36,12 @@ class VideoFormat:
     # How many search results to ground the script in. Billed at 2 credits per
     # 10 results against a 1000-a-month free tier, so this is cheap either way.
     research_results: int
+    # Whether the first sentence must carry the fact itself. Measured on the
+    # channel's first week: average view 5.6s against a 38s video, while the
+    # opening sentence of five videos out of six spent about five seconds
+    # defining the subject. Viewers were leaving exactly when the interesting
+    # part would have started.
+    lead_with_payoff: bool
     # Narrate a whole section per request rather than a sentence per request.
     narrate_by_section: bool
     # Silence inserted between sections, in seconds. A documentary narrator
@@ -99,6 +105,8 @@ SHORT = VideoFormat(
     ranking_metric="average_view_percentage",
     # 120 words has room for one or two real specifics, not eight.
     research_results=5,
+    # Fifty seconds has no room for a slow build.
+    lead_with_payoff=True,
     # One sentence per request, so the subtitle fallback can time each clip.
     # A Short is a single section anyway, so nothing is lost.
     narrate_by_section=False,
@@ -157,6 +165,9 @@ LONG = VideoFormat(
     ranking_metric="average_view_duration",
     # Eight sections across 800 words, each needing something concrete.
     research_results=10,
+    # Five minutes can afford to set something up before paying it off, and a
+    # long video the viewer chose to open is not fighting a swipe.
+    lead_with_payoff=False,
     # A paragraph per request: the voice then shapes the rhythm inside it,
     # instead of ending every sentence as though it were the last.
     narrate_by_section=True,

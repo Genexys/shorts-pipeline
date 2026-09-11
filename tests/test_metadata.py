@@ -1,3 +1,4 @@
+import pytest
 import time
 
 import gpt
@@ -654,3 +655,102 @@ def test_curio_brief_forbids_overselling():
     brief = " ".join(gpt.TOPIC_BRIEFS[gpt.CURIO].split())
     assert "without overselling" in brief
     assert "no 'literally'" in brief
+
+
+# -- openings ----------------------------------------------------------------
+
+
+REAL_WEAK_OPENINGS = (
+    "Sleep is a vital part of our lives, essential for our physical and mental health.",
+    "Mushrooms have adapted to survive in a wide range of environments, but some do more.",
+    "Time seems to pass at different speeds as we age, and this has puzzled humans for centuries.",
+)
+
+
+@pytest.mark.parametrize("opening", REAL_WEAK_OPENINGS)
+def test_real_published_openings_are_caught(opening):
+    # Every one of these shipped. At 2.5 words a second they cost about five
+    # seconds, against a 5.6-second average view.
+    assert gpt.opens_weakly(opening) is True
+
+
+@pytest.mark.parametrize(
+    "opening",
+    [
+        "The Texas horned lizard squirts blood from its own eyes when a coyote comes close.",
+        "A jellyfish in the Mediterranean reverses its own life cycle when injured.",
+        "Sea cucumbers throw up their internal organs to escape, then grow new ones.",
+    ],
+)
+def test_a_strong_opening_passes(opening):
+    assert gpt.opens_weakly(opening) is False
+
+
+def test_the_blocklist_does_not_catch_every_weak_opening():
+    # "Animals migrate to find more abundant food sources at different times of
+    # the year" shipped, and is weak for a reason no phrase captures: it
+    # restates the premise. Catching it by pattern would mean matching ordinary
+    # declarative sentences, which is what a good opening also is. The prompt
+    # rule is what handles this class; the blocklist only catches stock filler.
+    assert gpt.opens_weakly(
+        "Animals migrate to find more abundant food sources at different times of the year."
+    ) is False
+
+
+def test_opens_weakly_only_reads_the_first_sentence():
+    # Later filler is the body's business; only the opening decides the swipe.
+    script = "A lizard squirts blood from its eyes. Scientists have long puzzled over why."
+    assert gpt.opens_weakly(script) is False
+
+
+def test_opens_weakly_handles_an_empty_script():
+    assert gpt.opens_weakly("") is False
+
+
+def test_shorts_are_told_to_lead_with_the_payoff(monkeypatch):
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or ("A lizard squirts blood. " + "word " * 130),
+    )
+    gpt.generate_script("s", 1, "m", "en_us_001", "", target_words=120, lead_with_payoff=True)
+    assert "FIRST sentence must contain the surprising thing" in prompts[0]
+
+
+def test_long_form_is_not(monkeypatch):
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or ("word " * 130),
+    )
+    gpt.generate_script("s", 1, "m", "en_us_001", "", target_words=120)
+    assert "FIRST sentence" not in prompts[0]
+
+
+def test_a_weak_opening_is_retried_once(monkeypatch):
+    drafts = [
+        "Sleep is a vital part of our lives. " + "word " * 130,
+        "A lizard squirts blood from its eyes. " + "word " * 130,
+    ]
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: drafts.pop(0))
+
+    script = gpt.generate_script(
+        "s", 1, "m", "en_us_001", "", target_words=120, lead_with_payoff=True
+    )
+
+    assert script.startswith("A lizard squirts blood")
+    assert drafts == []
+
+
+def test_a_weak_second_draft_is_still_returned(monkeypatch):
+    # A dull video beats a failed job, and the warning says what happened.
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: "Sleep is a vital part of our lives. " + "word " * 130,
+    )
+
+    script = gpt.generate_script(
+        "s", 1, "m", "en_us_001", "", target_words=120, lead_with_payoff=True
+    )
+
+    assert script.startswith("Sleep is a vital part")

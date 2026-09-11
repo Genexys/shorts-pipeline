@@ -206,6 +206,7 @@ def run_generation_pipeline(
             target_words=target_words or fmt.target_words,
             research=brief,
             register=register,
+            lead_with_payoff=fmt.lead_with_payoff,
         )
 
     if not script:
