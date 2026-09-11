@@ -75,6 +75,7 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_CUSTOM_PROMPT` | Custom script prompt. | empty |
 | `AUTOPILOT_LONGFORM_PER_WEEK` | Long videos per week, 0..7. `0` keeps the autopilot on Shorts. Long form wins the slot whenever the weekly budget has room. | `0` |
 | `AUTOPILOT_CURIO_SHARE` | Percent of videos that report something absurd but true instead of explaining how something works, 0..100. See [Registers](#registers). | `33` |
+| `AUTOPILOT_ANNIVERSARY_SHARE` | Percent of videos built from an event that happened on today's date, 0..100. See [Registers](#registers). | `20` |
 | `OUTPUT_RETENTION_DAYS` | Days to keep `output/` videos and thumbnails, 1..365. | `7` |
 | `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
 | `TELEGRAM_CHAT_ID` | Chat that receives notifications. | empty |
@@ -213,8 +214,9 @@ video that still gets made.
 
 ## Registers
 
-Every video is either an **explainer** — how something works — or a **curio**:
-a real phenomenon that sounds invented. `AUTOPILOT_CURIO_SHARE` sets how often
+Every video is an **explainer** — how something works — a **curio** (a real
+phenomenon that sounds invented), or an **anniversary**: something that
+happened on today's date. `AUTOPILOT_CURIO_SHARE` sets how often
 the second is drawn, per video rather than in rotation. A channel that reliably
 alternates is as templated as one that never varies.
 
@@ -227,6 +229,20 @@ marks.
 The topic brief for a curio also forbids overselling: no "literally", no
 absolutes the evidence does not carry. An overstated premise is one the script
 then has to defend, and it defends it by inventing.
+
+Anniversaries are not a reach play. This channel takes 96% of its views from
+the Shorts feed and 2.5% from search, and on a round date the search results
+belong to channels orders of magnitude larger. They are there for grounding: a
+dated event has a year, a place and participants, research finds it
+immediately, and unlike "mushrooms have built-in umbrellas" it cannot be
+invented.
+
+Wikimedia's on-this-day feed supplies them, free and unauthenticated.
+Disasters, wars, crime and politics are filtered out before the model sees the
+day, and what survives is ordered so science and technology are read first —
+the feed is newest-first, so a plain truncation would keep this decade's
+politics and cut the nineteenth-century discovery. If nothing suitable remains,
+the register falls back to an explainer rather than forcing one.
 
 The register is chosen when the job is queued and travels in its payload, since
 the script is written in another process.

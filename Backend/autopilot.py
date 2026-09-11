@@ -25,7 +25,7 @@ from autopilot_config import (
     week_start,
 )
 from db import SessionLocal, init_db
-from gpt import EXPLAINER, TOPIC_BRIEFS, extract_json_object, write_creative
+from gpt import ANNIVERSARY, CURIO, EXPLAINER, TOPIC_BRIEFS, extract_json_object, write_creative
 from logstream import log
 from models import Topic
 from notify import TELEGRAM_MAX_CAPTION, send_telegram, send_telegram_photo
@@ -53,6 +53,7 @@ from repository import (
     recent_topic_subjects,
     topics_awaiting_result,
 )
+import anniversary
 import research
 from posts import generate_post
 from thumbnail import pick_still
@@ -409,7 +410,7 @@ class Autopilot:
         # produces either an overstatement it will later defend by fabricating,
         # or a fact it half-remembers.
         material = ""
-        if register != EXPLAINER and research.is_configured():
+        if register == CURIO and research.is_configured():
             seed = research.curio_seed()
             found = research.gather([seed], limit=research.DEFAULT_RESULT_COUNT)
             material = research.format_brief(found)
@@ -417,6 +418,15 @@ class Autopilot:
                 f"[+] Curio seed '{seed}': {len(found)} source(s).",
                 "info" if found else "warning",
             )
+        elif register == ANNIVERSARY:
+            events = anniversary.fetch_events()
+            material = anniversary.format_events(events)
+            log(f"[+] {len(events)} usable events for today.", "info" if events else "warning")
+            if not events:
+                # Most days are wars and disasters once the grim ones are cut.
+                # An explainer beats an anniversary forced out of nothing.
+                register = EXPLAINER
+
         prompt = build_topic_prompt(self.config.niche, recent, register, material)
         last_problem = "no response"
         for attempt in range(1, TOPIC_ATTEMPTS + 1):

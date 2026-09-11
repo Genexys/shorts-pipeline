@@ -252,20 +252,41 @@ def test_curio_share_is_bounded():
         AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n", "AUTOPILOT_CURIO_SHARE": "101"})
 
 
-def test_choose_register_follows_the_share():
+def test_choose_register_splits_the_roll_three_ways():
     from autopilot_config import AutopilotConfig, choose_register
-    from gpt import CURIO, EXPLAINER
+    from gpt import ANNIVERSARY, CURIO, EXPLAINER
 
-    config = AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n", "AUTOPILOT_CURIO_SHARE": "33"})
+    config = AutopilotConfig.from_env(
+        {
+            "AUTOPILOT_NICHE": "n",
+            "AUTOPILOT_CURIO_SHARE": "33",
+            "AUTOPILOT_ANNIVERSARY_SHARE": "20",
+        }
+    )
     assert choose_register(config, roll=1) == CURIO
     assert choose_register(config, roll=33) == CURIO
-    assert choose_register(config, roll=34) == EXPLAINER
+    assert choose_register(config, roll=34) == ANNIVERSARY
+    assert choose_register(config, roll=53) == ANNIVERSARY
+    assert choose_register(config, roll=54) == EXPLAINER
     assert choose_register(config, roll=100) == EXPLAINER
 
 
-def test_a_zero_share_never_draws_a_curio():
+def test_zero_shares_leave_only_explainers():
     from autopilot_config import AutopilotConfig, choose_register
     from gpt import EXPLAINER
 
-    config = AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n", "AUTOPILOT_CURIO_SHARE": "0"})
+    config = AutopilotConfig.from_env(
+        {
+            "AUTOPILOT_NICHE": "n",
+            "AUTOPILOT_CURIO_SHARE": "0",
+            "AUTOPILOT_ANNIVERSARY_SHARE": "0",
+        }
+    )
     assert choose_register(config, roll=1) == EXPLAINER
+    assert choose_register(config, roll=100) == EXPLAINER
+
+
+def test_anniversary_share_defaults_to_a_fifth():
+    from autopilot_config import AutopilotConfig
+
+    assert AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n"}).anniversary_share == 20
