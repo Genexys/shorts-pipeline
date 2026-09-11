@@ -25,7 +25,7 @@ from autopilot_config import (
     week_start,
 )
 from db import SessionLocal, init_db
-from gpt import EXPLAINER, TOPIC_BRIEFS, extract_json_object, generate_response
+from gpt import EXPLAINER, TOPIC_BRIEFS, extract_json_object, write_creative
 from logstream import log
 from models import Topic
 from notify import TELEGRAM_MAX_CAPTION, send_telegram, send_telegram_photo
@@ -49,6 +49,7 @@ from repository import (
     recent_topic_subjects,
     topics_awaiting_result,
 )
+import research
 from posts import generate_post
 from thumbnail import pick_still
 from utils import ENV_FILE, OUTPUT_DIR, PROJECT_ROOT, TEMP_DIR
@@ -105,7 +106,12 @@ def build_notifier(config: AutopilotConfig) -> Callable[[str], bool]:
     )
 
 
-def build_topic_prompt(niche: str, recent: list[str], register: str = EXPLAINER) -> str:
+def build_topic_prompt(
+    niche: str,
+    recent: list[str],
+    register: str = EXPLAINER,
+    material: str = "",
+) -> str:
     # Substitution happens after dedent/strip (via .format, not an f-string): recent
     # subjects are unindented, and interpolating them before dedent would drag the
     # whole block's common-indent calculation down to zero, leaving every other line
@@ -117,7 +123,7 @@ def build_topic_prompt(niche: str, recent: list[str], register: str = EXPLAINER)
 
         Channel niche: {niche}
 
-        Propose ONE new video topic. Requirements:
+        {material}Propose ONE new video topic. Requirements:
         - Written in English.
         - Between {min_words} and {max_words} words.
         - {brief}
@@ -129,12 +135,20 @@ def build_topic_prompt(niche: str, recent: list[str], register: str = EXPLAINER)
         Return ONLY a JSON object: {{"subject": "..."}}
         """
     ).strip()
+    material_block = (
+        "Real material found by searching. Pick one of these and turn it into a\n"
+        "        topic; do not invent something else, and do not use anything the\n"
+        f"        notes do not support.\n\n        {material}\n\n        "
+        if material.strip()
+        else ""
+    )
     return template.format(
         niche=niche,
         min_words=TOPIC_MIN_WORDS,
         max_words=TOPIC_MAX_WORDS,
         recent_block=recent_block,
         brief=TOPIC_BRIEFS[register],
+        material=material_block,
     )
 
 
@@ -144,7 +158,7 @@ class Autopilot:
         config: AutopilotConfig,
         session_factory: Callable[[], Session],
         notify: Callable[[str], bool] = send_telegram,
-        generate: Callable[[str, str], str] = generate_response,
+        generate: Callable[[str, str], str] = write_creative,
         output_dir: Path = OUTPUT_DIR,
         fetch_metrics: Callable = fetch_metrics,
         generate_post: Callable = generate_post,
@@ -369,7 +383,19 @@ class Autopilot:
         self, session: Session, register: str = EXPLAINER
     ) -> Optional[Topic]:
         recent = recent_topic_subjects(session, RECENT_TOPICS_LIMIT)
-        prompt = build_topic_prompt(self.config.niche, recent, register)
+        # A curio is found, not invented. Asked to make one up, the model
+        # produces either an overstatement it will later defend by fabricating,
+        # or a fact it half-remembers.
+        material = ""
+        if register != EXPLAINER and research.is_configured():
+            seed = research.curio_seed()
+            found = research.gather([seed], limit=research.DEFAULT_RESULT_COUNT)
+            material = research.format_brief(found)
+            log(
+                f"[+] Curio seed '{seed}': {len(found)} source(s).",
+                "info" if found else "warning",
+            )
+        prompt = build_topic_prompt(self.config.niche, recent, register, material)
         last_problem = "no response"
         for attempt in range(1, TOPIC_ATTEMPTS + 1):
             try:

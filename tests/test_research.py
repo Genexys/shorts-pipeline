@@ -385,3 +385,15 @@ def test_min_usable_sources_is_more_than_one():
     # One thin source is worse than none: enough to make the model feel
     # grounded, not enough to hold it up.
     assert research.MIN_USABLE_SOURCES >= 2
+
+
+def test_curio_seeds_are_searchable_phrases():
+    assert len(research.CURIO_SEEDS) >= 8
+    assert all(len(seed.split()) >= 3 for seed in research.CURIO_SEEDS)
+
+
+def test_curio_seed_varies():
+    import random
+
+    rng = random.Random(7)
+    assert len({research.curio_seed(rng) for _ in range(40)}) > 1
