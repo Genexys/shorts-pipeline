@@ -203,7 +203,8 @@ SCRIPT_ANGLES = (
 # the delivery stays deadpan and the subject does the work.
 EXPLAINER = "explainer"
 CURIO = "curio"
-REGISTERS = (EXPLAINER, CURIO)
+ANNIVERSARY = "anniversary"
+REGISTERS = (EXPLAINER, CURIO, ANNIVERSARY)
 
 TOPIC_BRIEFS = {
     EXPLAINER: (
@@ -220,10 +221,21 @@ TOPIC_BRIEFS = {
         "superlative the evidence does not carry. An overstated premise is one "
         "the script then has to defend, and it will defend it by inventing."
     ),
+    ANNIVERSARY: (
+        "Pick ONE event from the dated list below and make a topic of it. It "
+        "must be a discovery, an invention, an experiment, an expedition or a "
+        "first — something about how the world works or how we found out. If "
+        "nothing in the list is about science, technology, nature or the "
+        "history behind an everyday thing, return the JSON object with an "
+        "empty subject rather than forcing one. Do not mention the anniversary "
+        "or the date in the topic itself; the event is where the subject comes "
+        "from, not what the video is about."
+    ),
 }
 
 SCRIPT_REGISTER_RULES = {
     EXPLAINER: "",
+    ANNIVERSARY: "",
     CURIO: (
         "    Tone: completely straight. The subject is absurd on its own and "
         "needs no help.\n"

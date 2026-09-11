@@ -72,6 +72,7 @@ class AutopilotConfig:
     custom_prompt: str
     longform_per_week: int
     curio_share: int
+    anniversary_share: int
     output_retention_days: int
     telegram_bot_token: str
     telegram_chat_id: str
@@ -137,6 +138,13 @@ class AutopilotConfig:
             ),
             curio_share=_parse_int(
                 "AUTOPILOT_CURIO_SHARE", get("AUTOPILOT_CURIO_SHARE"), 33, 0, 100
+            ),
+            anniversary_share=_parse_int(
+                "AUTOPILOT_ANNIVERSARY_SHARE",
+                get("AUTOPILOT_ANNIVERSARY_SHARE"),
+                20,
+                0,
+                100,
             ),
             output_retention_days=_parse_int("OUTPUT_RETENTION_DAYS", get("OUTPUT_RETENTION_DAYS"), 7, 1, 365),
             telegram_bot_token=get("TELEGRAM_BOT_TOKEN").strip(),
@@ -213,9 +221,11 @@ def choose_register(config: AutopilotConfig, roll: Optional[int] = None) -> str:
     as templated as one that never varies, and the monetization policy is about
     exactly that.
     """
-    from gpt import CURIO, EXPLAINER
+    from gpt import ANNIVERSARY, CURIO, EXPLAINER
 
-    if config.curio_share <= 0:
-        return EXPLAINER
     drawn = random.randint(1, 100) if roll is None else roll
-    return CURIO if drawn <= config.curio_share else EXPLAINER
+    if drawn <= config.curio_share:
+        return CURIO
+    if drawn <= config.curio_share + config.anniversary_share:
+        return ANNIVERSARY
+    return EXPLAINER
