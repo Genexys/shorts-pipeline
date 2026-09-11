@@ -61,6 +61,9 @@ def test_build_payload_matches_frontend_shape():
         # The API treats format as optional and defaults to short, so the
         # frontend need not send it; autopilot is explicit about what it wants.
         "format": "short",
+        # Explains something, or reports something absurd. It travels with the
+        # job because the script is written in another process.
+        "register": "explainer",
         "aiModel": "llama3.1:8b",
         "voice": "en_us_001",
         "paragraphNumber": 1,

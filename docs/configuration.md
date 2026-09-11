@@ -72,6 +72,7 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_USE_MUSIC` | Mix a background music bed from `Songs/`. See [Background music](#background-music). | `false` |
 | `AUTOPILOT_CUSTOM_PROMPT` | Custom script prompt. | empty |
 | `AUTOPILOT_LONGFORM_PER_WEEK` | Long videos per week, 0..7. `0` keeps the autopilot on Shorts. Long form wins the slot whenever the weekly budget has room. | `0` |
+| `AUTOPILOT_CURIO_SHARE` | Percent of videos that report something absurd but true instead of explaining how something works, 0..100. See [Registers](#registers). | `33` |
 | `OUTPUT_RETENTION_DAYS` | Days to keep `output/` videos and thumbnails, 1..365. | `7` |
 | `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
 | `TELEGRAM_CHAT_ID` | Chat that receives notifications. | empty |
@@ -207,3 +208,23 @@ Search bills 2 credits per 10 results against a free 1000 a month, so three
 videos a day costs well under the free tier. A failed search, an exhausted
 balance or a missing key all produce the same thing: an empty brief and a
 video that still gets made.
+
+## Registers
+
+Every video is either an **explainer** — how something works — or a **curio**:
+a real phenomenon that sounds invented. `AUTOPILOT_CURIO_SHARE` sets how often
+the second is drawn, per video rather than in rotation. A channel that reliably
+alternates is as templated as one that never varies.
+
+A register is not a tone of voice. An 8B model asked to be funny writes
+strained puns and tells the viewer that science is amazing; asked to state
+something absurd plainly, it lets the subject do the work. So a curio script is
+instructed to stay completely straight — no jokes, no asides, no exclamation
+marks.
+
+The topic brief for a curio also forbids overselling: no "literally", no
+absolutes the evidence does not carry. An overstated premise is one the script
+then has to defend, and it defends it by inventing.
+
+The register is chosen when the job is queued and travels in its payload, since
+the script is written in another process.
