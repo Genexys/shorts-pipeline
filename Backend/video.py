@@ -1,5 +1,7 @@
 import os
 import subprocess
+
+from PIL import Image
 import uuid
 
 import requests
@@ -14,6 +16,7 @@ from moviepy import AudioFileClip
 from dotenv import load_dotenv
 from formats import SHORT, VideoFormat
 from logstream import log
+from thumbnail import score_frame
 from search import DOWNLOAD_TIMEOUT
 from utils import ENV_FILE, TEMP_DIR, SUBTITLES_DIR, FONTS_DIR
 
@@ -1050,3 +1053,56 @@ def make_silence(seconds: float, output_path: str) -> str:
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
     return output_path
+
+
+# Where to sample a clip when judging how striking it opens. Far enough in to
+# clear a fade or a title card, early enough to be what the viewer actually
+# sees first.
+OPENING_SAMPLE_SECONDS = 0.5
+
+
+def promote_strongest_opening(
+    video_paths: List[str], work_dir: Path, ffmpeg: str = "ffmpeg"
+) -> List[str]:
+    """Moves the most striking clip to the front, leaving the rest in order.
+
+    The first frame decides whether a Short is watched at all, and until now it
+    was whichever clip the first search term happened to return. Only the
+    opening is promoted rather than sorting the whole list: ranking every clip
+    by contrast would front-load the good footage and leave a dull tail, and
+    the order after the first shot is already varied on purpose.
+
+    Returns the list unchanged if fewer than two clips, or if no frame can be
+    read — a worse opening beats a failed render.
+    """
+    if len(video_paths) < 2:
+        return list(video_paths)
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    best_index, best_score = 0, None
+    for index, path in enumerate(video_paths):
+        frame = work_dir / f"opening_{index}.png"
+        try:
+            subprocess.run(
+                [
+                    ffmpeg, "-v", "error", "-y",
+                    "-ss", f"{OPENING_SAMPLE_SECONDS}",
+                    "-i", path, "-frames:v", "1", str(frame),
+                ],
+                check=True, capture_output=True, text=True,
+            )
+            with Image.open(frame) as image:
+                score = score_frame(image)
+        except (subprocess.CalledProcessError, OSError):
+            continue
+        if best_score is None or score > best_score:
+            best_index, best_score = index, score
+
+    if best_score is None:
+        log("[!] Could not judge any opening frame; leaving the order alone.", "warning")
+        return list(video_paths)
+
+    ordered = list(video_paths)
+    ordered.insert(0, ordered.pop(best_index))
+    log(f"[+] Opening on clip {best_index + 1} of {len(ordered)}.", "info")
+    return ordered
