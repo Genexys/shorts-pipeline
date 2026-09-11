@@ -39,8 +39,12 @@ from repository import (
     get_job,
     has_active_jobs,
     last_topic_used_at,
+    daily_movement,
     get_research_sources,
     get_script,
+    record_stats,
+    top_performing_subjects,
+    worst_performing_subjects,
     list_artifacts,
     mark_topic_finished,
     next_planned_topic,
@@ -54,6 +58,7 @@ from posts import generate_post
 from thumbnail import pick_still
 from utils import ENV_FILE, OUTPUT_DIR, PROJECT_ROOT, TEMP_DIR
 from video import probe_duration
+from youtube import fetch_statistics
 
 TICK_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 3600
@@ -75,6 +80,19 @@ METRICS_LOOKBACK_DAYS = 90
 # into Studio, so the caption is the post text and nothing else — a prefix
 # would be copied along with it.
 POST_STILL_NAME = "post_still.jpg"
+
+# Counts are read once a day, in the morning, so each reading covers a whole
+# finished day rather than a partial one. The Data API is current, unlike
+# Analytics — that is the whole reason this exists alongside it.
+STATS_HOUR = 9
+# Retention comes from the Analytics API, which the documentation puts 48 to 72
+# hours behind. A daily digest of it would mostly repeat itself; a week is the
+# shortest interval over which the numbers actually move.
+DIGEST_WEEKDAY = 0  # Monday
+DIGEST_HOUR = 10
+# Nothing younger than this has settled data to rank on. See §7.5 of the plan:
+# the threshold is arithmetic, not caution.
+DIGEST_MIN_AGE_DAYS = 7
 
 
 def build_payload(
@@ -176,6 +194,8 @@ class Autopilot:
         self.topic_failure_notified = False
         self.last_cleanup_at: Optional[datetime] = None
         self.last_metrics_at: Optional[datetime] = None
+        self.last_stats_day = None
+        self.last_digest_week = None
         self.stall_notified: set[int] = set()
 
     # -- messages ------------------------------------------------------------
@@ -195,6 +215,8 @@ class Autopilot:
             lambda: self.warn_stalled_topics(now),
             lambda: self.maybe_create_job(now),
             lambda: self.refresh_metrics(now),
+            lambda: self.snapshot_stats(now),
+            lambda: self.weekly_digest(now),
             lambda: self.cleanup_output(now),
         ):
             try:
@@ -486,6 +508,86 @@ class Autopilot:
             session.commit()
         log(f"[+] Refreshed metrics for {len(measured)} video(s).", "success")
         return len(measured)
+
+    def snapshot_stats(self, now: datetime) -> int:
+        """Records each video's current counts, once per morning.
+
+        These come from the Data API, which is current. The Analytics numbers
+        that drive ranking run two to three days behind by design, so without
+        this there is no way to see what a video published today is doing.
+        """
+        local = now.astimezone(self.config.tz)
+        if local.hour < STATS_HOUR or self.last_stats_day == local.date():
+            return 0
+
+        with self.session_factory() as session:
+            published = list_published_videos(session)
+        if not published:
+            self.last_stats_day = local.date()
+            return 0
+
+        counts = fetch_statistics([row[0] for row in published])
+        if not counts:
+            log("[!] No statistics came back; will try again tomorrow.", "warning")
+            self.last_stats_day = local.date()
+            return 0
+
+        with self.session_factory() as session:
+            record_stats(session, local.date(), counts, commit=False)
+            movement = daily_movement(
+                session, local.date(), local.date() - timedelta(days=1)
+            )
+            session.commit()
+        self.last_stats_day = local.date()
+
+        self.notify(self._movement_message(movement))
+        log(f"[+] Recorded counts for {len(counts)} video(s).", "success")
+        return len(counts)
+
+    def _movement_message(self, movement: list) -> str:
+        """Yesterday's numbers, busiest first."""
+        total = sum(views for _, views, _ in movement)
+        gained = sum(gain for _, _, gain in movement if gain is not None)
+        lines = [f"📊 {gained:+} views yesterday, {total} on the channel"]
+        for video_id, views, gain in movement[:5]:
+            change = "new" if gain is None else f"{gain:+}"
+            lines.append(f"  {change:>6}  {views:>6} total  youtu.be/{video_id}")
+        return "\n".join(lines)
+
+    def weekly_digest(self, now: datetime) -> bool:
+        """Once a week, what the settled retention numbers say."""
+        local = now.astimezone(self.config.tz)
+        week = (local.isocalendar().year, local.isocalendar().week)
+        if (
+            local.weekday() != DIGEST_WEEKDAY
+            or local.hour < DIGEST_HOUR
+            or self.last_digest_week == week
+        ):
+            return False
+        self.last_digest_week = week
+
+        with self.session_factory() as session:
+            lines = ["🗓 Weekly retention"]
+            for format_name in ("short", "long"):
+                best = top_performing_subjects(
+                    session, format_name, 3, DIGEST_MIN_AGE_DAYS
+                )
+                worst = worst_performing_subjects(
+                    session, format_name, 2, DIGEST_MIN_AGE_DAYS
+                )
+                if not best:
+                    lines.append(
+                        f"\n{format_name}: nothing older than "
+                        f"{DIGEST_MIN_AGE_DAYS} days has settled data yet."
+                    )
+                    continue
+                lines.append(f"\n{format_name} — held attention:")
+                lines += [f"  + {subject}" for subject in best]
+                if worst:
+                    lines.append(f"{format_name} — lost them early:")
+                    lines += [f"  - {subject}" for subject in worst]
+        self.notify("\n".join(lines))
+        return True
 
     # -- step 4 --------------------------------------------------------------
 
