@@ -754,3 +754,21 @@ def test_a_weak_second_draft_is_still_returned(monkeypatch):
     )
 
     assert script.startswith("Sleep is a vital part")
+
+
+def test_search_term_prompt_rejects_metaphors_and_abstractions(monkeypatch):
+    # Observed 2026-09-11: an onion video searched "tear gas escape" — a
+    # metaphor lifted from its own script — and came back with birds
+    # scattering off a river, which then became the community post's picture.
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or '["onion cutting", "kitchen board"]',
+    )
+
+    gpt.get_search_terms("Why onions make you cry", 2, "the script", "model")
+
+    prompt = " ".join(prompts[0].split())
+    assert "would sit just as naturally in a video about something else" in prompt
+    assert "never from the script's figures of speech" in prompt
+    assert "tear gas" in prompt
