@@ -746,3 +746,57 @@ def test_the_post_prompt_gets_the_stored_notes(pilot, monkeypatch):
 
     assert seen["script"] == "A stored script."
     assert "4.5 mm" in seen["research"]
+
+
+def test_curio_topic_prompt_carries_the_found_material():
+    from autopilot import build_topic_prompt
+    from gpt import CURIO
+
+    prompt = build_topic_prompt(
+        "niche", [], CURIO, material="[1] Ig Nobel\nA prize for levitating a frog."
+    )
+    assert "levitating a frog" in prompt
+    assert "Pick one of these" in prompt
+    assert "do not invent something else" in prompt
+
+
+def test_a_topic_prompt_without_material_says_nothing_about_it():
+    from autopilot import build_topic_prompt
+    from gpt import EXPLAINER
+
+    prompt = build_topic_prompt("niche", [], EXPLAINER)
+    assert "Pick one of these" not in prompt
+
+
+def test_curio_topics_are_seeded_from_search(pilot, monkeypatch):
+    import research
+    from gpt import CURIO
+
+    seen: list = []
+    monkeypatch.setattr(research, "is_configured", lambda: True)
+    monkeypatch.setattr(research, "curio_seed", lambda rng=None: "Ig Nobel prize winning research")
+    monkeypatch.setattr(
+        research, "gather",
+        lambda queries, limit=None: seen.append(queries) or [],
+    )
+    pilot.generate = lambda prompt, model: '{"subject": "A frog was levitated by magnets"}'
+
+    with pilot.session_factory() as session:
+        pilot.generate_topic(session, CURIO)
+
+    assert seen == [["Ig Nobel prize winning research"]]
+
+
+def test_explainer_topics_are_not_seeded(pilot, monkeypatch):
+    import research
+    from gpt import EXPLAINER
+
+    monkeypatch.setattr(research, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        research, "gather",
+        lambda *a, **k: pytest.fail("explainers should not be seeded"),
+    )
+    pilot.generate = lambda prompt, model: '{"subject": "Why the ocean is salty here"}'
+
+    with pilot.session_factory() as session:
+        assert pilot.generate_topic(session, EXPLAINER) is not None

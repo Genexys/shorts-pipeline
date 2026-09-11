@@ -11,6 +11,8 @@ Use `.env.example` as your template.
 | `TIKTOK_SESSION_ID` | TikTok session cookie (`sessionid`) used for TTS voice endpoint calls. |
 | `PEXELS_API_KEY` | API key used to fetch stock video clips. |
 | `PIXABAY_API_KEY` | *Optional.* A second stock library, merged with Pexels. Empty uses Pexels alone. Long videos need it — see [Stock footage](#stock-footage). |
+| `ANTHROPIC_API_KEY` | *Optional.* Writes the topic and the script with a stronger model — see [The writer](#the-writer). Empty keeps everything on Ollama. |
+| `SCRIPT_MODEL` | *Optional.* Model for those two calls. | `claude-opus-5` |
 | `FIRECRAWL_API_KEY` | *Optional.* Grounds scripts in real search results and lists the sources in the description — see [Research](#research). Empty writes scripts with no specifics at all. |
 
 ## Optional
@@ -228,3 +230,21 @@ then has to defend, and it defends it by inventing.
 
 The register is chosen when the job is queued and travels in its payload, since
 the script is written in another process.
+
+## The writer
+
+With `ANTHROPIC_API_KEY` set, two calls leave Ollama: the **topic** and the
+**script**. Nothing else. Search terms, YouTube metadata and the music mood are
+structured extraction — the local model does them well and for free.
+
+Those two are where judgement shows. A curio in particular lives or dies on
+whether the subject is genuinely absurd rather than merely phrased as though it
+were, and telling those apart is exactly the discrimination a small model
+lacks. It can write joke-shaped text; it cannot reliably tell whether the joke
+landed.
+
+Failure is never fatal. A missing key, a rate limit, an outage or a refusal all
+fall back to Ollama for that call — a video written locally beats no video.
+
+At three videos a day this is roughly 240k input and 32k output tokens a month:
+about two dollars on the default model, and noise beside the narration bill.

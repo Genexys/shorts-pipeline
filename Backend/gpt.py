@@ -7,6 +7,7 @@ from ollama import Client, ResponseError
 from dotenv import load_dotenv
 from logstream import log
 from speech import split_sentences
+import writer
 from typing import Callable, List, Optional, Tuple
 from utils import ENV_FILE, MUSIC_MOODS
 
@@ -87,6 +88,19 @@ def _chat(client, model_name: str, messages: list, disable_thinking):
     return client.chat(
         model=model_name, messages=messages, stream=False, think=not disable_thinking
     )
+
+
+def write_creative(prompt: str, ai_model: str) -> str:
+    """A completion for the two calls where judgement shows: topic and script.
+
+    Prefers the stronger model when one is configured and falls back to Ollama
+    on any failure. Everything else in the pipeline is structured extraction
+    and stays local.
+    """
+    written = writer.write(prompt)
+    if written:
+        return written
+    return generate_response(prompt, ai_model)
 
 
 def generate_response(prompt: str, ai_model: str) -> str:
@@ -420,7 +434,7 @@ def generate_script(
     """
 
     # Generate script
-    response = generate_response(prompt, ai_model)
+    response = write_creative(prompt, ai_model)
 
     log(response, "info")
 
@@ -1122,7 +1136,7 @@ def generate_long_script(
         """
 
         try:
-            section = clean_script_text(generate_response(prompt, ai_model)).strip()
+            section = clean_script_text(write_creative(prompt, ai_model)).strip()
         except Exception as err:
             # One bad section is worth losing; the video is not.
             log(f"[!] Section {index} failed: {err}", "warning")

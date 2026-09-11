@@ -41,6 +41,30 @@ SEARCH_PAGE_SIZE = 10
 # "umbrellas" as waxy filaments that reflect sunlight — a mechanism its single
 # source, one sentence about spores spreading in damp air, never mentioned.
 MIN_USABLE_SOURCES = 2
+
+# Places where absurd-but-true material is dense enough to find by searching.
+# Better than asking a model to invent one: an invented curio is either an
+# overstatement it will later defend by fabricating, or a fact it half-recalls.
+# These return real, checkable episodes, and the model only has to pick.
+CURIO_SEEDS = (
+    "Ig Nobel prize winning research",
+    "bizarre animal defence mechanisms biologists documented",
+    "strangest experiments in the history of science",
+    "medieval medical treatments that were actually used",
+    "absurd military projects that were genuinely built",
+    "surprising failures of famous inventions",
+    "unusual legal cases and laws that really existed",
+    "strange behaviours animals use to find a mate",
+    "historical misunderstandings that changed everything",
+    "engineering mistakes with unexpected consequences",
+)
+
+
+def curio_seed(rng=None) -> str:
+    """One search query likely to turn up something absurd and real."""
+    import random as _random
+
+    return (rng or _random).choice(list(CURIO_SEEDS))
 SNIPPET_MAX_CHARS = 500
 BRIEF_MAX_SOURCES = 12
 # Sources are listed in the description, which YouTube caps; and a wall of
