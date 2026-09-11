@@ -553,3 +553,77 @@ def test_every_format_ends_on_silence_not_a_syllable():
     # music's fade-out played under the closing sentence instead of after it.
     assert SHORT.outro_seconds > 0
     assert LONG.outro_seconds > SHORT.outro_seconds
+
+
+# -- the opening shot --------------------------------------------------------
+
+
+def _grey_clip(path, brightness=0.5, seconds=2):
+    import subprocess
+
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+            "-i", f"color=c=gray@{brightness}:s=320x180:d={seconds}:r=15",
+            "-pix_fmt", "yuv420p", str(path),
+        ],
+        check=True, capture_output=True,
+    )
+    return str(path)
+
+
+def test_promote_strongest_opening_leaves_a_single_clip_alone(tmp_path):
+    assert video.promote_strongest_opening(["a.mp4"], tmp_path) == ["a.mp4"]
+
+
+def test_promote_strongest_opening_leaves_an_empty_list_alone(tmp_path):
+    assert video.promote_strongest_opening([], tmp_path) == []
+
+
+def test_promote_strongest_opening_keeps_every_clip(tmp_path):
+    # Only the order changes; losing a clip would shorten the video.
+    clips = [_grey_clip(tmp_path / f"{i}.mp4") for i in range(3)]
+    ordered = video.promote_strongest_opening(clips, tmp_path / "work")
+    assert sorted(ordered) == sorted(clips)
+    assert len(ordered) == 3
+
+
+def test_promote_strongest_opening_preserves_the_rest_of_the_order(tmp_path):
+    clips = [_grey_clip(tmp_path / f"{i}.mp4") for i in range(4)]
+    ordered = video.promote_strongest_opening(clips, tmp_path / "work")
+    promoted = ordered[0]
+    remaining = [clip for clip in clips if clip != promoted]
+    assert ordered[1:] == remaining
+
+
+def test_promote_strongest_opening_survives_unreadable_clips(tmp_path):
+    # A worse opening beats a failed render.
+    broken = tmp_path / "broken.mp4"
+    broken.write_bytes(b"not a video")
+    clips = [str(broken), str(tmp_path / "also-missing.mp4")]
+    assert video.promote_strongest_opening(clips, tmp_path / "work") == clips
+
+
+def test_promote_strongest_opening_picks_the_one_with_contrast(tmp_path):
+    # The point of the change, not just that the order is preserved: a flat
+    # frame scores near zero variance, a patterned one scores high.
+    import subprocess
+
+    flat = tmp_path / "flat.mp4"
+    busy = tmp_path / "busy.mp4"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "color=c=gray:s=320x180:d=2:r=15", "-pix_fmt", "yuv420p", str(flat)],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "testsrc=size=320x180:rate=15:duration=2", "-pix_fmt", "yuv420p", str(busy)],
+        check=True, capture_output=True,
+    )
+
+    # Flat clip first; the patterned one must be promoted past it.
+    ordered = video.promote_strongest_opening(
+        [str(flat), str(busy)], tmp_path / "work"
+    )
+    assert ordered[0] == str(busy)

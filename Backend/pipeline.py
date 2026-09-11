@@ -32,6 +32,7 @@ from utils import (
 from video import (
     combine_videos,
     make_silence,
+    promote_strongest_opening,
     probe_duration,
     generate_subtitles,
     generate_video,
@@ -46,6 +47,11 @@ from youtube import (
     upload_thumbnail,
     upload_video,
 )
+
+
+# The shortest clip worth using when footage runs out. Below this a clip is a
+# flicker however long the shot holding it.
+MIN_FALLBACK_CLIP_SECONDS = 3
 
 
 class PipelineCancelled(Exception):
@@ -239,14 +245,54 @@ def run_generation_pipeline(
     # search terms overlap and some return almost nothing, so a fixed share
     # leaves the video short of footage and it starts repeating itself.
     wanted = fmt.stock_video_count
-    for depth in range(it):
-        if len(video_urls) >= wanted:
-            break
-        for found_urls in found_per_term:
+
+    def collect(per_term: list) -> None:
+        for depth in range(it):
             if len(video_urls) >= wanted:
-                break
-            if depth < len(found_urls) and found_urls[depth] not in video_urls:
-                video_urls.append(found_urls[depth])
+                return
+            for found_urls in per_term:
+                if len(video_urls) >= wanted:
+                    return
+                if depth < len(found_urls) and found_urls[depth] not in video_urls:
+                    video_urls.append(found_urls[depth])
+
+    collect(found_per_term)
+
+    if len(video_urls) < wanted:
+        # A narrow subject starves the search, and what arrives instead is
+        # whatever loosely matched one word of it — a mushroom video came back
+        # with a cartoon orangutan because the term was "umbrella". Two things
+        # widen the net before that happens: the subject's own content words,
+        # and a shorter minimum clip. A three-second clip held a little longer
+        # beats a clip about something else.
+        emit(
+            f"[!] {len(video_urls)} of {wanted} clips; widening the search.",
+            "warning",
+        )
+        broader = [term for term in keywords_from_subject(data["videoSubject"], 4)]
+        relaxed = max(MIN_FALLBACK_CLIP_SECONDS, min_dur // 2)
+        extra = []
+        for search_term in broader:
+            guard_cancelled()
+            extra.append(
+                search_for_stock_videos(
+                    search_term, os.getenv("PEXELS_API_KEY"), it, relaxed
+                )
+            )
+        collect(extra)
+        if len(video_urls) < wanted:
+            # Same terms, shorter clips: the original searches rejected these
+            # only for being under the shot length.
+            retried = []
+            for search_term in search_terms:
+                guard_cancelled()
+                retried.append(
+                    search_for_stock_videos(
+                        search_term, os.getenv("PEXELS_API_KEY"), it, relaxed
+                    )
+                )
+            collect(retried)
+        emit(f"[+] {len(video_urls)} clips after widening.", "info")
 
     if not video_urls:
         raise RuntimeError("No videos found to download.")
@@ -349,8 +395,13 @@ def run_generation_pipeline(
                 f"{least_clips} are needed to avoid repeating footage.",
                 "warning",
             )
+        ordered_paths = promote_strongest_opening(
+            video_paths,
+            TEMP_DIR / f"{job_id}-openings",
+            os.getenv("FFMPEG_BINARY", "").strip() or "ffmpeg",
+        )
         combined_video_path = combine_videos(
-            video_paths, temp_audio.duration, n_threads or 2, fmt
+            ordered_paths, temp_audio.duration, n_threads or 2, fmt
         )
     finally:
         temp_audio.close()
