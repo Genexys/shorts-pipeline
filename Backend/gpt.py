@@ -525,6 +525,13 @@ def get_search_terms(
     Generate a JSON-Array of search terms for stock videos,
     depending on the subject of a video.
 
+    Goes through write_creative rather than straight to Ollama. This looked
+    like structured extraction and is not: deciding whether "chemical defense"
+    names something a camera can point at is the same judgement a small model
+    lacks everywhere else. Measured on one subject, the local model returned
+    "sulfur compounds" and "lacrimal glands" where the stronger one returned
+    "onion slices closeup" and "knife cutting board".
+
     Args:
         video_subject (str): The subject of the video.
         amount (int): The amount of search terms to generate.
@@ -546,6 +553,17 @@ def get_search_terms(
 
     Each search term is 1-3 words naming something filmable.
 
+    Every term must describe something a viewer would accept as a picture of
+    THIS subject. Apply this test to each one: if the clip it returns would sit
+    just as naturally in a video about something else, the term is wrong.
+
+    Take the terms from the subject itself, never from the script's figures of
+    speech. A script about onions may call the irritant "tear gas"; searching
+    that returns riot footage and birds scattering off a river, because a stock
+    library matches the words and not the meaning. The same goes for abstract
+    nouns — "mechanism", "process", "reaction", "system" — which return
+    whatever the library happens to have filed under them.
+
     Cover different angles so the results do not overlap: the setting, the
     creatures or objects, the physical process, the human activity around it,
     the scale. Repeating the subject in every term returns the same handful of
@@ -564,7 +582,7 @@ def get_search_terms(
     """
 
     # Generate search terms
-    response = generate_response(prompt, ai_model)
+    response = write_creative(prompt, ai_model)
     log(response, "info")
 
     search_terms = parse_string_array(response)

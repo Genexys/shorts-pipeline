@@ -233,9 +233,14 @@ the script is written in another process.
 
 ## The writer
 
-With `ANTHROPIC_API_KEY` set, two calls leave Ollama: the **topic** and the
-**script**. Nothing else. Search terms, YouTube metadata and the music mood are
-structured extraction — the local model does them well and for free.
+With `ANTHROPIC_API_KEY` set, three calls leave Ollama: the **topic**, the
+**script**, and the **stock search terms**. YouTube metadata and the music mood stay behind: those are
+structured extraction, and the local model does them well and for free.
+
+Search terms were on that list until an onion video searched "tear gas
+escape" — a metaphor from its own script — and came back with birds
+scattering off a river. Deciding whether a phrase names something a camera
+can point at is judgement, not extraction.
 
 Those two are where judgement shows. A curio in particular lives or dies on
 whether the subject is genuinely absurd rather than merely phrased as though it

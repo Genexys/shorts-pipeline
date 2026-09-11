@@ -106,3 +106,28 @@ def test_creative_calls_prefer_the_stronger_model(monkeypatch):
         lambda p, m: pytest.fail("should not have asked Ollama"),
     )
     assert gpt.write_creative("prompt", "llama3.1:8b") == "from claude"
+
+
+def test_search_terms_go_through_the_creative_path(monkeypatch):
+    # Picking filmable shots is judgement, not extraction: the local model
+    # returned "sulfur compounds" and "lacrimal glands" where the stronger one
+    # returned "onion slices closeup" and "knife cutting board".
+    monkeypatch.setattr(
+        writer, "write", lambda prompt: '["chopping onion", "knife cutting board"]'
+    )
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: pytest.fail("should not have asked Ollama"),
+    )
+
+    assert gpt.get_search_terms("onions", 2, "script", "llama3.1:8b") == [
+        "chopping onion",
+        "knife cutting board",
+    ]
+
+
+def test_search_terms_still_fall_back_to_ollama(monkeypatch):
+    monkeypatch.setattr(writer, "write", lambda prompt: None)
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: '["onion cutting"]')
+
+    assert gpt.get_search_terms("onions", 1, "script", "llama3.1:8b") == ["onion cutting"]
