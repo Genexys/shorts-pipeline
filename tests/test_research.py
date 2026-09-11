@@ -379,3 +379,9 @@ def test_search_says_so_when_everything_was_filtered_out(monkeypatch, capsys):
 
     assert search("mushroom umbrellas") == []
     assert "were social or unusable" in capsys.readouterr().out
+
+
+def test_min_usable_sources_is_more_than_one():
+    # One thin source is worse than none: enough to make the model feel
+    # grounded, not enough to hold it up.
+    assert research.MIN_USABLE_SOURCES >= 2

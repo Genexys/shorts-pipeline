@@ -588,3 +588,25 @@ def test_generate_script_trims_an_overlong_draft(monkeypatch):
     script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=60)
 
     assert 60 <= len(script.split()) < 110
+
+
+def test_research_rules_forbid_inventing_a_mechanism():
+    # Published 2026-09-11: a single source saying "wet conditions allow spores
+    # to spread" became a script about waxy filaments that reflect sunlight.
+    # The old rule covered numbers and citations only.
+    # The rule text is wrapped for readability, so compare on one line.
+    rules = " ".join(gpt.research_rules("[1] Note\nSomething true.").split())
+    assert "MUST NOT invent how something works" in rules
+    assert "mechanism, structure, cause or process" in rules
+
+
+def test_research_rules_allow_abandoning_a_false_premise():
+    # The topic generator invents premises the sources do not support.
+    rules = " ".join(gpt.research_rules("[1] Note\nX.").split())
+    assert "not borne out by the notes" in rules
+
+
+def test_no_research_rules_also_forbid_inventing_a_mechanism():
+    rules = " ".join(gpt.research_rules("").split())
+    assert "do not describe any mechanism" in rules
+    assert "inventing an explanation to fill the length" in rules

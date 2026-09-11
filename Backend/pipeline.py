@@ -12,6 +12,7 @@ import research
 from formats import LONG, resolve_format
 from gpt import (
     generate_long_script,
+    keywords_from_subject,
     generate_metadata,
     generate_script,
     get_search_terms,
@@ -156,13 +157,30 @@ def run_generation_pipeline(
                 if all(source.url != existing.url for existing in sources):
                     sources.append(source)
             return research.format_brief(found)
-        if sources:
-            emit(f"[+] Research: {len(sources)} source(s) found.", "info")
-        else:
-            # Said out loud: without it the script falls back to writing with
-            # no specifics at all, and the difference is invisible otherwise.
-            emit("[!] Research returned nothing. Writing without specifics.", "warning")
+        if len(sources) < research.MIN_USABLE_SOURCES:
+            # A topic phrased colloquially matches chatter rather than
+            # reference material: "mushrooms have built-in umbrellas" returned
+            # six social results out of eight. The content words alone search
+            # better.
+            keywords = " ".join(keywords_from_subject(data["videoSubject"]))
+            if keywords:
+                emit(f'[!] Thin results; searching again for "{keywords}".', "warning")
+                for found in research.gather([keywords], limit=fmt.research_results):
+                    if all(found.url != existing.url for existing in sources):
+                        sources.append(found)
+
+        emit(f"[+] Research: {len(sources)} source(s) found.", "info")
+
     brief = research.format_brief(sources)
+    if len(sources) < research.MIN_USABLE_SOURCES:
+        # Degrade honestly rather than let the model fill the gap. A vague but
+        # truthful video beats a confident invented one.
+        emit(
+            f"[!] Only {len(sources)} usable source(s); writing without "
+            "specifics rather than inventing them.",
+            "warning",
+        )
+        brief = ""
 
     if fmt is LONG:
         script = generate_long_script(
