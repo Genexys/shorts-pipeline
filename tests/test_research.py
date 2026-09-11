@@ -87,7 +87,11 @@ def test_search_sends_the_key_and_the_query(monkeypatch):
 
     assert recorder[0]["url"] == research.SEARCH_URL
     assert recorder[0]["headers"]["Authorization"] == "Bearer fc-abc"
-    assert recorder[0]["json"] == {"query": "why do we hiccup", "limit": 3}
+    # limit is what survives filtering; the API is always asked for a full page.
+    assert recorder[0]["json"] == {
+        "query": "why do we hiccup",
+        "limit": research.SEARCH_PAGE_SIZE,
+    }
 
 
 def test_search_truncates_a_long_snippet(monkeypatch):
@@ -172,18 +176,31 @@ def test_gather_ignores_blank_queries(monkeypatch):
 
 
 def test_gather_caps_the_brief(monkeypatch):
+    # The cap applies across queries: one search now returns at most `limit`,
+    # so reaching BRIEF_MAX_SOURCES takes several of them.
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-abc")
-    many = {
-        "data": {
-            "web": [
-                {"url": f"https://e.org/{i}", "title": "t", "description": "text"}
-                for i in range(40)
-            ]
-        }
-    }
-    _patch_post(monkeypatch, many)
 
-    assert len(gather(["q"])) == research.BRIEF_MAX_SOURCES
+    def page(start):
+        return {
+            "data": {
+                "web": [
+                    {"url": f"https://e.org/{i}", "title": "t", "description": "text"}
+                    for i in range(start, start + 8)
+                ]
+            }
+        }
+
+    responses = [page(0), page(8), page(16)]
+    calls = {"n": 0}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        response = _FakeResponse(responses[min(calls["n"], len(responses) - 1)])
+        calls["n"] += 1
+        return response
+
+    monkeypatch.setattr(research.requests, "post", fake_post)
+
+    assert len(gather(["a", "b", "c"])) == research.BRIEF_MAX_SOURCES
 
 
 # -- rendering --------------------------------------------------------------
@@ -325,3 +342,40 @@ def test_gather_deduplicates_urls_that_differ_only_by_tracking(monkeypatch):
     _patch_post(monkeypatch, payload)
 
     assert len(gather(["q"])) == 1
+
+
+def test_search_asks_for_a_full_page_whatever_the_limit(monkeypatch):
+    # Filtering removes most results and a page of ten costs the same two
+    # credits as a page of five, so the API is always asked for the full page.
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-abc")
+    recorder: list = []
+    _patch_post(monkeypatch, RESPONSE, recorder=recorder)
+
+    search("q", limit=2)
+
+    assert recorder[0]["json"]["limit"] == research.SEARCH_PAGE_SIZE
+
+
+def test_search_returns_no_more_than_the_limit_asks_for(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-abc")
+    _patch_post(monkeypatch, RESPONSE)
+
+    assert len(search("q", limit=1)) == 1
+
+
+def test_search_says_so_when_everything_was_filtered_out(monkeypatch, capsys):
+    # The real case: eight results, six of them Facebook, Reddit, YouTube,
+    # Instagram and Pinterest.
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-abc")
+    payload = {
+        "data": {
+            "web": [
+                {"url": "https://reddit.com/r/x/1", "title": "t", "description": "d"},
+                {"url": "https://facebook.com/g/1", "title": "t", "description": "d"},
+            ]
+        }
+    }
+    _patch_post(monkeypatch, payload)
+
+    assert search("mushroom umbrellas") == []
+    assert "were social or unusable" in capsys.readouterr().out

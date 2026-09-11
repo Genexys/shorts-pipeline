@@ -26,6 +26,14 @@ REQUEST_TIMEOUT_SECONDS = 30
 # Search bills 2 credits per 10 results, and the free tier is 1000 a month. At
 # three videos a day one query each, that is under 200 credits a month.
 DEFAULT_RESULT_COUNT = 8
+
+# How many results to ask the API for, regardless of how many are wanted back.
+# Filtering removes most of them — a search for "mushrooms have built-in
+# umbrellas" returned eight results of which six were Facebook, Reddit,
+# YouTube, Instagram and Pinterest, leaving two. Asking for ten and keeping
+# what survives costs the same two credits as asking for five, so `limit` means
+# usable sources wanted, not results requested.
+SEARCH_PAGE_SIZE = 10
 SNIPPET_MAX_CHARS = 500
 BRIEF_MAX_SOURCES = 12
 # Sources are listed in the description, which YouTube caps; and a wall of
@@ -142,7 +150,11 @@ def _to_source(item: object) -> Optional[Source]:
 
 
 def search(query: str, limit: int = DEFAULT_RESULT_COUNT) -> List[Source]:
-    """One Firecrawl search. Returns [] on any failure, and says why."""
+    """One Firecrawl search, returning up to `limit` usable sources.
+
+    `limit` is what survives filtering, not what the API is asked for: see
+    SEARCH_PAGE_SIZE. Returns [] on any failure, and says why.
+    """
     key = api_key()
     if not key:
         return []
@@ -153,7 +165,7 @@ def search(query: str, limit: int = DEFAULT_RESULT_COUNT) -> List[Source]:
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
             },
-            json={"query": query, "limit": limit},
+            json={"query": query, "limit": max(limit, SEARCH_PAGE_SIZE)},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -168,7 +180,13 @@ def search(query: str, limit: int = DEFAULT_RESULT_COUNT) -> List[Source]:
     if not isinstance(web, list):
         return []
     sources = [source for source in (_to_source(item) for item in web) if source]
-    return sources
+    if len(web) and not sources:
+        log(
+            f"[!] All {len(web)} results for '{query[:60]}' were social or "
+            "unusable. The script will have nothing specific to stand on.",
+            "warning",
+        )
+    return sources[:limit]
 
 
 def gather(queries: Sequence[str], limit: int = DEFAULT_RESULT_COUNT) -> List[Source]:
