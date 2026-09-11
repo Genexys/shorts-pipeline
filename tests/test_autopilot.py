@@ -800,3 +800,121 @@ def test_explainer_topics_are_not_seeded(pilot, monkeypatch):
 
     with pilot.session_factory() as session:
         assert pilot.generate_topic(session, EXPLAINER) is not None
+
+
+# -- daily counts ------------------------------------------------------------
+
+
+from datetime import date, timezone as _tz
+
+MORNING = datetime(2026, 9, 12, 9, 30, tzinfo=_tz.utc)
+
+
+def _published_video(pilot, video_id):
+    from repository import add_artifact, create_job
+
+    with pilot.session_factory() as session:
+        job = create_job(session, payload={"videoSubject": video_id, "format": "short"})
+        add_artifact(session, job.id, "youtube_video", "u", {"videoId": video_id})
+        session.commit()
+
+
+def test_stats_are_recorded_once_a_morning(pilot, monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(
+        "autopilot.fetch_statistics",
+        lambda ids: calls.append(list(ids)) or {"v1": {"views": 100, "likes": 3}},
+    )
+    pilot.notify = lambda text: True
+    _published_video(pilot, "v1")
+
+    assert pilot.snapshot_stats(MORNING) == 1
+    assert pilot.snapshot_stats(MORNING + timedelta(hours=2)) == 0
+    assert len(calls) == 1
+
+
+def test_stats_wait_for_the_morning(pilot, monkeypatch):
+    monkeypatch.setattr(
+        "autopilot.fetch_statistics",
+        lambda ids: pytest.fail("should not read before the hour"),
+    )
+    _published_video(pilot, "v1")
+
+    before_dawn = MORNING.replace(hour=3)
+    assert pilot.snapshot_stats(before_dawn) == 0
+
+
+def test_the_movement_message_reports_the_day_not_the_total(pilot, monkeypatch):
+    from repository import record_stats
+
+    pilot.notify = lambda text: sent.append(text) or True
+    sent: list = []
+    _published_video(pilot, "v1")
+
+    with pilot.session_factory() as session:
+        record_stats(session, date(2026, 9, 11), {"v1": {"views": 400}})
+
+    monkeypatch.setattr(
+        "autopilot.fetch_statistics", lambda ids: {"v1": {"views": 1000}}
+    )
+    pilot.snapshot_stats(MORNING)
+
+    assert "+600 views yesterday" in sent[0]
+    assert "1000 total" in sent[0]
+
+
+def test_a_first_appearance_is_not_counted_as_a_gain(pilot, monkeypatch):
+    # Its whole count is new; calling that a gain would misread tomorrow.
+    sent: list = []
+    pilot.notify = lambda text: sent.append(text) or True
+    _published_video(pilot, "v1")
+    monkeypatch.setattr(
+        "autopilot.fetch_statistics", lambda ids: {"v1": {"views": 250}}
+    )
+
+    pilot.snapshot_stats(MORNING)
+
+    assert "+0 views yesterday" in sent[0]
+    assert "new" in sent[0]
+
+
+def test_no_statistics_does_not_retry_all_day(pilot, monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(
+        "autopilot.fetch_statistics", lambda ids: calls.append(1) or {}
+    )
+    _published_video(pilot, "v1")
+
+    pilot.snapshot_stats(MORNING)
+    pilot.snapshot_stats(MORNING + timedelta(hours=4))
+    assert len(calls) == 1
+
+
+# -- weekly digest -----------------------------------------------------------
+
+
+MONDAY = datetime(2026, 9, 14, 10, 30, tzinfo=_tz.utc)
+
+
+def test_the_digest_runs_once_a_week(pilot):
+    sent: list = []
+    pilot.notify = lambda text: sent.append(text) or True
+
+    assert pilot.weekly_digest(MONDAY) is True
+    assert pilot.weekly_digest(MONDAY + timedelta(hours=3)) is False
+    assert pilot.weekly_digest(MONDAY + timedelta(days=7)) is True
+    assert len(sent) == 2
+
+
+def test_the_digest_does_not_run_on_other_days(pilot):
+    pilot.notify = lambda text: pytest.fail("should not send midweek")
+    assert pilot.weekly_digest(MONDAY + timedelta(days=2)) is False
+
+
+def test_the_digest_says_so_when_nothing_has_settled(pilot):
+    sent: list = []
+    pilot.notify = lambda text: sent.append(text) or True
+
+    pilot.weekly_digest(MONDAY)
+
+    assert "nothing older than 7 days has settled data yet" in sent[0]

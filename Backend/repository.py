@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import TYPE_CHECKING, Optional, Sequence
 from uuid import uuid4
 
@@ -16,6 +16,7 @@ from models import (
     Script,
     Topic,
     VideoMetric,
+    VideoStat,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to type checkers
@@ -642,3 +643,60 @@ def get_research_sources(session: Session, job_id: str) -> list[ResearchSource]:
         .order_by(ResearchSource.id)
     )
     return list(session.scalars(stmt))
+
+
+def record_stats(
+    session: Session, day: "date", counts: dict, commit: bool = True
+) -> int:
+    """Stores one day's counts per video. Re-running on the same day overwrites.
+
+    Overwrite rather than skip: the morning run is the reading that matters,
+    but a re-run after a failure should correct the row rather than leave a
+    partial one.
+    """
+    written = 0
+    for video_id, values in (counts or {}).items():
+        existing = session.scalars(
+            select(VideoStat).where(
+                and_(VideoStat.video_id == video_id, VideoStat.day == day)
+            )
+        ).first()
+        if existing is None:
+            existing = VideoStat(video_id=video_id, day=day)
+            session.add(existing)
+        existing.views = int(values.get("views") or 0)
+        existing.likes = int(values.get("likes") or 0)
+        existing.comments = int(values.get("comments") or 0)
+        written += 1
+    if commit:
+        session.commit()
+    else:
+        # SessionLocal runs with autoflush=False, so without this the rows are
+        # invisible to the query that reads them back a line later and the
+        # morning report is all zeroes.
+        session.flush()
+    return written
+
+
+def stats_for_day(session: Session, day: "date") -> dict:
+    """{video_id: row} for one day."""
+    rows = session.scalars(select(VideoStat).where(VideoStat.day == day))
+    return {row.video_id: row for row in rows}
+
+
+def daily_movement(session: Session, day: "date", previous: "date") -> list:
+    """(video_id, views, gained) per video, busiest first.
+
+    `gained` is None for a video with no reading on the previous day — its
+    first appearance, where the whole count is new but calling that a gain
+    would misread the next morning's comparison.
+    """
+    today = stats_for_day(session, day)
+    yesterday = stats_for_day(session, previous)
+    movement = []
+    for video_id, row in today.items():
+        before = yesterday.get(video_id)
+        gained = None if before is None else row.views - before.views
+        movement.append((video_id, row.views, gained))
+    movement.sort(key=lambda entry: (entry[2] is None, -(entry[2] or 0), -entry[1]))
+    return movement

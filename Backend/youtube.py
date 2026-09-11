@@ -2,7 +2,7 @@ import os
 import random
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import httplib2
 from google.auth.transport.requests import Request
@@ -436,3 +436,43 @@ def update_video_metadata(
         "success",
     )
     return written
+
+
+# videos.list accepts up to 50 ids per call and costs one quota unit whatever
+# the count, so the whole channel is one request.
+STATISTICS_BATCH = 50
+
+
+def fetch_statistics(video_ids: Sequence[str]) -> dict:
+    """Current views, likes and comments per video.
+
+    The Analytics API runs 48 to 72 hours behind by design; this does not. It
+    is the only way to see what a video published this morning is doing, and
+    the documentation points here for exactly that.
+
+    Returns a mapping of video id to counts. Videos the call does not know
+    about are absent rather than zeroed — the same rule the Analytics layer
+    follows, and for the same reason.
+
+    Raises:
+        YouTubeAuthError: If the saved token lacks the wider scope.
+    """
+    wanted = [video_id for video_id in video_ids if video_id]
+    if not wanted:
+        return {}
+
+    youtube = _service_for("videos.list")
+    collected: dict = {}
+    for start in range(0, len(wanted), STATISTICS_BATCH):
+        batch = wanted[start : start + STATISTICS_BATCH]
+        response = (
+            youtube.videos().list(part="statistics", id=",".join(batch)).execute()
+        )
+        for item in response.get("items") or []:
+            stats = item.get("statistics") or {}
+            collected[str(item.get("id"))] = {
+                "views": int(stats.get("viewCount") or 0),
+                "likes": int(stats.get("likeCount") or 0),
+                "comments": int(stats.get("commentCount") or 0),
+            }
+    return collected

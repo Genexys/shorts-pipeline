@@ -5,7 +5,9 @@
 1. Checks topics whose job finished: `completed` marks the topic `done`, `failed` or `cancelled` marks it `failed`, and sends a Telegram message; and warns once when a job has been queued or running for more than 3 hours. A published video is followed by a second message: a ready-to-paste community post, captioned onto a still from the video (see [Community posts](#community-posts)).
 2. Decides whether to queue a new job (see below) using a manually added topic first, otherwise a topic invented by Ollama for `AUTOPILOT_NICHE`.
 3. Once a day pulls settled performance numbers for every published video into `video_metrics`.
-4. Once an hour deletes `output/*.mp4` and `output/*.jpg` older than `OUTPUT_RETENTION_DAYS`.
+4. Each morning records every published video's current view, like and comment counts, and reports the day's movement to Telegram.
+5. Each Monday sends a retention digest built from the settled Analytics numbers.
+6. Once an hour deletes `output/*.mp4` and `output/*.jpg` older than `OUTPUT_RETENTION_DAYS`.
 
 Run locally:
 
@@ -81,3 +83,18 @@ obviously generated post is worse than no post.
 
 Posts of the `fact` kind need the video's research notes, which are stored from
 2026-09-10 onward. Older videos get a question or a poll.
+
+## Two clocks
+
+The two sets of numbers come from different APIs with different freshness, and
+conflating them is how you end up reading a fresh video as a failure.
+
+**Counts — views, likes, comments — come from the Data API and are current.**
+They are read once each morning, so every reading covers a whole finished day
+rather than a partial one, and stored as one row per video per day. That makes
+a curve: how fast a video picked up and whether it kept going.
+
+**Retention comes from the Analytics API, which Google documents as running 48
+to 72 hours behind.** A daily digest of it would mostly repeat itself, so the
+digest is weekly, and it only ranks videos older than seven days — anything
+younger has no settled data at all and reads as zero rather than as unknown.

@@ -46,6 +46,7 @@ def init_db() -> None:
         Script,
         Topic,
         VideoMetric,
+        VideoStat,
     )
 
     Base.metadata.create_all(bind=engine)
