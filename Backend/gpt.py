@@ -227,9 +227,12 @@ TOPIC_BRIEFS = {
         "first — something about how the world works or how we found out. If "
         "nothing in the list is about science, technology, nature or the "
         "history behind an everyday thing, return the JSON object with an "
-        "empty subject rather than forcing one. Do not mention the anniversary "
-        "or the date in the topic itself; the event is where the subject comes "
-        "from, not what the video is about."
+        "empty subject rather than forcing one. Keep the date out of the topic "
+        "line itself — it is where the subject comes from, not what the video "
+        "announces — but return the event you picked, verbatim, in an "
+        "\"anchor\" field alongside the subject. The script is written later by "
+        "something that will not see this list, and without the anchor it "
+        "writes about whatever the words happen to match."
     ),
 }
 
@@ -369,6 +372,7 @@ def generate_script(
     research: str = "",
     register: Optional[str] = None,
     lead_with_payoff: bool = False,
+    anchor: str = "",
     _retry: bool = True,
 ) -> Optional[str]:
     """
@@ -443,7 +447,7 @@ def generate_script(
     
     Subject: {video_subject}
 {length}    Language: {voice}
-{OPENING_RULES if lead_with_payoff else ""}{register_rules(register)}{research_rules(research)}
+{OPENING_RULES if lead_with_payoff else ""}{anchor_rules(anchor)}{register_rules(register)}{research_rules(research)}
     """
 
     # Generate script
@@ -521,6 +525,7 @@ def generate_script(
                     research=research,
                     register=register,
                     lead_with_payoff=lead_with_payoff,
+                    anchor=anchor,
                     _retry=False,
                 ) or final_script
 
@@ -713,6 +718,22 @@ def figures_used(sections: List[str]) -> set:
             if len(cleaned) > 1:
                 used.add(cleaned)
     return used
+
+
+ANCHOR_RULES = """
+    This video is about one specific event, given below. Write about that event
+    and nothing else. If the research notes are mostly about something adjacent
+    — a later development, a different team, a modern version — they are the
+    wrong notes: say what you can about the event itself and stop. Do not
+    transplant the story onto whoever the notes happen to describe.
+"""
+
+
+def anchor_rules(anchor: str) -> str:
+    """The grounding line for a video built from one named event."""
+    if not (anchor or "").strip():
+        return ""
+    return f"{ANCHOR_RULES}\n    The event: {anchor.strip()}\n"
 
 
 def research_rules(brief: str) -> str:

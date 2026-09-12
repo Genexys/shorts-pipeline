@@ -124,6 +124,7 @@ def run_generation_pipeline(
     subtitles_position = data.get("subtitlesPosition")
     text_color = data.get("color")
     register = data.get("register")
+    anchor = (data.get("anchor") or "").strip()
     use_music = data.get("useMusic", False)
     automate_youtube_upload = data.get("automateYoutubeUpload", False)
     job_id = str(data.get("jobId") or uuid4())
@@ -133,6 +134,8 @@ def run_generation_pipeline(
     emit("   AI Model: " + str(ai_model), "info")
     emit(f"   Format: {fmt.name} ({fmt.width}x{fmt.height})", "info")
     emit(f"   Register: {register or 'explainer'}", "info")
+    if anchor:
+        emit(f"   Anchored to: {anchor[:110]}", "info")
     emit("   Custom Prompt: " + data["customPrompt"], "info")
 
     guard_cancelled()
@@ -148,8 +151,11 @@ def run_generation_pipeline(
     sources = []
     section_research = None
     if research.is_configured():
+        # Search the event, not the topic line. The topic deliberately omits
+        # the date, so searching it alone returns whatever the words match —
+        # a Kilby anniversary came back as a 2023 Stanford press release.
         sources = research.gather(
-            [data["videoSubject"]], limit=fmt.research_results
+            [anchor or data["videoSubject"]], limit=fmt.research_results
         )
 
         def section_research(heading: str) -> str:
@@ -213,6 +219,7 @@ def run_generation_pipeline(
             research=brief,
             register=register,
             lead_with_payoff=fmt.lead_with_payoff,
+            anchor=anchor,
         )
 
     if not script:

@@ -28,7 +28,15 @@ NOON = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)
 
 
 def _config(**overrides) -> AutopilotConfig:
-    env = {"AUTOPILOT_NICHE": "ocean facts", "AUTOPILOT_VIDEOS_PER_DAY": "2"}
+    # Registers are drawn at random in production. Left at their real shares a
+    # test would sometimes take the anniversary path and fail on a stub that
+    # returns no anchor, so they are off unless a test asks for them.
+    env = {
+        "AUTOPILOT_NICHE": "ocean facts",
+        "AUTOPILOT_VIDEOS_PER_DAY": "2",
+        "AUTOPILOT_CURIO_SHARE": "0",
+        "AUTOPILOT_ANNIVERSARY_SHARE": "0",
+    }
     env.update({k: str(v) for k, v in overrides.items()})
     return AutopilotConfig.from_env(env)
 
@@ -64,6 +72,8 @@ def test_build_payload_matches_frontend_shape():
         # Explains something, or reports something absurd. It travels with the
         # job because the script is written in another process.
         "register": "explainer",
+        # The event an anniversary topic came from; empty for every other kind.
+        "anchor": "",
         "aiModel": "llama3.1:8b",
         "voice": "en_us_001",
         "paragraphNumber": 1,
@@ -164,7 +174,7 @@ def test_generate_topic_retries_and_skips_duplicates(session_factory, tmp_path, 
     pilot.finish_completed_topics()
 
     with session_factory() as session:
-        topic = pilot.generate_topic(session)
+        topic, _ = pilot.generate_topic(session)
 
     assert topic is not None
     assert topic.subject == "A fresh topic about tides"
@@ -177,7 +187,7 @@ def test_generate_topic_gives_up_after_three_attempts(session_factory, tmp_path,
     pilot = Autopilot(_config(), session_factory, lambda text: notifications.append(text) or True, lambda p, m: "nope", tmp_path)
 
     with session_factory() as session:
-        assert pilot.generate_topic(session) is None
+        assert pilot.generate_topic(session)[0] is None
     assert pilot.failed_topic_ticks == 1
 
 
@@ -197,7 +207,7 @@ def test_generate_topic_rejects_wrong_length(session_factory, tmp_path, notifica
     pilot = Autopilot(_config(), session_factory, lambda text: notifications.append(text) or True, lambda p, m: next(answers), tmp_path)
 
     with session_factory() as session:
-        topic = pilot.generate_topic(session)
+        topic, _ = pilot.generate_topic(session)
 
     assert topic.subject == "This subject has exactly six words"
 
@@ -799,7 +809,7 @@ def test_explainer_topics_are_not_seeded(pilot, monkeypatch):
     pilot.generate = lambda prompt, model: '{"subject": "Why the ocean is salty here"}'
 
     with pilot.session_factory() as session:
-        assert pilot.generate_topic(session, EXPLAINER) is not None
+        assert pilot.generate_topic(session, EXPLAINER)[0] is not None
 
 
 # -- daily counts ------------------------------------------------------------
@@ -918,3 +928,55 @@ def test_the_digest_says_so_when_nothing_has_settled(pilot):
     pilot.weekly_digest(MONDAY)
 
     assert "nothing older than 7 days has settled data yet" in sent[0]
+
+
+def test_an_anniversary_topic_must_return_its_event(pilot, monkeypatch):
+    # Without the anchor the script has no way back to the event, and writes
+    # about whatever the topic's words happen to match.
+    import research
+    from gpt import ANNIVERSARY
+
+    monkeypatch.setattr(research, "is_configured", lambda: False)
+    monkeypatch.setattr(
+        "autopilot.anniversary.fetch_events",
+        lambda: [type("E", (), {"text": "Kilby builds a chip", "year": 1958,
+                                "render": lambda self: "1958: Kilby builds a chip"})()],
+    )
+    pilot.generate = lambda prompt, model: '{"subject": "A chip was built in Texas"}'
+
+    with pilot.session_factory() as session:
+        topic, anchor = pilot.generate_topic(session, ANNIVERSARY)
+
+    assert topic is None
+    assert anchor == ""
+
+
+def test_an_anniversary_topic_carries_its_event(pilot, monkeypatch):
+    import research
+    from gpt import ANNIVERSARY
+
+    monkeypatch.setattr(research, "is_configured", lambda: False)
+    monkeypatch.setattr(
+        "autopilot.anniversary.fetch_events",
+        lambda: [type("E", (), {"text": "Kilby builds a chip", "year": 1958,
+                                "render": lambda self: "1958: Kilby builds a chip"})()],
+    )
+    pilot.generate = lambda prompt, model: (
+        '{"subject": "A chip was built in Texas once",'
+        ' "anchor": "1958: Kilby demonstrates the first integrated circuit"}'
+    )
+
+    with pilot.session_factory() as session:
+        topic, anchor = pilot.generate_topic(session, ANNIVERSARY)
+
+    assert topic is not None
+    assert "Kilby" in anchor
+
+
+def test_the_payload_carries_the_anchor():
+    from autopilot import build_payload
+    from gpt import ANNIVERSARY
+
+    payload = build_payload(_config(), "A chip", "short", ANNIVERSARY, "1958: Kilby")
+    assert payload["anchor"] == "1958: Kilby"
+    assert build_payload(_config(), "A chip")["anchor"] == ""

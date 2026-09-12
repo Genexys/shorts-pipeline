@@ -772,3 +772,46 @@ def test_search_term_prompt_rejects_metaphors_and_abstractions(monkeypatch):
     assert "would sit just as naturally in a video about something else" in prompt
     assert "never from the script's figures of speech" in prompt
     assert "tear gas" in prompt
+
+
+# -- anchoring ---------------------------------------------------------------
+
+
+def test_anchor_rules_pin_the_script_to_one_event():
+    # Published 2026-09-12: a Jack Kilby 1958 anniversary became "In 2023,
+    # Stanford University unveiled a prototype" because the topic line dropped
+    # the date and the script researched the words alone.
+    rules = " ".join(gpt.anchor_rules("1958: Jack Kilby demonstrates the first IC").split())
+    assert "about one specific event" in rules
+    assert "1958: Jack Kilby" in rules
+    assert "Do not transplant the story" in rules
+
+
+def test_anchor_rules_are_empty_without_one():
+    assert gpt.anchor_rules("") == ""
+    assert gpt.anchor_rules("   ") == ""
+
+
+def test_the_anchor_reaches_the_script_prompt(monkeypatch):
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or ("A chip was built. " + "word " * 130),
+    )
+
+    gpt.generate_script(
+        "a chip", 1, "m", "en_us_001", "", target_words=120,
+        anchor="1958: Jack Kilby demonstrates the first working integrated circuit",
+    )
+
+    assert "Jack Kilby" in prompts[0]
+
+
+def test_a_script_without_an_anchor_is_unchanged(monkeypatch):
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or ("word " * 130),
+    )
+    gpt.generate_script("s", 1, "m", "en_us_001", "", target_words=120)
+    assert "about one specific event" not in prompts[0]
