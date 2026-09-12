@@ -815,3 +815,12 @@ def test_a_script_without_an_anchor_is_unchanged(monkeypatch):
     )
     gpt.generate_script("s", 1, "m", "en_us_001", "", target_words=120)
     assert "about one specific event" not in prompts[0]
+
+
+def test_research_rules_separate_a_page_stamp_from_an_event_date():
+    # Published 2026-09-12: a Stanford prototype unveiled in February 2019
+    # became "In 2023" because the page carried a 2023 update stamp. The
+    # grounding rule did not catch it — "2023" was in the notes.
+    rules = " ".join(gpt.research_rules("[1] Note\nUpdated 2023. Something happened.").split())
+    assert "A date printed on a page is not the date of the event" in rules
+    assert "publication and update stamps" in rules
