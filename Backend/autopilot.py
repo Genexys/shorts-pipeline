@@ -101,12 +101,19 @@ def build_payload(
     subject: str,
     format_name: str = "short",
     register: str = EXPLAINER,
+    anchor: str = "",
 ) -> dict:
     """Same shape as Frontend/app.js sends, plus upload flag and thread count."""
     return {
         "videoSubject": subject,
         "format": format_name,
         "register": register,
+        # The event an anniversary topic was built from. The script is written
+        # in another process that never sees the day's list, and without this
+        # it researches the topic line alone and writes about whatever the
+        # words happen to match — a Kilby anniversary became a 2023 Stanford
+        # press release that way.
+        "anchor": anchor,
         "aiModel": config.model,
         "voice": config.voice,
         "paragraphNumber": config.paragraphs,
@@ -378,9 +385,10 @@ class Autopilot:
                 return None
 
             register = choose_register(self.config)
-            topic = next_planned_topic(session) or self.generate_topic(
-                session, register
-            )
+            topic = next_planned_topic(session)
+            anchor = ""
+            if topic is None:
+                topic, anchor = self.generate_topic(session, register)
             if topic is None:
                 return None
 
@@ -392,7 +400,9 @@ class Autopilot:
             job = queue_topic_job(
                 session,
                 topic,
-                build_payload(self.config, topic.subject, format_name, register),
+                build_payload(
+                    self.config, topic.subject, format_name, register, anchor
+                ),
                 now=now,
             )
             log(
@@ -404,7 +414,9 @@ class Autopilot:
 
     def generate_topic(
         self, session: Session, register: str = EXPLAINER
-    ) -> Optional[Topic]:
+    ) -> tuple:
+        """Returns (topic, anchor). The anchor is the event an anniversary
+        topic came from, and empty for every other register."""
         recent = recent_topic_subjects(session, RECENT_TOPICS_LIMIT)
         # A curio is found, not invented. Asked to make one up, the model
         # produces either an overstatement it will later defend by fabricating,
@@ -443,6 +455,14 @@ class Autopilot:
                 log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
                 continue
             subject = " ".join(subject.split())
+            # An anniversary topic must carry the event it came from; nothing
+            # else downstream can recover it.
+            picked = parsed.get("anchor") if isinstance(parsed, dict) else None
+            anchor = " ".join(picked.split()) if isinstance(picked, str) else ""
+            if register == ANNIVERSARY and not anchor:
+                last_problem = "anniversary topic came back without an anchor"
+                log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
+                continue
             word_count = len(subject.split())
             if word_count < TOPIC_MIN_WORDS or word_count > TOPIC_MAX_WORDS:
                 last_problem = f"subject has {word_count} words: '{subject}'"
@@ -455,7 +475,7 @@ class Autopilot:
                 continue
             self.failed_topic_ticks = 0
             self.topic_failure_notified = False
-            return topic
+            return topic, anchor
 
         self.failed_topic_ticks += 1
         log(
@@ -469,7 +489,7 @@ class Autopilot:
                 f"⚠️ Autopilot: topic generation failed {self.failed_topic_ticks} ticks in a row. "
                 f"Last problem: {last_problem}"
             )
-        return None
+        return None, ""
 
     # -- step 3 --------------------------------------------------------------
 
