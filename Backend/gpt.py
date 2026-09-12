@@ -684,6 +684,11 @@ RESEARCH_RULES = """
     make the script worth trusting, so use the ones the notes give you.
     You MUST NOT state any number, date, percentage, institution, researcher
     or study that does not appear in the notes.
+    A date printed on a page is not the date of the event it describes. Pages
+    carry publication and update stamps, and a note updated this year may be
+    describing something from decades ago. Give a year only when the notes say
+    the event happened then; otherwise say when it happened in words the notes
+    support, or leave the timing out.
     You MUST NOT invent how something works. Any mechanism, structure, cause or
     process you describe has to come from the notes. If the notes do not explain
     the subject, say what they do support and stop — do not fill the gap with a
