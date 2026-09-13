@@ -274,7 +274,9 @@ class Autopilot:
     def _success_message(self, session: Session, topic: Topic, job_id: str) -> str:
         title = topic.subject
         second_line = "upload skipped: unknown reason"
-        warning = ""
+        # A list, not a string: a run can degrade in more than one way at once,
+        # and the second warning used to silently overwrite the first.
+        warnings: list = []
         for artifact in list_artifacts(session, job_id):
             metadata = artifact.metadata_json or {}
             if artifact.artifact_type == "video":
@@ -285,13 +287,23 @@ class Autopilot:
                     # Almost always exhausted ElevenLabs credits. Worth saying
                     # out loud: the video is fine but sounds like a different
                     # channel, and every one after it will too until topped up.
-                    warning = (
-                        f"\n⚠️ narrated with {metadata.get('narration')} — "
+                    warnings.append(
+                        f"⚠️ narrated with {metadata.get('narration')} — "
                         "the paid voice was unavailable"
+                    )
+                if metadata.get("scriptFellBack"):
+                    # The difference between the two writers is visible in the
+                    # script: the fallback restates its own sentences and skips
+                    # the turn a curio lives on. Until now this was a log line
+                    # in a container that a deploy throws away.
+                    warnings.append(
+                        f"⚠️ written by {metadata.get('scriptModel')} — "
+                        "the stronger model was unavailable or declined"
                     )
             elif artifact.artifact_type == "youtube_video":
                 second_line = artifact.path
-        return f"✅ {title}\n{second_line}{warning}\njob {job_id}"
+        tail = "".join(f"\n{line}" for line in warnings)
+        return f"✅ {title}\n{second_line}{tail}\njob {job_id}"
 
     def send_post_draft(self, session: Session, topic: Topic, job) -> bool:
         """Sends a ready-to-paste community post, with a still from the video.

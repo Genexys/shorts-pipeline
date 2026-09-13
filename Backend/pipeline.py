@@ -20,6 +20,7 @@ from gpt import (
     words_for_seconds,
 )
 from logstream import log
+import writer
 from search import search_for_stock_videos
 from thumbnail import build_thumbnail
 from speech import ELEVENLABS, narration_plan, synthesize_sentences
@@ -102,6 +103,10 @@ class PipelineResult:
     # Ollama on any failure. Recording ai_model here instead filed every script
     # under llama3.1:8b, including the ones Opus wrote.
     script_model: str
+    # Whether the stronger model was configured and did not end up writing.
+    # Silent until now: the only trace was a log line, and the container that
+    # held it is recreated on every deploy.
+    script_fell_back: bool
     # Everything research found, not only what the script used. The leftovers
     # are what a community post can say that the video did not.
     sources: list
@@ -235,6 +240,14 @@ def run_generation_pipeline(
             anchor=anchor,
             max_words=words_for_seconds(fmt.max_seconds),
             report_model=note_model,
+        )
+
+    script_fell_back = writer.is_configured() and script_model != writer.model_name()
+    if script_fell_back:
+        emit(
+            f"[!] Script written by {script_model} rather than "
+            f"{writer.model_name()}.",
+            "warning",
         )
 
     if not script:
@@ -596,6 +609,7 @@ def run_generation_pipeline(
         script=script,
         ai_model=ai_model,
         script_model=script_model,
+        script_fell_back=script_fell_back,
         sources=sources,
         video_path=final_video_path,
         archived_path=archived_path,

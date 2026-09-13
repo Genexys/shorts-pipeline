@@ -93,6 +93,8 @@ def process_next_job() -> bool:
                         "format": result.format_name,
                         "narration": result.narration_provider,
                         "narrationFellBack": result.narration_fell_back,
+                        "scriptModel": result.script_model,
+                        "scriptFellBack": result.script_fell_back,
                     },
                     commit=False,
                 )

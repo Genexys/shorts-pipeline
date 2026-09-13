@@ -11,7 +11,7 @@ on Ollama, as it always has.
 """
 
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 from logstream import log
 
@@ -42,16 +42,27 @@ def scrub(text: str) -> str:
     return text.replace(key, "<redacted>") if key else text
 
 
-def write(prompt: str) -> Optional[str]:
-    """One completion from the stronger model, or None if it cannot be had.
+# What a refusal on a harmless subject costs, and why one retry is worth it.
+# A curio about a real published experiment — cattle painted with zebra stripes
+# to see whether it deters biting flies — was declined outright, and the 8B
+# fallback wrote four sentences of which two repeated the other two. The prompt
+# it refused arrives as a wall of terse prohibitions with no statement of what
+# any of it is for; saying that plainly is not a trick, it is the context that
+# was missing. One extra call costs about a cent.
+RETRY_PREAMBLE = """\
+The request below is for the narration of a short educational video on a
+general-audience science channel. It is read aloud as written, and it is not
+roleplay or dialogue. Write the narration and nothing else.
+"""
 
-    Never raises. A missing key, a network failure, a rate limit or a refusal
-    all return None, and the caller falls back to the local model — a video
-    written by Ollama beats no video.
+
+def _attempt(prompt: str) -> Tuple[Optional[str], bool]:
+    """One request. Returns the text, and whether the model declined.
+
+    The two are distinguished because only a refusal is worth retrying
+    differently: a rate limit or a timeout will not care how the prompt is
+    worded.
     """
-    if not is_configured():
-        return None
-
     try:
         import anthropic
 
@@ -65,16 +76,42 @@ def write(prompt: str) -> Optional[str]:
         )
     except Exception as err:
         log(f"[!] {model_name()} unavailable ({scrub(str(err))}).", "warning")
-        return None
+        return None, False
 
     if getattr(response, "stop_reason", None) == "refusal":
-        log(f"[!] {model_name()} declined to write this one.", "warning")
-        return None
+        return None, True
 
     text = "".join(
         block.text for block in response.content if getattr(block, "type", "") == "text"
     ).strip()
     if not text:
         log(f"[!] {model_name()} returned nothing usable.", "warning")
+        return None, False
+    return text, False
+
+
+def write(prompt: str) -> Optional[str]:
+    """One completion from the stronger model, or None if it cannot be had.
+
+    Never raises. A missing key, a network failure, a rate limit or a refusal
+    that survives the retry all return None, and the caller falls back to the
+    local model — a video written by Ollama beats no video.
+    """
+    if not is_configured():
         return None
+
+    text, refused = _attempt(prompt)
+    if text or not refused:
+        return text
+
+    log(
+        f"[!] {model_name()} declined this one; asking again with the brief stated.",
+        "warning",
+    )
+    text, refused = _attempt(f"{RETRY_PREAMBLE}\n{prompt}")
+    if refused:
+        log(
+            f"[!] {model_name()} declined it twice; the local model writes this one.",
+            "warning",
+        )
     return text
