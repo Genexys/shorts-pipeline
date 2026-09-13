@@ -90,16 +90,29 @@ def _chat(client, model_name: str, messages: list, disable_thinking):
     )
 
 
-def write_creative(prompt: str, ai_model: str) -> str:
+def write_creative(
+    prompt: str,
+    ai_model: str,
+    report_model: Optional[Callable[[str], None]] = None,
+) -> str:
     """A completion for the two calls where judgement shows: topic and script.
 
     Prefers the stronger model when one is configured and falls back to Ollama
     on any failure. Everything else in the pipeline is structured extraction
     and stays local.
+
+    `report_model` is told which model actually wrote it. Without it the caller
+    can only record what it asked for, which is how every script in the
+    database came to be filed under llama3.1:8b regardless of who wrote it —
+    and that is exactly the field we need when comparing retention by author.
     """
     written = writer.write(prompt)
     if written:
+        if report_model:
+            report_model(writer.model_name())
         return written
+    if report_model:
+        report_model((ai_model or "").strip() or OLLAMA_MODEL)
     return generate_response(prompt, ai_model)
 
 
@@ -315,7 +328,7 @@ SCRIPT_PREAMBLE_RE = re.compile(
 )
 
 
-def trim_to_words(script: str, target: int) -> str:
+def trim_to_words(script: str, target: int, ceiling: Optional[int] = None) -> str:
     """Cuts a script back to about `target` words, on sentence boundaries.
 
     Paragraph granularity is too coarse to land on a word count. A real script
@@ -327,24 +340,42 @@ def trim_to_words(script: str, target: int) -> str:
     never lands mid-utterance. The sentence that crosses the target is kept, so
     the result is at or just over it rather than under — undershooting is what
     the retry in generate_script is for.
+
+    `ceiling` is the limit the result must not cross, where `target` is only the
+    point at which it stops looking for more. Keeping the crossing sentence is
+    fine when the overshoot is a few words and ruinous when it is thirty: a
+    120-word target produced a 152-word script and sixty-four seconds of
+    narration. Given a ceiling, a sentence that would cross it is dropped rather
+    than kept, so the length is bounded instead of approximate. The first
+    sentence is never dropped — a ceiling too small for it is a misconfiguration,
+    and an empty script is worse than a long one.
     """
-    if target <= 0 or len(script.split()) <= target:
+    written = len(script.split())
+    if target <= 0:
+        return script
+    if written <= target and (ceiling is None or written <= ceiling):
         return script
 
     kept: List[str] = []
     words = 0
+    finished = False
     for block in re.split(r"\n\s*\n", script):
         if not block.strip():
             continue
         sentences = []
         for sentence in split_sentences(block):
+            length = len(sentence.split())
+            if ceiling is not None and (kept or sentences) and words + length > ceiling:
+                finished = True
+                break
             sentences.append(sentence)
-            words += len(sentence.split())
+            words += length
             if words >= target:
+                finished = True
                 break
         if sentences:
             kept.append(" ".join(sentences))
-        if words >= target:
+        if finished:
             break
     return "\n\n".join(kept)
 
@@ -373,6 +404,8 @@ def generate_script(
     register: Optional[str] = None,
     lead_with_payoff: bool = False,
     anchor: str = "",
+    max_words: Optional[int] = None,
+    report_model: Optional[Callable[[str], None]] = None,
     _retry: bool = True,
 ) -> Optional[str]:
     """
@@ -447,11 +480,11 @@ def generate_script(
     
     Subject: {video_subject}
 {length}    Language: {voice}
-{OPENING_RULES if lead_with_payoff else ""}{anchor_rules(anchor)}{register_rules(register)}{research_rules(research)}
+{OPENING_RULES if lead_with_payoff else ""}{ENDING_RULES}{anchor_rules(anchor)}{register_rules(register)}{research_rules(research)}
     """
 
     # Generate script
-    response = write_creative(prompt, ai_model)
+    response = write_creative(prompt, ai_model, report_model=report_model)
 
     log(response, "info")
 
@@ -480,20 +513,32 @@ def generate_script(
 
         if target_words:
             before = len(final_script.split())
-            final_script = trim_to_words(final_script, target_words)
+            final_script = trim_to_words(final_script, target_words, ceiling=max_words)
             after = len(final_script.split())
             if after < before:
+                capped = f", capped at {max_words}" if max_words else ""
                 log(
                     f"[*] Trimmed the script from {before} to {after} words "
-                    f"for a {target_words}-word target.",
+                    f"for a {target_words}-word target{capped}.",
                     "info",
                 )
 
+        # After the trim, not before: the cut is itself a way to end badly. The
+        # ceiling stops inside whichever paragraph it reaches, which on a real
+        # script left the video ending on "Then things turn."
+        word_floor = int(target_words * SCRIPT_WORD_FLOOR_RATIO) if target_words else 0
+        landed = drop_weak_ending(final_script, word_floor)
+        if landed != final_script:
+            dropped = (split_sentences(final_script) or [""])[-1]
+            log(f"[*] Dropped a trailing aside: {dropped[:80]}", "info")
+            final_script = landed
+
         log(f"Number of paragraphs used: {len(selected_paragraphs)}", "success")
 
-        # Two ways a draft can be wrong, and one retry covers both. The floor
-        # was only ever a sentence in the prompt, and a weak opening is what
-        # the retention numbers actually punish.
+        # Three ways a draft can be wrong, and one retry covers all of them.
+        # The floor was only ever a sentence in the prompt; a weak opening is
+        # what the retention numbers actually punish; and an ending that does
+        # not land is the last thing anyone who stayed will hear.
         problem = None
         if target_words:
             written = len(final_script.split())
@@ -506,6 +551,11 @@ def generate_script(
         if problem is None and lead_with_payoff and opens_weakly(final_script):
             opening = (split_sentences(final_script) or [""])[0]
             problem = f'opens on setup rather than the fact: "{opening[:80]}"'
+        if problem is None and ends_weakly(final_script):
+            # Only reached when the sentence could not simply be dropped, i.e.
+            # removing it would leave the script under its floor.
+            closing = (split_sentences(final_script) or [""])[-1]
+            problem = f'ends on an aside rather than the point: "{closing[:80]}"'
 
         if problem:
             log(
@@ -526,6 +576,8 @@ def generate_script(
                     register=register,
                     lead_with_payoff=lead_with_payoff,
                     anchor=anchor,
+                    max_words=max_words,
+                    report_model=report_model,
                     _retry=False,
                 ) or final_script
 
@@ -674,6 +726,90 @@ def opens_weakly(script: str) -> bool:
     first = (split_sentences(script or "") or [""])[0]
     return bool(_WEAK_OPENING_RE.search(first))
 
+
+# What the last sentence must do. The counterpart to OPENING_RULES, and it comes
+# from the same failure at the other end. A Short about scratching built to a
+# real twist — scratching releases serotonin, which makes the itch worse — and
+# then spent its closing eight seconds on "the peripheral nervous system appears
+# to play a powerful role in this relief too, since itch is carried by a specific
+# subpopulation of nerve fibers". That is a research note the writer had left
+# over, not an ending, and it is the last thing the viewer hears.
+ENDING_RULES = """
+    Your LAST sentence is the one the viewer leaves on. End on the part that
+    lands: the consequence, the turn, the thing they would repeat to someone
+    else. Do not end on a hedge, a caveat, an aside, a second mechanism you had
+    no room to explain, or a fact that is in the script only because a source
+    happened to mention it. If the strongest thing you have to say is in the
+    middle, the script is in the wrong order.
+"""
+
+# Endings that trail off. As with the opening list, the instruction above does
+# the work and this catches what it misses — hedges, tacked-on second causes,
+# and the "more research is needed" close that a sourced script drifts into.
+WEAK_ENDING_PATTERNS = (
+    r"\b(?:appears?|seems?) to\b",
+    r"\bis (?:thought|believed|considered) to\b",
+    r"\bmay (?:also )?(?:play|be|help|contribute|explain)\b",
+    r"\b(?:also|too) (?:plays?|contributes?|matters?)\b",
+    r"\bplays? (?:a|an) (?:powerful|important|key|crucial|significant|vital) role\b",
+    r"\b(?:more|further) (?:research|study|work)\b",
+    r"\b(?:scientists|researchers) (?:are still|continue to|have yet to|do not yet)\b",
+    r"\bremains? (?:unclear|unknown|a mystery|to be seen)\b",
+    r"\b(?:too|as well)\s*[.!?]*\s*$",
+)
+_WEAK_ENDING_RE = re.compile("|".join(WEAK_ENDING_PATTERNS), re.IGNORECASE)
+
+
+# A closing sentence this short is a stub, not an ending. Three words is what
+# the duration ceiling leaves behind when it cuts into a paragraph: trimming the
+# scratching script to fit ended it on "Then things turn." — a promise the video
+# then never keeps. A deliberate short ending runs longer than this.
+TRAILING_STUB_MAX_WORDS = 3
+
+
+def ends_weakly(script: str) -> bool:
+    """Whether the last sentence trails off, or stops mid-thought, instead of
+    landing."""
+    sentences = split_sentences(script or "")
+    if not sentences:
+        return False
+    if _WEAK_ENDING_RE.search(sentences[-1]):
+        return True
+    # A script of one sentence is whatever it is; there is nothing to stub.
+    return (
+        len(sentences) > 1
+        and len(sentences[-1].split()) <= TRAILING_STUB_MAX_WORDS
+    )
+
+
+def drop_weak_ending(script: str, floor: int) -> str:
+    """Removes a trailing sentence that trails off, when there is room for it.
+
+    Cheaper and safer than asking for a rewrite: everything before the last
+    sentence is already what was wanted, and a second draft puts that at risk to
+    fix eight seconds. Only one sentence goes, and only while the result stays
+    above the word floor — beyond that it is a rewrite, which is what the retry
+    is for.
+    """
+    if not ends_weakly(script):
+        return script
+
+    blocks = [block for block in re.split(r"\n\s*\n", script) if block.strip()]
+    if not blocks:
+        return script
+
+    sentences = split_sentences(blocks[-1])
+    if len(sentences) > 1:
+        trimmed = blocks[:-1] + [" ".join(sentences[:-1])]
+    elif len(blocks) > 1:
+        # The weak sentence is a paragraph of its own; there is another to end on.
+        trimmed = blocks[:-1]
+    else:
+        return script
+
+    candidate = "\n\n".join(trimmed)
+    return script if len(candidate.split()) < floor else candidate
+
 # The instruction that makes concrete detail safe. Specifics are what make a
 # script worth trusting — a real figure a viewer can check beats "some research
 # suggests" — but an 8B model asked for one with no source invents it, and an
@@ -751,6 +887,9 @@ def research_rules(brief: str) -> str:
 SUBJECT_HASHTAG_COUNT = 3
 MAX_JSON_CANDIDATES = 32
 
+# Fewer words than this is a fragment, not a sentence worth putting in a title.
+TITLE_MIN_WORDS = 4
+
 # A leading fragment this short is a title, not a paragraph. The prompt forbids
 # titles and the model writes them anyway; taking one as the whole script
 # produces a three-second video.
@@ -759,6 +898,21 @@ TITLE_FRAGMENT_MAX_WORDS = 8
 # Models undershoot a word count. Measured: asked for 90, wrote 62. Stating a
 # floor as well lands much closer than an approximate target alone.
 SCRIPT_WORD_FLOOR_RATIO = 0.85
+
+# Words of narration per second, used to turn a format's duration ceiling into
+# a word ceiling. Measured across twelve published Shorts: 118 to 152 words
+# against 50.6 to 64.1 seconds of ElevenLabs audio, which is 2.00 to 2.46 words
+# a second including the pauses it leaves between sentences. The slowest of
+# those is the one to divide by — a cap computed from the average would be
+# breached by every below-average run, which is the failure it exists to stop.
+NARRATION_WORDS_PER_SECOND = 2.0
+
+
+def words_for_seconds(seconds: Optional[float]) -> Optional[int]:
+    """The most words that fit in `seconds` of narration, or None for no limit."""
+    if not seconds or seconds <= 0:
+        return None
+    return max(1, int(seconds * NARRATION_WORDS_PER_SECOND))
 
 
 def _iter_balanced_brace_spans(text: str):
@@ -847,6 +1001,29 @@ def _capitalized(subject: str) -> str:
     if not cleaned:
         return "Untitled video"
     return cleaned[:1].upper() + cleaned[1:]
+
+
+def title_from_opening(script: str) -> str:
+    """The script's own first sentence as the title, when it can serve as one.
+
+    Only meaningful where OPENING_RULES applies, because that is what makes the
+    first sentence the hook rather than a definition. Where it holds, the best
+    line in the video is already written, and the metadata model reliably writes
+    something blander: a Short that opened "Scratching works by hurting you"
+    went up titled "Scratching for Relief".
+
+    Returns "" when the sentence cannot carry a title — too long to show without
+    truncation, or too short to say anything — and the model's own title stands.
+    """
+    first = (split_sentences(script or "") or [""])[0]
+    first = re.sub(r'[*#"<>]', "", first)
+    first = re.sub(r"\s+", " ", first).strip()
+    # A title carries no full stop; a question mark or an exclamation is part of
+    # the line and stays.
+    first = first.rstrip(".").strip()
+    if len(first) > TITLE_MAX_CHARS or len(first.split()) < TITLE_MIN_WORDS:
+        return ""
+    return first
 
 
 def validate_metadata(
@@ -999,6 +1176,7 @@ def generate_metadata(
     ai_model: str,
     always_hashtags: tuple = ALWAYS_HASHTAGS,
     format_label: str = "short vertical YouTube video (YouTube Shorts)",
+    opening_title: bool = False,
 ) -> Tuple[str, str, List[str]]:
     """
     Generate YouTube title, description and tags with a single JSON request.
@@ -1034,6 +1212,11 @@ def generate_metadata(
         log(response[:500], "info")
 
     title, description, tags = validate_metadata(raw, video_subject)
+    if opening_title:
+        # Set by the caller for formats whose first sentence is the hook.
+        opening = title_from_opening(script)
+        if opening:
+            title = opening
     if not tags:
         # snippet.tags goes up empty otherwise. Shorts hid this behind the
         # "#Shorts" floor in the description; long form, which forces no

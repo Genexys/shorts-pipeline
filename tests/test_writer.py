@@ -131,3 +131,31 @@ def test_search_terms_still_fall_back_to_ollama(monkeypatch):
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: '["onion cutting"]')
 
     assert gpt.get_search_terms("onions", 1, "script", "llama3.1:8b") == ["onion cutting"]
+
+
+def test_write_creative_reports_the_model_that_wrote(monkeypatch):
+    import gpt
+
+    seen = []
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    monkeypatch.setattr(gpt.writer, "write", lambda prompt: "Written by Opus.")
+
+    text = gpt.write_creative("p", "llama3.1:8b", report_model=seen.append)
+
+    assert text == "Written by Opus."
+    assert seen == ["claude-opus-5"]
+
+
+def test_write_creative_reports_the_fallback_model(monkeypatch):
+    import gpt
+
+    seen = []
+    monkeypatch.setattr(gpt.writer, "write", lambda prompt: None)
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: "Written by Ollama.")
+
+    text = gpt.write_creative("p", "llama3.1:8b", report_model=seen.append)
+
+    assert text == "Written by Ollama."
+    # The point of the field: a fallback must not be filed under the model that
+    # was asked for and did not write it.
+    assert seen == ["llama3.1:8b"]

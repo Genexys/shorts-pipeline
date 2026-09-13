@@ -21,6 +21,13 @@ class VideoFormat:
     subtitle_font_size: int
     burn_subtitles: bool
     target_words: int
+    # Hard ceiling on narration length, in seconds. None means no ceiling.
+    # A word target alone does not bound the duration: the model overshoots
+    # it, the trim keeps the sentence that crosses it, and the narrator's
+    # pace varies. Twelve published Shorts ran from 50.6 to 64.1 seconds on
+    # word counts of 118 to 152 — a spread of fourteen seconds nobody asked
+    # for, and two videos a third longer than the format was designed for.
+    max_seconds: Optional[float]
     section_count: int
     subtitle_max_chars: int
     voice: str
@@ -78,9 +85,18 @@ SHORT = VideoFormat(
     # MoviePy render. See SUBTITLE_FONT_SIZE in video.py.
     subtitle_font_size=112,
     burn_subtitles=True,
-    # About 48 seconds of speech at 150 wpm. Comfortably inside the Shorts
-    # limit, and long enough to make a point rather than state one.
-    target_words=120,
+    # Measured, not assumed. The old note here said "about 48 seconds at 150
+    # wpm"; across twelve published Shorts the narrator actually ran 120 to 148
+    # words a minute including the pauses between sentences, so 120 words was
+    # never 48 seconds — it averaged 53, and the longest run reached 64.
+    # 85 leaves the trim somewhere to land under the ceiling below.
+    target_words=85,
+    # Forty-five seconds. Not a platform limit — Shorts run to three minutes
+    # since October 2024 — but a retention one: the channel's average view is
+    # 5.6 seconds, so every second past the point the script has made is a
+    # second nobody watches. It also keeps the clip budget honest, since ten
+    # clips capped at five seconds only cover fifty.
+    max_seconds=45.0,
     # One continuous take; the outline machinery is for long form only.
     section_count=1,
     # Word-by-word captions, the usual Shorts style.
@@ -103,9 +119,9 @@ SHORT = VideoFormat(
     # The Shorts feed is a swipe test: a viewer either stays past the first
     # seconds or does not, and nothing else about the video matters if they go.
     ranking_metric="average_view_percentage",
-    # 120 words has room for one or two real specifics, not eight.
+    # Under a hundred words has room for one or two real specifics, not eight.
     research_results=5,
-    # Fifty seconds has no room for a slow build.
+    # Forty-five seconds has no room for a slow build.
     lead_with_payoff=True,
     # One sentence per request, so the subtitle fallback can time each clip.
     # A Short is a single section anyway, so nothing is lost.
@@ -138,6 +154,9 @@ LONG = VideoFormat(
     # translate it and viewers can turn it off.
     burn_subtitles=False,
     target_words=800,
+    # Long form is bounded by its outline, not by a stopwatch, and a viewer
+    # who opened it chose the length.
+    max_seconds=None,
     # Length has to come from more ground covered, not longer sections: eight
     # sections of a hundred words each, rather than six of a hundred and thirty.
     section_count=8,

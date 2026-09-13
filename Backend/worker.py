@@ -79,7 +79,7 @@ def process_next_job() -> bool:
         try:
             with SessionLocal() as session:
                 add_script(
-                    session, job_id, result.script, result.ai_model, commit=False
+                    session, job_id, result.script, result.script_model, commit=False
                 )
                 add_research_sources(session, job_id, result.sources, commit=False)
                 add_artifact(
