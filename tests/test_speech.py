@@ -266,3 +266,39 @@ def test_elevenlabs_gets_neighbouring_text_for_continuity(monkeypatch, paths):
     assert calls[0][1] is None and calls[0][2] == "Two."
     assert calls[1][1] == "One." and calls[1][2] == "Three."
     assert calls[2][1] == "Two." and calls[2][2] is None
+
+
+# -- semicolons --------------------------------------------------------------
+
+
+def test_for_narration_turns_a_semicolon_into_a_sentence():
+    # From the published Short: ElevenLabs read the clause after the semicolon
+    # at 1.45 words a second against 3.0 for the clause before it.
+    script = "One held a patient still; the other killed him."
+    assert speech.for_narration(script) == (
+        "One held a patient still. The other killed him."
+    )
+
+
+def test_for_narration_handles_a_semicolon_before_a_capital():
+    script = "He tried water; Kilby tried silicon."
+    assert speech.for_narration(script) == "He tried water. Kilby tried silicon."
+
+
+def test_for_narration_leaves_ordinary_punctuation_alone():
+    script = "A sentence. Another one, with a comma!\n\nAnd a new paragraph?"
+    assert speech.for_narration(script) == script
+
+
+def test_narration_plan_splits_at_a_semicolon():
+    # Two chunks, so the second is generated as its own short sentence — which
+    # is the pace every other short sentence in that script was read at.
+    plan = speech.narration_plan("One held a patient still; the other killed him.", False)
+    assert plan == [["One held a patient still.", "The other killed him."]]
+
+
+def test_narration_plan_by_section_still_drops_the_semicolon():
+    # Long form sends a whole paragraph in one request, and the voice slows in
+    # exactly the same way.
+    plan = speech.narration_plan("A clause; and another.", True)
+    assert plan == [["A clause. And another."]]
