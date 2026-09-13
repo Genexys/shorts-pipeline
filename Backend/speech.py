@@ -33,6 +33,29 @@ def split_sentences(block: str) -> List[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
+# ElevenLabs reads a semicolon as a full stop and then delivers what follows as
+# a separate, weighted closing line. Measured on a published Short from the word
+# timings AssemblyAI returned: "One held a patient still long enough to cut
+# through a limb" ran at 3.0 words a second, and "the other killed him" — the
+# same sentence, after the semicolon — at 1.45. No silence between the words, so
+# nothing showed up as a gap; each word is simply stretched to most of a second,
+# and with word-by-word captions snapping over them the line reads as a stutter.
+# The same clause written as its own sentence is read at normal pace, which is
+# what every other short sentence in that script did.
+_SEMICOLON_CLAUSE = re.compile(r"\s*;\s+([a-z])")
+_SEMICOLON = re.compile(r"\s*;\s+")
+
+
+def for_narration(script: str) -> str:
+    """The script as the voice should receive it, not as it is written.
+
+    Only the audio is affected. The stored script keeps its punctuation, and the
+    subtitles are transcribed from the audio, so nothing downstream sees this.
+    """
+    spoken = _SEMICOLON_CLAUSE.sub(lambda m: f". {m.group(1).upper()}", script or "")
+    return _SEMICOLON.sub(". ", spoken)
+
+
 def narration_plan(script: str, by_section: bool) -> List[List[str]]:
     """The script as chunks to narrate, grouped by section.
 
@@ -42,8 +65,11 @@ def narration_plan(script: str, by_section: bool) -> List[List[str]]:
     the result sounds clipped. Sentence chunks stay the default for Shorts,
     whose subtitles are timed from the individual clips when AssemblyAI is not
     configured.
+
+    Semicolons are turned into full stops on the way through — see
+    `for_narration` for why.
     """
-    sections = split_sections(script)
+    sections = split_sections(for_narration(script))
     if by_section:
         return [[section] for section in sections]
     return [split_sentences(section) for section in sections]
