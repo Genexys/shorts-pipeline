@@ -986,19 +986,21 @@ def test_ends_weakly_catches_a_stub_left_by_the_ceiling():
     # What trimming the scratching script to 45 seconds produced before the
     # drop ran after the trim instead of before it.
     script = "The itch starts in your skin. Scratching drowns it out. Then things turn."
-    assert gpt.ends_weakly(script)
+    assert gpt.ends_weakly(script, cut_short=True)
+    # Without a cut it is simply how the writer chose to end.
+    assert not gpt.ends_weakly(script)
 
 
 def test_ends_weakly_leaves_a_single_sentence_script_alone():
     # Nothing to stub: it is the whole script, not a trailing fragment.
-    assert not gpt.ends_weakly("Then things turn.")
+    assert not gpt.ends_weakly("Then things turn.", cut_short=True)
 
 
 def test_generate_script_does_not_end_on_the_ceiling_cut(monkeypatch):
     # The ceiling stops inside whichever paragraph it reaches, so the trim is
     # itself a way to end badly and the drop has to run after it.
     draft = (
-        " ".join(f"word{i}" for i in range(70))
+        " ".join(f"word{i}" for i in range(60))
         + ".\n\nThen things turn. "
         + " ".join(f"later{i}" for i in range(40))
         + "."
@@ -1006,7 +1008,41 @@ def test_generate_script_does_not_end_on_the_ceiling_cut(monkeypatch):
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: draft)
 
     script = gpt.generate_script(
-        "s", 1, "model", "en_us_001", "", target_words=70, max_words=75
+        "s", 1, "model", "en_us_001", "", target_words=62, max_words=70
     )
 
     assert not script.rstrip().endswith("Then things turn.")
+
+
+def test_trim_to_words_keeps_a_lone_closing_sentence():
+    # Published 2026-09-13: the draft ended "Hotter water doesn't just catch up.
+    # It wins." The target was reached two words early, and the video went out
+    # on the setup with the payoff cut off.
+    body = " ".join(f"word{i}" for i in range(87)) + "."
+    script = f"{body} It wins."
+    trimmed = gpt.trim_to_words(script, 85, ceiling=90)
+    assert trimmed.endswith("It wins.")
+    # Ninety was the limit; eighty-nine plus two is the price of an ending.
+    assert len(trimmed.split()) == 89
+
+
+def test_trim_to_words_does_not_keep_a_long_closing_sentence():
+    # The grace is for a closing line, which is short by nature. A whole
+    # paragraph past the limit is the overrun the ceiling exists to stop.
+    body = " ".join(f"word{i}" for i in range(87)) + "."
+    tail = " ".join(f"more{i}" for i in range(30)) + "."
+    trimmed = gpt.trim_to_words(f"{body} {tail}", 85, ceiling=90)
+    assert not trimmed.endswith(tail)
+
+
+def test_generate_script_keeps_a_two_word_payoff(monkeypatch):
+    draft = " ".join(f"word{i}" for i in range(87)) + ". It wins."
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: draft)
+
+    script = gpt.generate_script(
+        "s", 1, "model", "en_us_001", "", target_words=85, max_words=90
+    )
+
+    # Short, and therefore a stub by length — but nothing was cut after it, so
+    # it is the writer's ending and it stands.
+    assert script.endswith("It wins.")
