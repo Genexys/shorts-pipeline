@@ -348,7 +348,9 @@ def trim_to_words(script: str, target: int, ceiling: Optional[int] = None) -> st
     narration. Given a ceiling, a sentence that would cross it is dropped rather
     than kept, so the length is bounded instead of approximate. The first
     sentence is never dropped — a ceiling too small for it is a misconfiguration,
-    and an empty script is worse than a long one.
+    and an empty script is worse than a long one. Nor is the closing sentence,
+    if it is the only one left and it fits within CLOSING_GRACE_WORDS of the
+    limit: a second of audio is a cheaper price than an ending.
     """
     written = len(script.split())
     if target <= 0:
@@ -356,26 +358,44 @@ def trim_to_words(script: str, target: int, ceiling: Optional[int] = None) -> st
     if written <= target and (ceiling is None or written <= ceiling):
         return script
 
-    kept: List[str] = []
+    blocks = [
+        split_sentences(block)
+        for block in re.split(r"\n\s*\n", script)
+        if block.strip()
+    ]
+    flat = [sentence for sentences in blocks for sentence in sentences]
+
+    taken = 0
     words = 0
-    finished = False
-    for block in re.split(r"\n\s*\n", script):
-        if not block.strip():
-            continue
-        sentences = []
-        for sentence in split_sentences(block):
-            length = len(sentence.split())
-            if ceiling is not None and (kept or sentences) and words + length > ceiling:
-                finished = True
-                break
-            sentences.append(sentence)
-            words += length
-            if words >= target:
-                finished = True
-                break
-        if sentences:
-            kept.append(" ".join(sentences))
-        if finished:
+    for sentence in flat:
+        length = len(sentence.split())
+        if taken and ceiling is not None and words + length > ceiling:
+            break
+        taken += 1
+        words += length
+        if words >= target:
+            break
+
+    # Never leave exactly one sentence behind. A lone closing sentence is the
+    # payoff far more often than it is padding, and cutting it turns the
+    # sentence before it into a setup with nothing after it. Measured on a
+    # published Short: the draft ended "Hotter water doesn't just catch up. It
+    # wins." — the target was reached two words early, "It wins" was dropped,
+    # and the video went out on the setup alone.
+    if taken == len(flat) - 1:
+        closing = len(flat[-1].split())
+        allowance = (ceiling if ceiling is not None else target) + CLOSING_GRACE_WORDS
+        if words + closing <= allowance:
+            taken += 1
+
+    kept: List[str] = []
+    used = 0
+    for sentences in blocks:
+        room = min(len(sentences), taken - used)
+        if room > 0:
+            kept.append(" ".join(sentences[:room]))
+            used += room
+        if used >= taken:
             break
     return "\n\n".join(kept)
 
@@ -511,10 +531,15 @@ def generate_script(
         # Join the selected paragraphs into a single string
         final_script = "\n\n".join(selected_paragraphs)
 
+        cut_short = False
         if target_words:
             before = len(final_script.split())
             final_script = trim_to_words(final_script, target_words, ceiling=max_words)
             after = len(final_script.split())
+            # Word counts rather than string equality: the rebuild rejoins each
+            # paragraph's sentences with single spaces, so a script that lost
+            # nothing can still differ by whitespace.
+            cut_short = after < before
             if after < before:
                 capped = f", capped at {max_words}" if max_words else ""
                 log(
@@ -527,7 +552,7 @@ def generate_script(
         # ceiling stops inside whichever paragraph it reaches, which on a real
         # script left the video ending on "Then things turn."
         word_floor = int(target_words * SCRIPT_WORD_FLOOR_RATIO) if target_words else 0
-        landed = drop_weak_ending(final_script, word_floor)
+        landed = drop_weak_ending(final_script, word_floor, cut_short=cut_short)
         if landed != final_script:
             dropped = (split_sentences(final_script) or [""])[-1]
             log(f"[*] Dropped a trailing aside: {dropped[:80]}", "info")
@@ -551,7 +576,7 @@ def generate_script(
         if problem is None and lead_with_payoff and opens_weakly(final_script):
             opening = (split_sentences(final_script) or [""])[0]
             problem = f'opens on setup rather than the fact: "{opening[:80]}"'
-        if problem is None and ends_weakly(final_script):
+        if problem is None and ends_weakly(final_script, cut_short=cut_short):
             # Only reached when the sentence could not simply be dropped, i.e.
             # removing it would leave the script under its floor.
             closing = (split_sentences(final_script) or [""])[-1]
@@ -760,16 +785,20 @@ WEAK_ENDING_PATTERNS = (
 _WEAK_ENDING_RE = re.compile("|".join(WEAK_ENDING_PATTERNS), re.IGNORECASE)
 
 
-# A closing sentence this short is a stub, not an ending. Three words is what
-# the duration ceiling leaves behind when it cuts into a paragraph: trimming the
-# scratching script to fit ended it on "Then things turn." — a promise the video
-# then never keeps. A deliberate short ending runs longer than this.
+# A closing sentence this short is a stub — when something was cut from after
+# it. Trimming the scratching script to fit ended it on "Then things turn.", a
+# promise the video never keeps. Length alone does not decide it: a deliberate
+# short ending is the best kind, and the very next Short was written to close on
+# "It wins." So this applies only where the trim actually removed what followed.
 TRAILING_STUB_MAX_WORDS = 3
 
 
-def ends_weakly(script: str) -> bool:
-    """Whether the last sentence trails off, or stops mid-thought, instead of
-    landing."""
+def ends_weakly(script: str, cut_short: bool = False) -> bool:
+    """Whether the last sentence trails off instead of landing.
+
+    `cut_short` says the trim removed what came after it, which is the only
+    circumstance in which a very short closing sentence is evidence of anything.
+    """
     sentences = split_sentences(script or "")
     if not sentences:
         return False
@@ -777,12 +806,13 @@ def ends_weakly(script: str) -> bool:
         return True
     # A script of one sentence is whatever it is; there is nothing to stub.
     return (
-        len(sentences) > 1
+        cut_short
+        and len(sentences) > 1
         and len(sentences[-1].split()) <= TRAILING_STUB_MAX_WORDS
     )
 
 
-def drop_weak_ending(script: str, floor: int) -> str:
+def drop_weak_ending(script: str, floor: int, cut_short: bool = False) -> str:
     """Removes a trailing sentence that trails off, when there is room for it.
 
     Cheaper and safer than asking for a rewrite: everything before the last
@@ -791,7 +821,7 @@ def drop_weak_ending(script: str, floor: int) -> str:
     above the word floor — beyond that it is a rewrite, which is what the retry
     is for.
     """
-    if not ends_weakly(script):
+    if not ends_weakly(script, cut_short=cut_short):
         return script
 
     blocks = [block for block in re.split(r"\n\s*\n", script) if block.strip()]
@@ -906,6 +936,11 @@ SCRIPT_WORD_FLOOR_RATIO = 0.85
 # those is the one to divide by — a cap computed from the average would be
 # breached by every below-average run, which is the failure it exists to stop.
 NARRATION_WORDS_PER_SECOND = 2.0
+
+# How far the closing sentence may run past the limit rather than be cut. Six
+# words is three seconds at the slowest measured pace, and a closing line is
+# short by nature — the one this exists for was two words long.
+CLOSING_GRACE_WORDS = 6
 
 
 def words_for_seconds(seconds: Optional[float]) -> Optional[int]:
