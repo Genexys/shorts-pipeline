@@ -159,3 +159,76 @@ def test_write_creative_reports_the_fallback_model(monkeypatch):
     # The point of the field: a fallback must not be filed under the model that
     # was asked for and did not write it.
     assert seen == ["llama3.1:8b"]
+
+
+def _patch_sequence(monkeypatch, responses):
+    """Like _patch_client, but hands out `responses` in order.
+
+    Returns the list of prompts actually sent, so a test can check what the
+    retry changed.
+    """
+    sent = []
+
+    class _Messages:
+        def create(self, **kwargs):
+            sent.append(kwargs["messages"][0]["content"])
+            return responses.pop(0)
+
+    class _Client:
+        def __init__(self, **kwargs):
+            self.messages = _Messages()
+
+    import types
+
+    fake = types.SimpleNamespace(Anthropic=_Client)
+    monkeypatch.setitem(__import__("sys").modules, "anthropic", fake)
+    return sent
+
+
+def test_write_retries_once_when_the_model_declines(monkeypatch):
+    # A curio about cattle painted with zebra stripes to deter biting flies was
+    # refused outright, and the 8B fallback then wrote four sentences of which
+    # two repeated the other two.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    sent = _patch_sequence(
+        monkeypatch,
+        [_Response(None, stop_reason="refusal"), _Response("A script.")],
+    )
+
+    assert writer.write("Subject: painted cows") == "A script."
+    assert len(sent) == 2
+    assert sent[0] == "Subject: painted cows"
+    # The retry says what the request is for, and still carries the original.
+    assert "general-audience science channel" in sent[1]
+    assert "Subject: painted cows" in sent[1]
+
+
+def test_write_gives_up_after_a_second_refusal(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    sent = _patch_sequence(
+        monkeypatch,
+        [_Response(None, stop_reason="refusal")] * 2,
+    )
+
+    assert writer.write("Subject: painted cows") is None
+    assert len(sent) == 2
+
+
+def test_write_does_not_retry_a_network_failure(monkeypatch):
+    # Rewording will not fix a timeout, and the caller has a local model
+    # waiting. Only a refusal is worth asking differently.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    calls = []
+    _patch_client(monkeypatch, error=RuntimeError("connection reset"), recorder=calls)
+
+    assert writer.write("Subject: anything") is None
+    # One client, one create; a second attempt would add two more entries.
+    assert len(calls) == 2
+
+
+def test_write_does_not_retry_a_first_attempt_that_worked(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    sent = _patch_sequence(monkeypatch, [_Response("A script.")])
+
+    assert writer.write("Subject: anything") == "A script."
+    assert len(sent) == 1

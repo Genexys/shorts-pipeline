@@ -980,3 +980,54 @@ def test_the_payload_carries_the_anchor():
     payload = build_payload(_config(), "A chip", "short", ANNIVERSARY, "1958: Kilby")
     assert payload["anchor"] == "1958: Kilby"
     assert build_payload(_config(), "A chip")["anchor"] == ""
+
+
+def test_success_message_warns_when_the_strong_model_did_not_write(
+    pilot, session_factory, notifications
+):
+    from repository import add_artifact
+
+    with session_factory() as session:
+        job_id = _completed_job(session, "Painted cows")
+        add_artifact(
+            session, job_id, "video", f"output/{job_id}.mp4",
+            {"title": "Painted cows", "uploadError": None,
+             "narration": "elevenlabs", "narrationFellBack": False,
+             "scriptModel": "llama3.1:8b", "scriptFellBack": True},
+        )
+        add_artifact(
+            session, job_id, "youtube_video", "https://youtu.be/abc",
+            {"videoId": "abc"},
+        )
+
+    pilot.finish_completed_topics()
+
+    message = notifications[0]
+    # Otherwise the only trace is a log line, in a container a deploy throws away.
+    assert "written by llama3.1:8b" in message
+
+
+def test_success_message_reports_both_fallbacks_at_once(
+    pilot, session_factory, notifications
+):
+    # The second warning used to overwrite the first.
+    from repository import add_artifact
+
+    with session_factory() as session:
+        job_id = _completed_job(session, "Painted cows")
+        add_artifact(
+            session, job_id, "video", f"output/{job_id}.mp4",
+            {"title": "Painted cows", "uploadError": None,
+             "narration": "tiktok", "narrationFellBack": True,
+             "scriptModel": "llama3.1:8b", "scriptFellBack": True},
+        )
+        add_artifact(
+            session, job_id, "youtube_video", "https://youtu.be/abc",
+            {"videoId": "abc"},
+        )
+
+    pilot.finish_completed_topics()
+
+    message = notifications[0]
+    assert "narrated with tiktok" in message
+    assert "written by llama3.1:8b" in message
