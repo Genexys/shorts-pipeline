@@ -17,6 +17,7 @@ from gpt import (
     generate_script,
     get_search_terms,
     select_music_mood,
+    words_for_seconds,
 )
 from logstream import log
 from search import search_for_stock_videos
@@ -95,7 +96,12 @@ class PipelineResult:
     narration_provider: str
     narration_fell_back: bool
     script: str                # persisted by the worker; community posts read it
-    ai_model: str
+    ai_model: str              # the model the request asked for
+    # The model that actually wrote the script, which is not always the one
+    # asked for: write_creative prefers the stronger model and falls back to
+    # Ollama on any failure. Recording ai_model here instead filed every script
+    # under llama3.1:8b, including the ones Opus wrote.
+    script_model: str
     # Everything research found, not only what the script used. The leftovers
     # are what a community post can say that the video did not.
     sources: list
@@ -196,6 +202,13 @@ def run_generation_pipeline(
         )
         brief = ""
 
+    # Filled in by write_creative with whoever ended up writing.
+    script_model = ai_model or ""
+
+    def note_model(name: str) -> None:
+        nonlocal script_model
+        script_model = name
+
     if fmt is LONG:
         script = generate_long_script(
             data["videoSubject"],
@@ -220,6 +233,8 @@ def run_generation_pipeline(
             register=register,
             lead_with_payoff=fmt.lead_with_payoff,
             anchor=anchor,
+            max_words=words_for_seconds(fmt.max_seconds),
+            report_model=note_model,
         )
 
     if not script:
@@ -429,7 +444,14 @@ def run_generation_pipeline(
         ) from err
 
     title, description, keywords = generate_metadata(
-        data["videoSubject"], script, ai_model, fmt.always_hashtags, fmt.metadata_label
+        data["videoSubject"],
+        script,
+        ai_model,
+        fmt.always_hashtags,
+        fmt.metadata_label,
+        # Where the first sentence is required to be the hook, it is also the
+        # best title the video has.
+        opening_title=fmt.lead_with_payoff,
     )
 
     description = research.append_sources(description, sources)
@@ -573,6 +595,7 @@ def run_generation_pipeline(
     return PipelineResult(
         script=script,
         ai_model=ai_model,
+        script_model=script_model,
         sources=sources,
         video_path=final_video_path,
         archived_path=archived_path,

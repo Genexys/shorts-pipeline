@@ -57,3 +57,14 @@ def offline(monkeypatch):
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("FIRECRAWL_API_KEY", "")
+    # Ollama is free, but reaching it is still a live call, and the suite was
+    # quietly relying on the host being unable to resolve "ollama" — run the
+    # same tests inside the compose network and three of them fail, because a
+    # code path that is meant to give up instead succeeds and sends a second
+    # Telegram message. Point it at a closed port so the outcome is the same
+    # wherever the suite runs. Tests that want a model patch generate_response.
+    # Set on the module, not the environment: gpt.py reads OLLAMA_BASE_URL once
+    # at import, so an env var set here would arrive far too late.
+    import gpt
+
+    monkeypatch.setattr(gpt, "OLLAMA_BASE_URL", "http://127.0.0.1:1")

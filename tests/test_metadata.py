@@ -824,3 +824,189 @@ def test_research_rules_separate_a_page_stamp_from_an_event_date():
     rules = " ".join(gpt.research_rules("[1] Note\nUpdated 2023. Something happened.").split())
     assert "A date printed on a page is not the date of the event" in rules
     assert "publication and update stamps" in rules
+
+
+# --- The duration ceiling -----------------------------------------------------
+
+
+def test_words_for_seconds_uses_the_slowest_measured_pace():
+    # Twelve published Shorts ran 2.00 to 2.46 words a second. Dividing by the
+    # slowest is what makes the cap hold for a below-average run.
+    assert gpt.words_for_seconds(45.0) == 90
+    assert gpt.words_for_seconds(None) is None
+    assert gpt.words_for_seconds(0) is None
+
+
+def test_trim_to_words_never_crosses_the_ceiling():
+    # Ten sentences of five words. A 22-word target would keep the sentence
+    # that crosses it and land on 25; a ceiling of 23 stops it at 20.
+    script = " ".join(f"a{i} b c d e." for i in range(10))
+    assert len(gpt.trim_to_words(script, 22).split()) == 25
+    assert len(gpt.trim_to_words(script, 22, ceiling=23).split()) == 20
+
+
+def test_trim_to_words_keeps_the_first_sentence_whatever_the_ceiling():
+    # A ceiling below the opening sentence is a misconfiguration; an empty
+    # script would be worse than an overlong one.
+    script = "One two three four five six seven. Eight nine ten."
+    assert gpt.trim_to_words(script, 2, ceiling=3).startswith("One two three")
+
+
+def test_trim_to_words_with_a_ceiling_leaves_a_short_script_alone():
+    script = "One two three four five."
+    assert gpt.trim_to_words(script, 100, ceiling=90) == script
+
+
+def test_generate_script_honours_the_duration_ceiling(monkeypatch):
+    # The 2026-09-13 Short: 131 words of narration ran 59.9 seconds against a
+    # format designed for about 48.
+    draft = "\n\n".join(
+        " ".join(f"word{i}" for i in range(20)) + "." for _ in range(10)
+    )
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: draft)
+
+    script = gpt.generate_script(
+        "s", 1, "model", "en_us_001", "", target_words=85, max_words=90
+    )
+
+    assert len(script.split()) <= 90
+
+
+# --- Endings ------------------------------------------------------------------
+
+
+def test_ends_weakly_catches_the_published_trailing_note():
+    # Verbatim from https://youtu.be/BIzNTXc4KW8, the last thing the viewer hears.
+    script = (
+        "Scratching works by hurting you. The peripheral nervous system appears "
+        "to play a powerful role in this relief too, since itch is carried by a "
+        "specific subpopulation of nerve fibers."
+    )
+    assert gpt.ends_weakly(script)
+
+
+def test_ends_weakly_accepts_an_ending_that_lands():
+    script = "Scratching hurts you. The signals get confused, and you scratch more."
+    assert not gpt.ends_weakly(script)
+
+
+def test_drop_weak_ending_removes_the_trailing_sentence():
+    script = (
+        "The itch starts in your skin. Scratching drowns it out with pain. "
+        "More research is needed."
+    )
+    landed = gpt.drop_weak_ending(script, floor=5)
+    assert landed.endswith("Scratching drowns it out with pain.")
+
+
+def test_drop_weak_ending_drops_a_whole_trailing_paragraph():
+    script = "The itch starts in your skin.\n\nMore research is needed."
+    assert gpt.drop_weak_ending(script, floor=5) == "The itch starts in your skin."
+
+
+def test_drop_weak_ending_keeps_a_script_that_would_fall_under_the_floor():
+    # Better an aside than a video too short to make its point. The retry in
+    # generate_script is what handles this case.
+    script = "Scratching hurts you. More research is needed."
+    assert gpt.drop_weak_ending(script, floor=8) == script
+
+
+def test_drop_weak_ending_leaves_a_good_ending_alone():
+    script = "The itch starts in your skin. The signals get confused."
+    assert gpt.drop_weak_ending(script, floor=1) == script
+
+
+def test_generate_script_drops_a_trailing_aside_without_a_retry(monkeypatch):
+    calls = {"n": 0}
+    body = " ".join(f"word{i}" for i in range(60)) + "."
+
+    def fake(prompt, model):
+        calls["n"] += 1
+        return f"{body} The peripheral nervous system appears to play a role."
+
+    monkeypatch.setattr(gpt, "generate_response", fake)
+
+    script = gpt.generate_script(
+        "s", 1, "model", "en_us_001", "", target_words=60, max_words=90
+    )
+
+    assert "appears to play" not in script
+    # Dropping is free; a rewrite would risk everything that was already right.
+    assert calls["n"] == 1
+
+
+def test_script_prompt_carries_the_ending_rule(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        gpt, "generate_response", lambda p, m: seen.setdefault("p", p) or "A script."
+    )
+    gpt.generate_script("s", 1, "model", "en_us_001", "")
+    rules = " ".join(seen["p"].split())
+    assert "LAST sentence is the one the viewer leaves on" in rules
+
+
+# --- The title the video already wrote ----------------------------------------
+
+
+def test_title_from_opening_uses_the_hook():
+    script = "Scratching works by hurting you. That sting is a pain sensation."
+    assert gpt.title_from_opening(script) == "Scratching works by hurting you"
+
+
+def test_title_from_opening_keeps_a_question_mark():
+    script = "Why does your stomach growl when it is empty? Because it never stops."
+    assert gpt.title_from_opening(script).endswith("?")
+
+
+def test_title_from_opening_refuses_a_sentence_that_would_be_truncated():
+    script = " ".join(["word"] * 40) + ". Short one."
+    assert gpt.title_from_opening(script) == ""
+
+
+def test_title_from_opening_refuses_a_fragment():
+    assert gpt.title_from_opening("Itches. And then some more text here.") == ""
+
+
+def test_generate_metadata_prefers_the_opening_when_asked(monkeypatch):
+    monkeypatch.setattr(
+        gpt,
+        "generate_response",
+        lambda p, m: '{"title": "Scratching for Relief", "description": "d", "tags": ["itch"]}',
+    )
+    script = "Scratching works by hurting you. That sting is a pain sensation."
+
+    title, _, _ = gpt.generate_metadata("itch", script, "model", opening_title=True)
+    assert title == "Scratching works by hurting you"
+
+    title, _, _ = gpt.generate_metadata("itch", script, "model")
+    assert title == "Scratching for Relief"
+
+
+def test_ends_weakly_catches_a_stub_left_by_the_ceiling():
+    # What trimming the scratching script to 45 seconds produced before the
+    # drop ran after the trim instead of before it.
+    script = "The itch starts in your skin. Scratching drowns it out. Then things turn."
+    assert gpt.ends_weakly(script)
+
+
+def test_ends_weakly_leaves_a_single_sentence_script_alone():
+    # Nothing to stub: it is the whole script, not a trailing fragment.
+    assert not gpt.ends_weakly("Then things turn.")
+
+
+def test_generate_script_does_not_end_on_the_ceiling_cut(monkeypatch):
+    # The ceiling stops inside whichever paragraph it reaches, so the trim is
+    # itself a way to end badly and the drop has to run after it.
+    draft = (
+        " ".join(f"word{i}" for i in range(70))
+        + ".\n\nThen things turn. "
+        + " ".join(f"later{i}" for i in range(40))
+        + "."
+    )
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: draft)
+
+    script = gpt.generate_script(
+        "s", 1, "model", "en_us_001", "", target_words=70, max_words=75
+    )
+
+    assert not script.rstrip().endswith("Then things turn.")
