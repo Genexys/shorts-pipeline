@@ -198,12 +198,38 @@ def week_start(now: datetime, tz: tzinfo) -> datetime:
     return (midnight - timedelta(days=local_now.weekday())).astimezone(timezone.utc)
 
 
-def next_format(longform_this_week: int, config: AutopilotConfig) -> str:
+def longform_due_by(day_index: int, config: AutopilotConfig) -> int:
+    """How many long videos the week should have produced by the end of this day.
+
+    `day_index` is 0 for Monday, matching date.weekday() and week_start above.
+    Rounded up, so the first one is due on Monday rather than partway through
+    Tuesday, and the budget is never made unreachable by the rounding.
+    """
+    day = max(0, min(6, day_index))
+    return -(-config.longform_per_week * (day + 1) // 7)
+
+
+def next_format(
+    longform_this_week: int, config: AutopilotConfig, day_index: int = 0
+) -> str:
     """Which format the next video should be.
 
-    Long form wins whenever its weekly budget has room: it is the scarcer and
-    more valuable slot, and leaving it until the end of the week risks losing
-    it to a day the machine happens to be off.
+    Long form used to win whenever the weekly budget had room, on the grounds
+    that the scarcer slot should not be left to a day the machine might be off.
+    What that produced was both of the week's long videos in Monday's first two
+    slots, and then six days without one — two of Monday's four slots spent on
+    the format that takes 2% of the channel's traffic, in the only day of the
+    week that got any long form at all.
+
+    So the budget is paced instead: a long video is due once the week is far
+    enough along that fewer have been made than the schedule expects. Two a week
+    lands on Monday and Thursday, three on Monday, Wednesday and Friday, one on
+    Monday.
+
+    The original worry is still answered. Falling behind — an outage, a day the
+    machine was off — raises the allowance without raising what was made, so the
+    next slots take long form until the week is caught up. Spacing is what gives
+    way when the budget is at risk, not the other way round.
 
     Deliberately does not take the daily count. slot_available already decides
     whether anything runs at all, and duplicating that gate here would let the
@@ -211,7 +237,7 @@ def next_format(longform_this_week: int, config: AutopilotConfig) -> str:
     """
     if config.longform_per_week <= 0:
         return "short"
-    return "long" if longform_this_week < config.longform_per_week else "short"
+    return "long" if longform_this_week < longform_due_by(day_index, config) else "short"
 
 
 def choose_register(config: AutopilotConfig, roll: Optional[int] = None) -> str:
