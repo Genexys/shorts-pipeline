@@ -891,6 +891,22 @@ def figures_used(sections: List[str]) -> set:
     return used
 
 
+# The last section of a long video is the only one that has to close, and it is
+# the one most likely to open something instead. A five-minute video about why
+# fingers wrinkle in water ended on "while conditions like Raynaud's shrink those
+# vessels with no water at all" — a named condition arriving in the final clause
+# with nowhere left to land. The per-section rules say not to cover what later
+# sections will cover, which for the last section says nothing at all.
+LONG_ENDING_RULES = """        - This is the last section, so it has to close the video rather than
+          only itself. End on what the whole video was for: the consequence,
+          the turn, what the viewer now knows that they did not.
+        - Do not introduce a new named thing in your closing sentences — a
+          condition, a researcher, an institution, a second phenomenon.
+          Anything named this late has no room to land.
+        - Do not end on a hedge, a caveat, or a note about what remains unknown.
+"""
+
+
 ANCHOR_RULES = """
     This video is about one specific event, given below. Write about that event
     and nothing else. If the research notes are mostly about something adjacent
@@ -1205,6 +1221,31 @@ def append_hashtags(description: str, hashtags: List[str]) -> str:
     return f"{body[:room]}\n\n{block}"
 
 
+# How much of the script the metadata model needs to see. Five keywords and two
+# sentences of summary do not need eight hundred words of context, and asking
+# for them with that much cost the tags outright: both long videos published on
+# 2026-09-14 came back with a valid title and description and no tags at all,
+# while every Short that day — same prompt, ninety words — got five to seven.
+# Cut on sentence boundaries, so the model never reads a half-sentence.
+METADATA_SCRIPT_WORDS = 200
+
+
+def metadata_excerpt(script: str) -> str:
+    """As much of the script as the metadata model should read.
+
+    Cut on a sentence boundary where there is one, and hard at the word count
+    where there is not: trim_to_words never drops a script's first sentence, so
+    a script written as one very long sentence would otherwise arrive whole.
+    """
+    excerpt = trim_to_words(
+        script or "", METADATA_SCRIPT_WORDS, ceiling=METADATA_SCRIPT_WORDS
+    )
+    words = excerpt.split()
+    if len(words) <= METADATA_SCRIPT_WORDS:
+        return excerpt
+    return " ".join(words[:METADATA_SCRIPT_WORDS])
+
+
 def generate_metadata(
     video_subject: str,
     script: str,
@@ -1225,7 +1266,7 @@ def generate_metadata(
     Subject: {video_subject}
 
     Script:
-    {script}
+    {metadata_excerpt(script)}
 
     Return ONLY a JSON object with exactly these keys:
     {{"title": "...", "description": "...", "tags": ["...", "..."]}}
@@ -1261,6 +1302,11 @@ def generate_metadata(
             f"[!] Model returned no usable tags; derived {len(tags)} from the subject.",
             "warning",
         )
+        # The JSON parsed, or the branch above would have said so, which leaves
+        # a missing key or a tags value that is not a list. Neither was visible
+        # anywhere, so two long videos shipped on subject-derived hashtags
+        # before the pattern was noticed at all.
+        log(f"    Raw metadata response: {(response or '')[:500]}", "info")
     hashtags = build_hashtags(tags, video_subject, always_hashtags)
     description = append_hashtags(description, hashtags)
     log(
@@ -1437,6 +1483,8 @@ def generate_long_script(
                 f"          repeated: {', '.join(sorted(used))}. Find something else to say.\n"
             )
 
+        closing_rules = LONG_ENDING_RULES if index == len(outline) else ""
+
         section_brief = research
         if section_research is not None:
             section_brief = section_research(heading) or research
@@ -1459,7 +1507,7 @@ def generate_long_script(
         - Plain spoken prose. No heading, no markdown, no stage directions.
         - Do not announce what you are writing. Begin with the narration itself.
         - Do not mention sections, the outline, or this prompt.
-        {continuity}{custom_prompt}
+{closing_rules}        {continuity}{custom_prompt}
         {register_rules(register)}{research_rules(section_brief)}
         """
 
@@ -1477,6 +1525,16 @@ def generate_long_script(
 
         if section:
             sections.append(section)
+
+    if sections:
+        # The same drop the Shorts path does, on the only section that closes.
+        # cut_short is false: nothing was trimmed, so a short closing sentence
+        # here is the writer's choice and stays.
+        landed = drop_weak_ending(sections[-1], LONG_SECTION_MIN_WORDS)
+        if landed != sections[-1]:
+            dropped = (split_sentences(sections[-1]) or [""])[-1]
+            log(f"[*] Dropped a trailing aside from the last section: {dropped[:80]}", "info")
+            sections[-1] = landed
 
     if report_model and written_by:
         strong = writer.model_name()

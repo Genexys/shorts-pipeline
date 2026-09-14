@@ -467,3 +467,46 @@ def test_long_script_reports_a_fallback_in_any_section(monkeypatch):
     )
 
     assert seen == ["llama3.1:8b"]
+
+
+def test_last_section_is_told_to_close(monkeypatch):
+    # The per-section rules say not to cover what later sections will cover,
+    # which for the last section says nothing at all. A five-minute video on
+    # finger wrinkling ended by naming Raynaud's in its final clause.
+    prompts = []
+
+    def fake(prompt, model):
+        prompts.append(prompt)
+        return "Some prose for the section."
+
+    monkeypatch.setattr(gpt, "generate_response", fake)
+    monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two", "Three"])
+
+    gpt.generate_long_script("s", 300, "model", "en_us_001", "", section_count=3)
+
+    assert "has to close the video" not in " ".join(prompts[:-1])
+    assert "has to close the video" in prompts[-1]
+    assert "no room to land" in prompts[-1]
+
+
+def test_long_script_drops_a_hedged_last_sentence(monkeypatch):
+    body = " ".join(f"word{i}" for i in range(80)) + "."
+    drafts = iter([body, f"{body} More research is needed."])
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: next(drafts))
+    monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two"])
+
+    script = gpt.generate_long_script("s", 200, "model", "en_us_001", "", section_count=2)
+
+    assert "More research is needed" not in script
+
+
+def test_long_script_keeps_a_short_closing_line(monkeypatch):
+    # Nothing was trimmed, so a short final sentence is the writer's ending.
+    body = " ".join(f"word{i}" for i in range(80)) + "."
+    drafts = iter([body, f"{body} It wins."])
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: next(drafts))
+    monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two"])
+
+    script = gpt.generate_long_script("s", 200, "model", "en_us_001", "", section_count=2)
+
+    assert script.rstrip().endswith("It wins.")
