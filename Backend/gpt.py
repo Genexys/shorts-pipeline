@@ -1372,6 +1372,7 @@ def generate_long_script(
     research: str = "",
     section_research: Optional[Callable[[str], str]] = None,
     register: Optional[str] = None,
+    report_model: Optional[Callable[[str], None]] = None,
 ) -> Optional[str]:
     """
     Writes a long script one section at a time.
@@ -1407,6 +1408,12 @@ def generate_long_script(
     words_per_section = max(LONG_SECTION_MIN_WORDS, target_words // len(outline))
     plan = "\n".join(f"{index}. {heading}" for index, heading in enumerate(outline, 1))
     sections: List[str] = []
+    # Which model wrote each section. A script that is part Opus and part Ollama
+    # is not an Opus script, so any fallback anywhere is reported as a fallback.
+    written_by: List[str] = []
+
+    def note_section_model(name: str) -> None:
+        written_by.append(name)
 
     for index, heading in enumerate(outline, 1):
         # The outline alone was not enough. Every section independently reached
@@ -1457,7 +1464,12 @@ def generate_long_script(
         """
 
         try:
-            section = clean_script_text(write_creative(prompt, ai_model)).strip()
+            # Every section reports, not only the first: a run that starts on
+            # the stronger model and falls back part way through has still
+            # fallen back, and the flag should say so.
+            section = clean_script_text(
+                write_creative(prompt, ai_model, report_model=note_section_model)
+            ).strip()
         except Exception as err:
             # One bad section is worth losing; the video is not.
             log(f"[!] Section {index} failed: {err}", "warning")
@@ -1465,6 +1477,11 @@ def generate_long_script(
 
         if section:
             sections.append(section)
+
+    if report_model and written_by:
+        strong = writer.model_name()
+        weaker = [name for name in written_by if name != strong]
+        report_model(weaker[0] if weaker else strong)
 
     if not sections:
         log("[-] Every section came back empty.", "error")

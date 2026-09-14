@@ -432,3 +432,38 @@ def test_figures_used_ignores_single_digits():
 
 def test_figures_used_is_empty_for_no_sections():
     assert gpt.figures_used([]) == set()
+
+
+def test_long_script_reports_the_model_that_wrote(monkeypatch):
+    # The long branch never called report_model, so script_model stayed at the
+    # model the request asked for and every long video was flagged a fallback.
+    # https://youtu.be/Pk7gdtLRH7A went out marked "written by llama3.1:8b"
+    # when Opus had written every section of it.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    monkeypatch.setattr(gpt.writer, "write", lambda prompt: "A section of prose.")
+    monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two"])
+
+    seen = []
+    gpt.generate_long_script(
+        "s", 100, "llama3.1:8b", "en_us_001", "", section_count=2,
+        report_model=seen.append,
+    )
+
+    assert seen == ["claude-opus-5"]
+
+
+def test_long_script_reports_a_fallback_in_any_section(monkeypatch):
+    # Part Opus and part Ollama is not an Opus script.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
+    drafts = iter(["A section of prose.", None])
+    monkeypatch.setattr(gpt.writer, "write", lambda prompt: next(drafts))
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: "A local section.")
+    monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two"])
+
+    seen = []
+    gpt.generate_long_script(
+        "s", 100, "llama3.1:8b", "en_us_001", "", section_count=2,
+        report_model=seen.append,
+    )
+
+    assert seen == ["llama3.1:8b"]
