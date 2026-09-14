@@ -534,7 +534,14 @@ def generate_script(
         cut_short = False
         if target_words:
             before = len(final_script.split())
-            final_script = trim_to_words(final_script, target_words, ceiling=max_words)
+            # The bound is what the trim enforces; the target is what the model
+            # was asked for. Stopping at the target cut a script the moment it
+            # crossed 85 words, which is how "So Parliament deleted the gap. And
+            # people took to the streets demanding their eleven days back."
+            # — the whole point of the video — was dropped from a draft that
+            # would have run 46 seconds. Without a ceiling, nothing changes.
+            limit = max_words or target_words
+            final_script = trim_to_words(final_script, limit, ceiling=max_words)
             after = len(final_script.split())
             # Word counts rather than string equality: the rebuild rejoins each
             # paragraph's sentences with single spaces, so a script that lost
@@ -720,6 +727,11 @@ SUBJECT_KEYWORD_COUNT = 5
 # our lives", "Animals migrate to find more abundant food sources". At roughly
 # 2.5 words a second, twelve words of preamble is five seconds. Viewers were
 # leaving exactly when the interesting part would have started.
+#
+# Measured again on 14 September across fifteen Shorts: the median is now
+# watched for 16 seconds, not 5.6. Better, and the rule is unchanged by it —
+# seconds watched are flat from 14-second videos to 57-second ones, so the first
+# twenty seconds are still where the whole audience is.
 OPENING_RULES = """
     Your FIRST sentence must contain the surprising thing itself. Not a
     definition of the subject, not why it matters, not that scientists have
@@ -936,6 +948,14 @@ MAX_JSON_CANDIDATES = 32
 # Fewer words than this is a fragment, not a sentence worth putting in a title.
 TITLE_MIN_WORDS = 4
 
+# How long an opening sentence may be and still work as a title. YouTube accepts
+# a hundred characters, but in the Shorts feed on a phone about forty are
+# visible, and an eighty-character sentence reads as a paragraph that has
+# wandered into the title. Measured against the ones that worked: "Scratching
+# works by hurting you" is 31, "Hotter water doesn't just catch up" is 34. Above
+# this the model's own title stands.
+OPENING_TITLE_MAX_CHARS = 55
+
 # A leading fragment this short is a title, not a paragraph. The prompt forbids
 # titles and the model writes them anyway; taking one as the whole script
 # produces a three-second video.
@@ -948,10 +968,16 @@ SCRIPT_WORD_FLOOR_RATIO = 0.85
 # Words of narration per second, used to turn a format's duration ceiling into
 # a word ceiling. Measured across twelve published Shorts: 118 to 152 words
 # against 50.6 to 64.1 seconds of ElevenLabs audio, which is 2.00 to 2.46 words
-# a second including the pauses it leaves between sentences. The slowest of
-# those is the one to divide by — a cap computed from the average would be
-# breached by every below-average run, which is the failure it exists to stop.
-NARRATION_WORDS_PER_SECOND = 2.0
+# a second including the pauses it leaves between sentences.
+#
+# The average, not the slowest. Dividing by the slowest makes the cap hold at 45
+# seconds for every run, and it cost two payoffs in four Shorts to do it: a
+# 102-word script whose last paragraph was the point ran 46.2 seconds at its
+# measured pace, and was cut to 86 words to save one and a half of them. The
+# ceiling is a retention preference, not a platform limit — Shorts run to three
+# minutes — so a slow run landing near 50 seconds is a far cheaper outcome than
+# an average run losing its ending.
+NARRATION_WORDS_PER_SECOND = 2.26
 
 # How far the closing sentence may run past the limit rather than be cut. Six
 # words is three seconds at the slowest measured pace, and a closing line is
@@ -1063,8 +1089,8 @@ def title_from_opening(script: str) -> str:
     something blander: a Short that opened "Scratching works by hurting you"
     went up titled "Scratching for Relief".
 
-    Returns "" when the sentence cannot carry a title — too long to show without
-    truncation, or too short to say anything — and the model's own title stands.
+    Returns "" when the sentence cannot carry a title — too long to show in the
+    feed, or too short to say anything — and the model's own title stands.
     """
     first = (split_sentences(script or "") or [""])[0]
     first = re.sub(r'[*#"<>]', "", first)
@@ -1072,7 +1098,7 @@ def title_from_opening(script: str) -> str:
     # A title carries no full stop; a question mark or an exclamation is part of
     # the line and stays.
     first = first.rstrip(".").strip()
-    if len(first) > TITLE_MAX_CHARS or len(first.split()) < TITLE_MIN_WORDS:
+    if len(first) > OPENING_TITLE_MAX_CHARS or len(first.split()) < TITLE_MIN_WORDS:
         return ""
     return first
 

@@ -47,7 +47,8 @@ class VideoFormat:
     # channel's first week: average view 5.6s against a 38s video, while the
     # opening sentence of five videos out of six spent about five seconds
     # defining the subject. Viewers were leaving exactly when the interesting
-    # part would have started.
+    # part would have started. Median watch is 16s as of 14 September; see
+    # OPENING_RULES in gpt.py for why that does not change the rule.
     lead_with_payoff: bool
     # Narrate a whole section per request rather than a sentence per request.
     narrate_by_section: bool
@@ -89,14 +90,30 @@ SHORT = VideoFormat(
     # wpm"; across twelve published Shorts the narrator actually ran 120 to 148
     # words a minute including the pauses between sentences, so 120 words was
     # never 48 seconds — it averaged 53, and the longest run reached 64.
-    # 85 leaves the trim somewhere to land under the ceiling below.
-    target_words=85,
-    # Forty-five seconds. Not a platform limit — Shorts run to three minutes
-    # since October 2024 — but a retention one: the channel's average view is
-    # 5.6 seconds, so every second past the point the script has made is a
-    # second nobody watches. It also keeps the clip budget honest, since ten
-    # clips capped at five seconds only cover fifty.
-    max_seconds=45.0,
+    #
+    # This is what the model is asked for, not what is enforced — the trim works
+    # to max_seconds below. The gap between the two is the point: asked for 85
+    # the model wrote 102, 97 and 91 on consecutive days, so it overshoots by
+    # about a fifth, and a ceiling only five words above the ask meant the
+    # overshoot was cut off the end, where the payoff is. Asking for 70 puts the
+    # expected draft around 84, comfortably inside the 90 the ceiling allows.
+    target_words=70,
+    # Forty seconds, and the number comes from this channel's own numbers rather
+    # than from a rule of thumb. Fifteen Shorts published 7-12 September,
+    # measured on the 14th, with length derived from duration over percentage:
+    #
+    #     14-38s   retention 44.5-73.2%   watched 10-21s
+    #     51-57s   retention 25.7-38.2%   watched 14-21s
+    #
+    # Seconds actually watched are flat across that whole range — the viewer
+    # leaves around the twentieth second whatever the length is — so the fall in
+    # percentage is very largely mechanical. Which means shortening costs no
+    # watch time at all and buys back about fifteen points of retention.
+    #
+    # Not a platform limit either: Shorts run to three minutes since October
+    # 2024. And it keeps the clip budget honest, since ten clips capped at five
+    # seconds cover fifty.
+    max_seconds=40.0,
     # One continuous take; the outline machinery is for long form only.
     section_count=1,
     # Word-by-word captions, the usual Shorts style.
