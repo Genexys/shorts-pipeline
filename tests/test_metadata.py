@@ -1046,3 +1046,56 @@ def test_generate_script_keeps_a_two_word_payoff(monkeypatch):
     # Short, and therefore a stub by length — but nothing was cut after it, so
     # it is the writer's ending and it stands.
     assert script.endswith("It wins.")
+
+
+# --- What the metadata model is asked to read ---------------------------------
+
+
+def test_metadata_excerpt_leaves_a_short_script_alone():
+    script = "One sentence. And a second one."
+    assert gpt.metadata_excerpt(script) == script
+
+
+def test_metadata_excerpt_cuts_a_long_script_on_a_sentence():
+    script = " ".join(f"word{i} word{i} word{i} word{i} word{i}." for i in range(100))
+    excerpt = gpt.metadata_excerpt(script)
+    assert len(excerpt.split()) <= gpt.METADATA_SCRIPT_WORDS
+    assert excerpt.endswith(".")
+
+
+def test_metadata_excerpt_bounds_a_script_with_no_sentence_breaks():
+    # trim_to_words never drops a first sentence, so without a hard cap a script
+    # written as one long sentence arrives whole.
+    script = " ".join(f"word{i}" for i in range(800)) + "."
+    assert len(gpt.metadata_excerpt(script).split()) == gpt.METADATA_SCRIPT_WORDS
+
+
+def test_generate_metadata_does_not_send_the_whole_long_script(monkeypatch):
+    # Both long videos on 2026-09-14 came back with a title, a description and
+    # no tags; every Short that day got five to seven from the same prompt.
+    seen = {}
+
+    def fake(prompt, model):
+        seen["prompt"] = prompt
+        return '{"title": "T", "description": "D", "tags": ["a tag"]}'
+
+    monkeypatch.setattr(gpt, "generate_response", fake)
+    script = " ".join(f"word{i}" for i in range(800)) + "."
+
+    gpt.generate_metadata("subject", script, "model")
+
+    assert "word199" in seen["prompt"]
+    assert "word400" not in seen["prompt"]
+
+
+def test_generate_metadata_logs_the_response_when_tags_are_unusable(monkeypatch, capsys):
+    # A tags value that is not a list is dropped silently by validate_metadata.
+    monkeypatch.setattr(
+        gpt,
+        "generate_response",
+        lambda p, m: '{"title": "T", "description": "D", "tags": "a, b, c"}',
+    )
+
+    gpt.generate_metadata("black holes", "A script.", "model")
+
+    assert "Raw metadata response" in capsys.readouterr().out
