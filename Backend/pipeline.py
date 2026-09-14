@@ -225,6 +225,7 @@ def run_generation_pipeline(
             research=brief,
             section_research=section_research,
             register=register,
+            report_model=note_model,
         )
     else:
         script = generate_script(
