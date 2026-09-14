@@ -829,10 +829,12 @@ def test_research_rules_separate_a_page_stamp_from_an_event_date():
 # --- The duration ceiling -----------------------------------------------------
 
 
-def test_words_for_seconds_uses_the_slowest_measured_pace():
-    # Twelve published Shorts ran 2.00 to 2.46 words a second. Dividing by the
-    # slowest is what makes the cap hold for a below-average run.
-    assert gpt.words_for_seconds(45.0) == 90
+def test_words_for_seconds_uses_the_average_measured_pace():
+    # Twelve published Shorts ran 2.00 to 2.46 words a second, averaging 2.26.
+    # Dividing by the slowest held the ceiling for every run and cost two
+    # payoffs in four Shorts to do it.
+    assert gpt.words_for_seconds(40.0) == 90
+    assert gpt.words_for_seconds(45.0) == 101
     assert gpt.words_for_seconds(None) is None
     assert gpt.words_for_seconds(0) is None
 
@@ -958,9 +960,23 @@ def test_title_from_opening_keeps_a_question_mark():
     assert gpt.title_from_opening(script).endswith("?")
 
 
-def test_title_from_opening_refuses_a_sentence_that_would_be_truncated():
-    script = " ".join(["word"] * 40) + ". Short one."
+def test_title_from_opening_refuses_a_sentence_too_long_for_the_feed():
+    # Published 2026-09-14 at eighty characters: "In Britain, Wednesday the 2nd
+    # of September 1752 was followed by Thursday the 14th". Inside YouTube's
+    # hundred, twice what the Shorts feed shows on a phone.
+    script = (
+        "In Britain, Wednesday the 2nd of September 1752 was followed by "
+        "Thursday the 14th. Eleven days never happened."
+    )
     assert gpt.title_from_opening(script) == ""
+
+
+def test_title_from_opening_keeps_the_ones_that_worked():
+    for opening in (
+        "Scratching works by hurting you.",
+        "Hotter water doesn't just catch up.",
+    ):
+        assert gpt.title_from_opening(f"{opening} And then more text follows.")
 
 
 def test_title_from_opening_refuses_a_fragment():
@@ -1099,3 +1115,34 @@ def test_generate_metadata_logs_the_response_when_tags_are_unusable(monkeypatch,
     gpt.generate_metadata("black holes", "A script.", "model")
 
     assert "Raw metadata response" in capsys.readouterr().out
+
+
+def test_generate_script_trims_at_the_ceiling_not_the_target(monkeypatch):
+    # Published 2026-09-14: Opus wrote 102 words ending "So Parliament deleted
+    # the gap. And people took to the streets demanding their eleven days back."
+    # The trim stopped the moment it crossed the 85-word target and dropped the
+    # whole closing paragraph — the point of the video — from a draft that would
+    # have run 46 seconds.
+    draft = (
+        " ".join(f"word{i}" for i in range(75))
+        + ".\n\nSo Parliament deleted the gap. And people took to the streets "
+        "demanding their eleven days back."
+    )
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: draft)
+
+    script = gpt.generate_script(
+        "s", 1, "model", "en_us_001", "", target_words=70, max_words=90
+    )
+
+    assert "eleven days back" in script
+
+
+def test_generate_script_still_trims_at_the_target_without_a_ceiling(monkeypatch):
+    # A caller that asks for a word count and no duration gets what it always
+    # got.
+    draft = "\n\n".join(" ".join(f"word{i}" for i in range(40)) + "." for _ in range(5))
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: draft)
+
+    script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=60)
+
+    assert len(script.split()) < 110
