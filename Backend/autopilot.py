@@ -407,7 +407,11 @@ class Autopilot:
             longform_this_week = count_longform_since(
                 session, week_start(now, self.config.tz)
             )
-            format_name = next_format(longform_this_week, self.config)
+            format_name = next_format(
+                longform_this_week,
+                self.config,
+                now.astimezone(self.config.tz).weekday(),
+            )
 
             job = queue_topic_job(
                 session,

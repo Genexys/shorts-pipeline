@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
-from autopilot_config import next_format, week_start
+from autopilot_config import longform_due_by, next_format, week_start
+
+MONDAY = 0
+THURSDAY = 3
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -196,18 +199,66 @@ def test_next_format_is_short_when_long_form_is_off():
     assert next_format(0, _cfg()) == "short"
 
 
-def test_next_format_prefers_long_while_the_budget_has_room():
+def test_next_format_takes_the_first_long_slot_on_monday():
     config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="2")
-    # The scarcer slot goes first: leaving it to the end of the week risks
-    # losing it to a day the machine is off.
-    assert next_format(0, config) == "long"
-    assert next_format(1, config) == "long"
+    assert next_format(0, config, MONDAY) == "long"
+
+
+def test_next_format_does_not_spend_the_whole_budget_in_one_day():
+    # What this replaced: both of the week's long videos went out in Monday's
+    # first two slots, and the other six days had none.
+    config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="2")
+    assert next_format(1, config, MONDAY) == "short"
+
+
+def test_next_format_spaces_two_long_videos_to_monday_and_thursday():
+    config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="2")
+    made = 0
+    days = []
+    for day in range(7):
+        if next_format(made, config, day) == "long":
+            days.append(day)
+            made += 1
+    assert days == [MONDAY, THURSDAY]
+
+
+def test_next_format_spaces_three_long_videos_evenly():
+    config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="3")
+    made = 0
+    days = []
+    for day in range(7):
+        if next_format(made, config, day) == "long":
+            days.append(day)
+            made += 1
+    assert days == [0, 2, 4]
+
+
+def test_next_format_gives_one_a_week_to_monday():
+    config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="1")
+    assert next_format(0, config, MONDAY) == "long"
+    assert next_format(1, config, THURSDAY) == "short"
+
+
+def test_next_format_catches_up_after_a_missed_day():
+    # Spacing is what gives way when the budget is at risk, not the reverse.
+    # Nothing ran on Monday, so Thursday owes two and takes both.
+    config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="2")
+    assert next_format(0, config, THURSDAY) == "long"
+    assert next_format(1, config, THURSDAY) == "long"
+    assert next_format(2, config, THURSDAY) == "short"
 
 
 def test_next_format_falls_back_to_short_once_the_budget_is_spent():
     config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK="2")
-    assert next_format(2, config) == "short"
-    assert next_format(5, config) == "short"
+    assert next_format(2, config, 6) == "short"
+    assert next_format(5, config, 6) == "short"
+
+
+def test_longform_due_by_never_makes_the_budget_unreachable():
+    for per_week in range(1, 8):
+        config = _cfg(AUTOPILOT_LONGFORM_PER_WEEK=str(per_week))
+        assert longform_due_by(0, config) >= 1
+        assert longform_due_by(6, config) == per_week
 
 
 # -- week boundary ----------------------------------------------------------
