@@ -130,7 +130,14 @@ class AutopilotConfig:
             voice=get("AUTOPILOT_VOICE").strip() or "en_us_001",
             paragraphs=_parse_int("AUTOPILOT_PARAGRAPHS", get("AUTOPILOT_PARAGRAPHS"), 1, 1, 10),
             subtitles_position=get("AUTOPILOT_SUBTITLES_POSITION").strip() or "center,center",
-            color=get("AUTOPILOT_COLOR").strip() or "#FFFF00",
+            # Cream, not the MoneyPrinter default of #FFFF00. Two reasons, and
+            # the second is the stronger one. It is the channel's own colour,
+            # from the branding kit, where pure yellow fights the amber
+            # everything else uses. And it is more legible: the style line puts
+            # a black outline around every word, and near-white inside a black
+            # outline is what broadcast captions have always been, while yellow
+            # loses contrast over sand, skin and sunset footage.
+            color=get("AUTOPILOT_COLOR").strip() or "#F4EEE3",
             use_music=_parse_bool("AUTOPILOT_USE_MUSIC", get("AUTOPILOT_USE_MUSIC"), default=False),
             custom_prompt=get("AUTOPILOT_CUSTOM_PROMPT"),
             longform_per_week=_parse_int(

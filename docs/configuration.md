@@ -70,7 +70,7 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_VOICE` | TikTok TTS voice. | `en_us_001` |
 | `AUTOPILOT_PARAGRAPHS` | Paragraphs in the script, 1..10. | `1` |
 | `AUTOPILOT_SUBTITLES_POSITION` | Same values as the UI. | `center,center` |
-| `AUTOPILOT_COLOR` | Subtitle colour. | `#FFFF00` |
+| `AUTOPILOT_COLOR` | Subtitle colour. Cream by default: it matches the channel's amber branding, which pure yellow fights, and near-white inside the black outline the style line already draws is the more legible pairing over unpredictable stock footage. | `#F4EEE3` |
 | `AUTOPILOT_USE_MUSIC` | Mix a background music bed from `Songs/`. See [Background music](#background-music). | `false` |
 | `AUTOPILOT_CUSTOM_PROMPT` | Custom script prompt. | empty |
 | `AUTOPILOT_LONGFORM_PER_WEEK` | Long videos per week, 0..7. `0` keeps the autopilot on Shorts. The budget is paced across the week rather than spent at the start of it: two a week land on Monday and Thursday, three on Monday, Wednesday and Friday. Falling behind (an outage, a day the machine was off) lets the next slots catch up. | `0` |

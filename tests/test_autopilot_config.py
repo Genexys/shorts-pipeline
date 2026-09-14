@@ -26,7 +26,7 @@ def test_from_env_defaults():
     assert config.voice == "en_us_001"
     assert config.paragraphs == 1
     assert config.subtitles_position == "center,center"
-    assert config.color == "#FFFF00"
+    assert config.color == "#F4EEE3"
     assert config.use_music is False
     assert config.custom_prompt == ""
     assert config.output_retention_days == 7
