@@ -449,7 +449,10 @@ def run_generation_pipeline(
             subtitles_path,
             n_threads or 2,
             subtitles_position,
-            text_color or "#FFFF00",
+            # Same cream as the autopilot default: a video made from the
+            # frontend with no colour chosen should still look like this
+            # channel. See AUTOPILOT_COLOR in autopilot_config.py.
+            text_color or "#F4EEE3",
             fmt,
         )
     except Exception as err:

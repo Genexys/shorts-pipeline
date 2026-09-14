@@ -82,7 +82,7 @@ def test_build_payload_matches_frontend_shape():
         "threads": payload["threads"],
         "subtitlesPosition": "center,center",
         "customPrompt": "",
-        "color": "#FFFF00",
+        "color": "#F4EEE3",
     }
     assert isinstance(payload["threads"], int) and payload["threads"] >= 1
 
