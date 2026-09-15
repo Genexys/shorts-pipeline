@@ -52,6 +52,8 @@ uv run pytest tests/test_file.py::test_name -q             # single test
 ```
 User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue)
   → worker.py claims queued job
+  → research.py: Firecrawl search → sources; knowledge.py: best pages read in full,
+     verbatim facts stored (knowledge_pages, facts) and added to the brief
   → gpt.py: generate_script() via Ollama
   → gpt.py: get_search_terms() → JSON keywords
   → search.py: Pexels API → download stock clips to temp/
@@ -89,6 +91,9 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 | `autopilot.py` | Scheduled loop: topic generation, job queuing, Telegram reports, output cleanup |
 | `autopilot_config.py` | `AutopilotConfig.from_env()` and pure `slot_available` rule |
 | `notify.py` | Telegram `send_telegram`, never raises |
+| `research.py` | Firecrawl search: sources and snippets for the script brief and the description |
+| `knowledge.py` | Knowledge base: reads a video's best sources in full once, stores verbatim facts, adds them to the brief |
+| `startup_check.py` | `REQUIRE_MOUNTS`: refuse to start on empty bind mounts |
 
 ### Frontend
 - `index.html`: UI with inline CSS, form fields, live log viewer

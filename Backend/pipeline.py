@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from moviepy import AudioFileClip, concatenate_audioclips
 
+import knowledge
 import research
 from formats import LONG, resolve_format
 from gpt import (
@@ -218,6 +219,9 @@ def run_generation_pipeline(
 
     sources = []
     section_research = None
+    # Verbatim facts from the best pages, filled in once the sources are known.
+    # Read by section_research at call time, so long form gets them too.
+    facts_block = ""
     if research.is_configured():
         # Search the event, not the topic line. The topic deliberately omits
         # the date, so searching it alone returns whatever the words match —
@@ -238,7 +242,12 @@ def run_generation_pipeline(
             for source in found:
                 if all(source.url != existing.url for existing in sources):
                     sources.append(source)
-            return research.format_brief(found)
+            section_brief = research.format_brief(found)
+            if section_brief and facts_block:
+                # The same facts in every section: figures_used stops any one
+                # of them being repeated once a section has said it.
+                return f"{section_brief}\n\n{facts_block}"
+            return section_brief
         if len(sources) < research.MIN_USABLE_SOURCES:
             # A topic phrased colloquially matches chatter rather than
             # reference material: "mushrooms have built-in umbrellas" returned
@@ -263,6 +272,20 @@ def run_generation_pipeline(
             "warning",
         )
         brief = ""
+
+    if brief:
+        # The snippets are a sentence or two per page; the page's best fact is
+        # usually elsewhere on it. Read the best pages in full, once ever.
+        passages = knowledge.facts_for(
+            sources, keywords_from_subject(anchor or data["videoSubject"])
+        )
+        facts_block = knowledge.format_facts(passages)
+        if facts_block:
+            brief = f"{brief}\n\n{facts_block}"
+            emit(
+                f"[+] Knowledge: {len(passages)} verbatim fact(s) from the full pages.",
+                "info",
+            )
 
     # Filled in by write_creative with whoever ended up writing.
     script_model = ai_model or ""

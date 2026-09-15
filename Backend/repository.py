@@ -12,6 +12,8 @@ from models import (
     Artifact,
     GenerationEvent,
     GenerationJob,
+    Fact,
+    KnowledgePage,
     ResearchSource,
     Script,
     SearchTerm,
@@ -644,6 +646,56 @@ def get_research_sources(session: Session, job_id: str) -> list[ResearchSource]:
         .where(ResearchSource.job_id == job_id)
         .order_by(ResearchSource.id)
     )
+    return list(session.scalars(stmt))
+
+
+def get_knowledge_page(session: Session, url: str) -> Optional[KnowledgePage]:
+    """The stored page for a URL, or None if it has never been read."""
+    return session.scalars(select(KnowledgePage).where(KnowledgePage.url == url)).first()
+
+
+def add_knowledge_page(
+    session: Session,
+    url: str,
+    title: str,
+    facts: "Sequence[tuple[str, float, str]]",
+) -> KnowledgePage:
+    """Stores a page and its facts, as (text, score, digest), and commits.
+
+    Committed at once rather than with the job: a page that has been paid for
+    is worth keeping even if the video it was fetched for then fails.
+    A fact whose digest is already stored — the same sentence on another
+    page — is skipped.
+    """
+    page = KnowledgePage(url=url[:1024], title=(title or "")[:512])
+    session.add(page)
+    session.flush()
+    digests = [digest for _, _, digest in facts]
+    existing = set()
+    if digests:
+        existing = set(
+            session.scalars(select(Fact.digest).where(Fact.digest.in_(digests)))
+        )
+    for position, (text_value, score, digest) in enumerate(facts):
+        if digest in existing:
+            continue
+        existing.add(digest)
+        session.add(
+            Fact(
+                page_id=page.id,
+                position=position,
+                text=text_value,
+                score=float(score),
+                digest=digest,
+            )
+        )
+    session.commit()
+    return page
+
+
+def get_page_facts(session: Session, page_id: int) -> list[Fact]:
+    """A page's facts in the order they appear on it."""
+    stmt = select(Fact).where(Fact.page_id == page_id).order_by(Fact.position)
     return list(session.scalars(stmt))
 
 

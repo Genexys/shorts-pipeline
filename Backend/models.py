@@ -213,6 +213,56 @@ class ResearchSource(Base):
     )
 
 
+class KnowledgePage(Base):
+    """A source page read in full, once.
+
+    Search results arrive as a sentence or two per page, and the best fact on a
+    page is rarely in that sentence. A Short about the smell of rain had the
+    Wikipedia article on petrichor among its sources and never saw what makes
+    the subject remarkable, because the snippet was a line about Streptomyces.
+    A row here means the page has been fetched and its facts are stored, so the
+    next video that cites it costs nothing.
+    """
+
+    __tablename__ = "knowledge_pages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    url: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    scraped_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class Fact(Base):
+    """One sentence quoted verbatim from a knowledge page.
+
+    Verbatim on purpose. A fact paraphrased by a model is a fact the model could
+    have altered, and the whole value of this table is that every entry can be
+    found, word for word, on the page it cites.
+    """
+
+    __tablename__ = "facts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    page_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("knowledge_pages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Order on the page, so a page's facts read back as they were written.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    # How specific the sentence is, before any particular subject is known.
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # The same sentence syndicated across two pages is stored once.
+    digest: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class SearchTerm(Base):
     """One stock-footage search a video ran, and what came of it.
 
