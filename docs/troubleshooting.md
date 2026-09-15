@@ -87,4 +87,5 @@ given only the script no room to add anything true.
 
 Notes are stored per job in `research_sources` from 2026-09-10 onward. Videos
 published before that have none, so `make_post.py` offers only `question` and
-`poll` for them and says so.
+`poll` for them and says so. The same goes for `quiz`, whose correct answer has
+to come from the notes.

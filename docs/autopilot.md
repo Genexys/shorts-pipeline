@@ -68,9 +68,24 @@ Set `AUTOPILOT_ENABLED=false` and restart the autopilot process. Finished jobs a
 YouTube has no API for creating community posts, so after each upload the
 autopilot sends one to Telegram to be pasted into Studio by hand.
 
-The caption **is the post text and nothing else**. Telegram copies a caption
-whole, so a heading or the video link would be pasted into Studio along with
-it. The video link is in the preceding success message instead.
+For a text post the caption **is the post text and nothing else**. Telegram
+copies a caption whole, so a heading or the video link would be pasted into
+Studio along with it. The video link is in the preceding success message
+instead.
+
+Polls and quizzes are entered field by field, so their drafts do carry a first
+line saying which they are, because as a list of options they look identical and
+Studio treats them differently:
+
+- **poll** — an opinion question: `POLL — opinion, no correct answer`. Options up
+  to 65 characters.
+- **quiz** — a question with one right answer, taken from the research notes:
+  `QUIZ — select the ✅ answer as correct`. The correct answer is marked ✅ and
+  the explanation for Studio's explanation field follows the options. Answers up
+  to 80 characters, explanation up to 500. The answers are shuffled, since a
+  model puts the right one first, and a quiz whose correct answer cannot be
+  identified is sent as a plain question rather than with a guess. Quizzes are
+  written by the stronger model where one is configured.
 
 A still from the video rides along, because a community post with a picture
 reaches further than one without. It is a plain frame — `pick_still`, not
@@ -81,8 +96,8 @@ A post that cannot be written is logged and dropped. It never costs the
 notification that the video is live, and there is no placeholder text: an
 obviously generated post is worse than no post.
 
-Posts of the `fact` kind need the video's research notes, which are stored from
-2026-09-10 onward. Older videos get a question or a poll.
+Posts of the `fact` and `quiz` kinds need the video's research notes, which are
+stored from 2026-09-10 onward. Older videos get a question or a poll.
 
 ## Two clocks
 

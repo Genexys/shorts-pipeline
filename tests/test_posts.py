@@ -83,9 +83,11 @@ def test_build_post_demotes_a_poll_with_too_few_options():
     assert post.text == "Which one?"
 
 
-def test_render_numbers_poll_options():
+def test_render_numbers_poll_options_and_says_there_is_no_right_answer():
     post = Post(kind=POLL, text="Which?", options=("a", "b"))
-    assert post.render() == "Which?\n\n  1. a\n  2. b"
+    assert post.render() == (
+        "POLL — opinion, no correct answer\n\nWhich?\n\n  1. a\n  2. b"
+    )
 
 
 def test_render_leaves_a_plain_post_alone():
@@ -242,3 +244,125 @@ def test_choose_post_kind_offers_facts_once_notes_exist():
     rng = random.Random(4)
     drawn = {choose_post_kind("script", rng, "notes") for _ in range(60)}
     assert posts.FACT in drawn
+
+
+# -- quizzes ----------------------------------------------------------------
+#
+# Reported 2026-09-15: a poll's options were being entered in Studio as a quiz,
+# which needs one answer marked correct, and nothing said which one it was.
+
+QUIZ_ANSWER = {
+    "text": "How little geosmin can the human nose detect?",
+    "options": ["0.4 parts per billion", "4 parts per million", "40 parts per thousand"],
+    "answer": "0.4 parts per billion",
+    "explanation": "The nose picks geosmin up at concentrations as low as 0.4 ppb.",
+}
+
+
+def test_build_quiz_marks_the_correct_answer_wherever_it_lands():
+    for seed in range(8):
+        post = build_post(QUIZ_ANSWER, posts.QUIZ, random.Random(seed))
+        assert post.kind == posts.QUIZ
+        assert post.options[post.correct] == "0.4 parts per billion"
+
+
+def test_build_quiz_shuffles_the_answers():
+    # A model puts the right answer first; viewers learn that fast.
+    positions = {
+        build_post(QUIZ_ANSWER, posts.QUIZ, random.Random(seed)).correct
+        for seed in range(20)
+    }
+    assert len(positions) > 1
+
+
+def test_build_quiz_accepts_the_answer_as_a_number():
+    raw = dict(QUIZ_ANSWER, answer=2)
+    post = build_post(raw, posts.QUIZ, random.Random(0))
+    assert post.options[post.correct] == "4 parts per million"
+
+
+def test_build_quiz_matches_the_answer_loosely_on_case_and_spacing():
+    raw = dict(QUIZ_ANSWER, answer="  0.4 PARTS per billion ")
+    post = build_post(raw, posts.QUIZ, random.Random(0))
+    assert post.options[post.correct] == "0.4 parts per billion"
+
+
+def test_a_quiz_without_an_identifiable_answer_becomes_a_question():
+    # Sending a quiz with a guessed correct answer is the bug being fixed.
+    raw = dict(QUIZ_ANSWER, answer="about a teaspoon")
+    post = build_post(raw, posts.QUIZ)
+    assert post.kind == QUESTION
+    assert post.options == ()
+    assert post.text == QUIZ_ANSWER["text"]
+
+
+def test_a_quiz_with_two_answers_becomes_a_question():
+    raw = dict(QUIZ_ANSWER, options=["0.4 parts per billion", "4 parts per million"])
+    assert build_post(raw, posts.QUIZ).kind == QUESTION
+
+
+def test_quiz_answers_may_be_longer_than_poll_options():
+    long_option = "x" * 80
+    raw = dict(QUIZ_ANSWER, options=[long_option, "b", "c"], answer=long_option)
+    post = build_post(raw, posts.QUIZ, random.Random(0))
+    assert long_option in post.options
+    assert clean_options([long_option]) == []  # too long for a poll
+
+
+def test_quiz_explanation_is_capped_at_youtubes_limit():
+    raw = dict(QUIZ_ANSWER, explanation="y" * 900)
+    post = build_post(raw, posts.QUIZ, random.Random(0))
+    assert len(post.explanation) == posts.QUIZ_EXPLANATION_MAX_CHARS
+
+
+def test_render_marks_the_quiz_answer_and_carries_the_explanation():
+    post = Post(
+        kind=posts.QUIZ,
+        text="How little?",
+        options=("4 ppm", "0.4 ppb", "40 ppt"),
+        correct=1,
+        explanation="As low as 0.4 ppb.",
+    )
+    assert post.render() == (
+        "QUIZ — select the ✅ answer as correct\n\n"
+        "How little?\n\n"
+        "  1. 4 ppm\n"
+        "  2. 0.4 ppb  ✅\n"
+        "  3. 40 ppt\n\n"
+        "Explanation:\nAs low as 0.4 ppb."
+    )
+
+
+def test_a_quiz_needs_the_research_notes():
+    assert posts.QUIZ not in posts.available_kinds("script", research="")
+    with pytest.raises(ValueError, match="needs the video's research notes"):
+        generate_post("s", "t", "script", "model", kind=posts.QUIZ)
+
+
+def test_a_quiz_is_written_by_the_stronger_model(monkeypatch):
+    import json
+
+    used = []
+    monkeypatch.setattr(
+        posts, "write_creative", lambda p, m: used.append("creative") or json.dumps(QUIZ_ANSWER)
+    )
+    monkeypatch.setattr(
+        posts, "generate_response", lambda p, m: used.append("local") or "{}"
+    )
+
+    post = generate_post(
+        "s", "t", "script", "model", kind=posts.QUIZ, research="notes", rng=random.Random(1)
+    )
+
+    assert used == ["creative"]
+    assert post.kind == posts.QUIZ
+
+
+def test_quiz_prompt_asks_for_an_answer_and_an_explanation():
+    prompt = build_prompt(posts.QUIZ, "s", "t", "script", "notes")
+    assert '"answer"' in prompt and '"explanation"' in prompt
+    assert "copied exactly" in prompt
+
+
+def test_poll_brief_says_a_poll_has_no_correct_answer():
+    assert "no correct answer" in build_prompt(POLL, "s", "t", "script", "notes")
