@@ -425,6 +425,7 @@ def generate_script(
     lead_with_payoff: bool = False,
     anchor: str = "",
     max_words: Optional[int] = None,
+    stretch_words: Optional[int] = None,
     report_model: Optional[Callable[[str], None]] = None,
     _retry: bool = True,
 ) -> Optional[str]:
@@ -487,7 +488,20 @@ def generate_script(
     # both is how a 167-word script became an 89-word one: the model obeyed the
     # words, wrote two paragraphs, and the paragraph cap threw the second away.
     # Where a word target exists it is the only length instruction given.
-    if target_words:
+    if target_words and stretch_words and stretch_words > target_words:
+        # A range rather than a number. Asked for "about 70", the writer wrote
+        # 71 to 78 words for every subject, and a mechanism with a second step
+        # got the same room as a single absurd fact.
+        floor = int(target_words * SCRIPT_WORD_FLOOR_RATIO)
+        length = (
+            f"    Length: {floor} to {stretch_words} words. Most subjects are fully told\n"
+            f"    in about {target_words}. Go past that only when this subject needs it:\n"
+            f"    a mechanism with a second step, a turn that needs its setup, a payoff\n"
+            f"    that needs one more sentence to land. Never lengthen by restating,\n"
+            f"    hedging, or giving a second example of the same thing.\n"
+            f"    Use as many paragraphs as that takes.\n"
+        )
+    elif target_words:
         floor = int(target_words * SCRIPT_WORD_FLOOR_RATIO)
         length = (
             f"    Length: about {target_words} words, and no fewer than {floor}.\n"
@@ -609,6 +623,7 @@ def generate_script(
                     lead_with_payoff=lead_with_payoff,
                     anchor=anchor,
                     max_words=max_words,
+                    stretch_words=stretch_words,
                     report_model=report_model,
                     _retry=False,
                 ) or final_script

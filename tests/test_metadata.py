@@ -1146,3 +1146,53 @@ def test_generate_script_still_trims_at_the_target_without_a_ceiling(monkeypatch
     script = gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=60)
 
     assert len(script.split()) < 110
+
+
+# --- A length that follows the subject -----------------------------------------
+#
+# Every Short after the 40-second change came back at 71-78 words, whatever the
+# subject: asked for "about 70", the writer delivered 70.
+
+
+def test_the_prompt_offers_a_range_when_the_format_allows_stretch(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: seen.setdefault("p", p) or "A script.")
+    gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=70, stretch_words=88)
+    prompt = " ".join(seen["p"].split())
+    assert "Length: 59 to 88 words" in prompt
+    assert "Most subjects are fully told in about 70" in prompt
+    assert "Never lengthen by restating" in prompt
+
+
+def test_without_stretch_the_prompt_asks_for_a_number_as_before(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: seen.setdefault("p", p) or "A script.")
+    gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=70)
+    prompt = " ".join(seen["p"].split())
+    assert "Length: about 70 words, and no fewer than 59" in prompt
+
+
+def test_a_stretched_script_is_not_trimmed(monkeypatch):
+    # The top of the range must sit under the ceiling, or whatever a subject
+    # was allowed to add is cut straight back off the end.
+    draft = " ".join(f"word{i}" for i in range(87)) + ". It lands."
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: draft)
+    script = gpt.generate_script(
+        "s", 1, "model", "en_us_001", "",
+        target_words=70, stretch_words=88, max_words=gpt.words_for_seconds(40.0),
+    )
+    assert script.endswith("It lands.")
+    assert len(script.split()) == 89
+
+
+def test_the_retry_keeps_the_range(monkeypatch):
+    prompts = []
+
+    def fake(prompt, model):
+        prompts.append(prompt)
+        return "Far too short."
+
+    monkeypatch.setattr(gpt, "generate_response", fake)
+    gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=70, stretch_words=88)
+    assert len(prompts) == 2
+    assert all("59 to 88 words" in " ".join(p.split()) for p in prompts)

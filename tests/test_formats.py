@@ -147,3 +147,16 @@ def test_both_formats_narrate_through_elevenlabs():
 
 def test_the_fallback_voices_differ_too():
     assert SHORT.voice != LONG.voice
+
+
+def test_short_stretch_fits_under_its_duration_ceiling():
+    import gpt
+    from formats import SHORT
+
+    assert SHORT.target_words < SHORT.stretch_words <= gpt.words_for_seconds(SHORT.max_seconds)
+
+
+def test_long_form_has_no_stretch():
+    from formats import LONG
+
+    assert LONG.stretch_words is None
