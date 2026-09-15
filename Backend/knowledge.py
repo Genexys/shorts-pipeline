@@ -26,6 +26,7 @@ all mean a brief without facts, not a failed video.
 
 import hashlib
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
 from urllib.parse import urlparse
@@ -74,6 +75,14 @@ _SCALE = re.compile(
 _EXTREME = re.compile(
     r"\b(?:first|only|largest|smallest|oldest|youngest|fastest|slowest|longest|"
     r"shortest|highest|lowest|deepest|rarest|deadliest|strongest|record)\b",
+    re.IGNORECASE,
+)
+# An author box. On a Discover Wildlife page about horned lizards, "She has also
+# worked as an ecologist for 20 years" outscored every sentence about the lizard.
+_BYLINE = re.compile(
+    r"\b(?:has (?:also )?(?:worked|written)|is an? (?:freelance|science|staff|"
+    r"senior|contributing) (?:writer|journalist|editor)|holds an? (?:degree|phd)|"
+    r"(?:writer|journalist|editor) (?:and|who|based))\b",
     re.IGNORECASE,
 )
 # A sentence talking to the reader is the page's voice, not a fact.
@@ -234,7 +243,7 @@ def looks_like_prose(sentence: str) -> bool:
         return False
     if sentence[-1] not in ".!?\"”":
         return False
-    if _BOILERPLATE.search(sentence) or _ADDRESS.search(sentence):
+    if _BOILERPLATE.search(sentence) or _ADDRESS.search(sentence) or _BYLINE.search(sentence):
         return False
     # A run of capitalised words is a title, a reference or a list of names.
     capitalised = sum(1 for word in words[1:] if word[:1].isupper())
@@ -291,9 +300,67 @@ def choose_pages(sources: Sequence["research.Source"], count: int = PAGES_PER_VI
     return [source for _, source in ranked[:count]]
 
 
-def relevance(text: str, keywords: Sequence[str]) -> float:
+_WORD = re.compile(r"[a-z][a-z]{3,}")
+
+# Words that turn up in any snippet about anything, so appearing in two of them
+# says nothing about the subject.
+_GENERIC = frozenset(
+    "about after also been being between both could does each even from have "
+    "into just like made make many more most much must only other over same "
+    "some such than that their them then there these they this those through "
+    "very well were what when where which while will with would your study "
+    "research researchers scientists according found shows known called".split()
+)
+
+# At most this much of a fact's rank comes from mentioning the subject, so a
+# long sentence that names every topic word cannot outrank a precise one.
+RELEVANCE_CAP = 2.0
+
+
+def _stem(word: str) -> str:
+    word = word.lower()
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
+def topic_vocabulary(sources: Sequence["research.Source"], keywords: Sequence[str]) -> set:
+    """The words that mark a sentence as being about this video's subject.
+
+    The subject's own keywords, plus every word that two or more of the search
+    snippets share. The second half is what the subject line alone misses: the
+    rain video's subject never says "geosmin", but two of its snippets did, and
+    the page's best fact is about geosmin. A word in only one snippet is not
+    enough — the one about horned lizards opened with a "Reptiles" category
+    heading, and that page's category blurbs are exactly what has to go.
+    """
+    vocabulary = {_stem(keyword) for keyword in keywords if keyword and len(keyword) >= 3}
+    shared: Counter = Counter()
+    for source in sources:
+        words = {
+            _stem(word)
+            for word in _WORD.findall((source.snippet or "").lower())
+            if word not in _GENERIC
+        }
+        shared.update(words)
+    vocabulary |= {word for word, count in shared.items() if count >= 2}
+    return vocabulary
+
+
+def relevance(text: str, vocabulary: Sequence[str]) -> float:
+    """How many of the subject's words a sentence uses, as whole words.
+
+    Whole words, allowing a plural: matched as substrings, "blood" found itself
+    in "warm blooded" and kept a sentence about metabolism in a video about a
+    lizard's eyes.
+    """
     lowered = text.lower()
-    return sum(1.0 for keyword in keywords if keyword and keyword.lower() in lowered)
+    hits = sum(
+        1.0
+        for word in vocabulary
+        if word and re.search(rf"\b{re.escape(word.lower())}(?:s|es)?\b", lowered)
+    )
+    return min(hits, RELEVANCE_CAP)
 
 
 def facts_for(
@@ -306,9 +373,9 @@ def facts_for(
 ) -> List[Passage]:
     """Facts from the best of `sources`, reading each page at most once, ever.
 
-    Ranked for this video by specificity plus how many of the subject's words a
-    fact mentions, since a stored page's facts were scored before any subject
-    was known. Returns [] rather than raising on any failure.
+    Filtered and ranked for this video — a stored page's facts were scored
+    before any subject was known — by whether a fact mentions the subject, then
+    by specificity. Returns [] rather than raising on any failure.
     """
     if not sources:
         return []
@@ -345,8 +412,16 @@ def facts_for(
         log(f"[!] Knowledge base unavailable ({err}). Using snippets only.", "warning")
         return []
 
+    vocabulary = topic_vocabulary(sources, keywords)
+    if vocabulary:
+        # A fact that shares no word with the subject is about something else
+        # on the page. On the first live run that was four of six: an author
+        # bio and three category blurbs about "Animals" and "Reptiles", all
+        # offered to the writer beside the two facts it actually used. Stored
+        # anyway, since the page may serve a different subject later.
+        collected = [p for p in collected if relevance(p.text, vocabulary) > 0]
     ranked = sorted(
-        collected, key=lambda passage: -(passage.score + relevance(passage.text, keywords))
+        collected, key=lambda passage: -(passage.score + relevance(passage.text, vocabulary))
     )
     return ranked[:limit]
 

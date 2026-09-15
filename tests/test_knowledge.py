@@ -240,3 +240,96 @@ def test_format_facts_names_where_each_came_from():
     assert block.startswith("Passages quoted word for word")
     assert "- Geosmin is detected at 0.4 ppb. (Petrichor)" in block
     assert knowledge.format_facts([]) == ""
+
+
+# -- relevance to the subject -------------------------------------------------------
+#
+# The first live run offered the writer six facts about a horned lizard, four of
+# them from elsewhere on the page: an author bio and category blurbs.
+
+LIZARD_SOURCES = [
+    Source("Horned lizard", "https://www.discoverwildlife.com/horned-lizard",
+           "But their real super-power is their ability to shoot blood from their eyes."),
+    Source("Eyes squirt blood", "https://asknature.org/eyes-squirt-blood",
+           "## Eyes Squirt Blood ### Reptiles When threatened it can shoot blood from its eyes."),
+    Source("Miami Herald", "https://www.miamiherald.com/lizard",
+           "When threatened, it can shoot a pressurized stream of blood directly from its eyes."),
+]
+LIZARD_FACTS = [
+    "But their real super-power is their ability to shoot blood from their eyes to a distance of up to nine times their body length.",
+    "She has also worked as an ecologist for 20 years, been a field naturalist for much longer, and worked as a journalist.",
+    "Animals–organisms that range from microscopic to larger than a bus–embody a wide variety of harms to living systems.",
+    "Reptiles retain some of the key characteristics that first enabled vertebrates to live permanently on land.",
+    "This means they burn through energy much more slowly than warm blooded creatures of the same size.",
+    "The result is a jet stream of blood that can shoot up to four feet from the eye socket, a process known as auto-hemorrhaging.",
+]
+
+
+def _page(sentences):
+    return "\n\n".join(sentences) + "\n"
+
+
+def test_vocabulary_takes_words_two_snippets_share_and_not_one():
+    vocabulary = knowledge.topic_vocabulary(LIZARD_SOURCES, [])
+    assert {"blood", "eye", "shoot", "threatened"} <= vocabulary
+    # "Reptiles" is a category heading in one snippet only.
+    assert "reptile" not in vocabulary
+    assert "when" not in vocabulary
+
+
+def test_vocabulary_includes_the_subject_keywords():
+    vocabulary = knowledge.topic_vocabulary([], ["horned", "lizards"])
+    assert vocabulary == {"horned", "lizard"}
+
+
+def test_relevance_matches_whole_words_and_plurals():
+    assert knowledge.relevance("warm blooded creatures", {"blood"}) == 0
+    assert knowledge.relevance("from its eyes", {"eye"}) == 1
+    assert knowledge.relevance("shoot blood from the eye", {"blood", "eye", "shoot"}) == (
+        knowledge.RELEVANCE_CAP
+    )
+
+
+def test_only_facts_about_the_subject_reach_the_writer(session_factory):
+    passages = knowledge.facts_for(
+        LIZARD_SOURCES[:1],
+        ["texas", "horned", "lizard", "shoots", "blood", "eyes", "predators"],
+        session_factory,
+        lambda url: _page(LIZARD_FACTS),
+    )
+    texts = [passage.text for passage in passages]
+    assert len(texts) == 2
+    assert any("nine times their body length" in text for text in texts)
+    assert any("four feet from the eye socket" in text for text in texts)
+
+
+def test_a_best_fact_without_the_subjects_words_survives_through_the_snippets(
+    session_factory,
+):
+    # The rain video's subject never says "geosmin"; two of its snippets did.
+    sources = [
+        Source("Petrichor", "https://en.wikipedia.org/wiki/Petrichor", "Bacteria secrete geosmin."),
+        Source("ACS", "https://www.acs.org/petrichor", "A compound called geosmin is released."),
+    ]
+    page = _page([
+        "The human nose can detect geosmin at concentrations as low as 0.4 parts per billion.",
+        "The oldest bristlecone pine is more than 4,800 years old today.",
+    ])
+    passages = knowledge.facts_for(
+        sources, ["smell", "rain", "bacteria"], session_factory, lambda url: page
+    )
+    assert [p.text for p in passages] == [
+        "The human nose can detect geosmin at concentrations as low as 0.4 parts per billion."
+    ]
+
+
+def test_an_author_bio_is_never_stored_as_a_fact():
+    page = _page(["She has also worked as an ecologist for 20 years and as a journalist for 30."])
+    assert knowledge.extract_facts(page) == []
+
+
+def test_with_nothing_to_judge_relevance_by_nothing_is_filtered(session_factory):
+    passages = knowledge.facts_for(
+        [_source("https://a.com/x")], [], session_factory, lambda url: _page(LIZARD_FACTS[:1])
+    )
+    assert len(passages) == 1
