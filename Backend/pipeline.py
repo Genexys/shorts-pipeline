@@ -2,7 +2,7 @@ import math
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 from uuid import uuid4
 
@@ -83,6 +83,58 @@ def _with_section_pauses(
     return combined
 
 
+def footage_timeline(
+    segments: list, url_for_path: dict, clip_origin: dict
+) -> list:
+    """Each planned shot with its start time and the search that found it.
+
+    `segments` is combine_videos' (path, seconds) plan, already in playing
+    order; shots are laid end to end, with no transitions between them, so a
+    shot starts where the previous one stopped. A clip reused to fill the
+    length appears once per time it plays.
+    """
+    timeline = []
+    start = 0.0
+    for position, (path, seconds) in enumerate(segments):
+        url = url_for_path.get(path, "")
+        origin = clip_origin.get(url, {})
+        timeline.append(
+            {
+                "position": position,
+                "start_seconds": round(start, 3),
+                "duration_seconds": round(float(seconds), 3),
+                "search_term": origin.get("term", ""),
+                "search_pass": origin.get("search_pass", ""),
+                "url": url,
+            }
+        )
+        start += float(seconds)
+    return timeline
+
+
+def summarize_searches(searches: list, clip_origin: dict, timeline: list) -> list:
+    """What each search returned, and how much of it the video used.
+
+    Credited by identity, not by the term's text: the short-clips pass repeats
+    the script terms, and each run should be credited only with its own clips.
+    A clip counts once however many times it plays.
+    """
+    played = {shot["url"] for shot in timeline}
+    return [
+        {
+            "search_pass": entry["search_pass"],
+            "term": entry["term"],
+            "results": len(entry["urls"]),
+            "used": sum(
+                1
+                for url, origin in clip_origin.items()
+                if origin is entry and url in played
+            ),
+        }
+        for entry in searches
+    ]
+
+
 @dataclass
 class PipelineResult:
     video_path: str            # "output.mp4" relative to PROJECT_ROOT
@@ -110,6 +162,11 @@ class PipelineResult:
     # Everything research found, not only what the script used. The leftovers
     # are what a community post can say that the video did not.
     sources: list
+    # Every stock search and every shot's origin, as plain dicts for
+    # add_search_terms and add_stock_clips. Defaults, so a result built before
+    # footage was chosen — or in a test — needs neither.
+    search_terms: list = field(default_factory=list)
+    stock_clips: list = field(default_factory=list)
 
 
 def run_generation_pipeline(
@@ -268,14 +325,22 @@ def run_generation_pipeline(
     # cap and the video repeated itself once as a result.
     min_dur = int(fmt.max_clip_duration)
 
-    found_per_term = []
-    for search_term in search_terms:
+    # Every search run, in order, and which one each chosen clip came from.
+    # Persisted by the worker: a Short about rain closed on a sea turtle, and
+    # with the terms only in a container log there was no way to say why.
+    searches: list = []
+    clip_origin: dict = {}
+
+    def search(term: str, search_pass: str, min_seconds: int) -> dict:
         guard_cancelled()
-        found_per_term.append(
-            search_for_stock_videos(
-                search_term, os.getenv("PEXELS_API_KEY"), it, min_dur
-            )
+        found = search_for_stock_videos(
+            term, os.getenv("PEXELS_API_KEY"), it, min_seconds
         )
+        entry = {"term": term, "search_pass": search_pass, "urls": found}
+        searches.append(entry)
+        return entry
+
+    found_per_term = [search(term, "script", min_dur) for term in search_terms]
 
     # Round-robin rather than taking a fixed share from each term and stopping:
     # search terms overlap and some return almost nothing, so a fixed share
@@ -286,11 +351,13 @@ def run_generation_pipeline(
         for depth in range(it):
             if len(video_urls) >= wanted:
                 return
-            for found_urls in per_term:
+            for entry in per_term:
                 if len(video_urls) >= wanted:
                     return
+                found_urls = entry["urls"]
                 if depth < len(found_urls) and found_urls[depth] not in video_urls:
                     video_urls.append(found_urls[depth])
+                    clip_origin[found_urls[depth]] = entry
 
     collect(found_per_term)
 
@@ -307,33 +374,18 @@ def run_generation_pipeline(
         )
         broader = [term for term in keywords_from_subject(data["videoSubject"], 4)]
         relaxed = max(MIN_FALLBACK_CLIP_SECONDS, min_dur // 2)
-        extra = []
-        for search_term in broader:
-            guard_cancelled()
-            extra.append(
-                search_for_stock_videos(
-                    search_term, os.getenv("PEXELS_API_KEY"), it, relaxed
-                )
-            )
-        collect(extra)
+        collect([search(term, "subject", relaxed) for term in broader])
         if len(video_urls) < wanted:
             # Same terms, shorter clips: the original searches rejected these
             # only for being under the shot length.
-            retried = []
-            for search_term in search_terms:
-                guard_cancelled()
-                retried.append(
-                    search_for_stock_videos(
-                        search_term, os.getenv("PEXELS_API_KEY"), it, relaxed
-                    )
-                )
-            collect(retried)
+            collect([search(term, "short-clips", relaxed) for term in search_terms])
         emit(f"[+] {len(video_urls)} clips after widening.", "info")
 
     if not video_urls:
         raise RuntimeError("No videos found to download.")
 
     video_paths = []
+    url_for_path: dict = {}
     emit(f"[+] Downloading {len(video_urls)} videos...", "info")
 
     for video_url in video_urls:
@@ -341,6 +393,7 @@ def run_generation_pipeline(
         try:
             saved_video_path = save_video(video_url)
             video_paths.append(saved_video_path)
+            url_for_path[saved_video_path] = video_url
         except Exception:
             emit(f"[-] Could not download video: {video_url}", "error")
 
@@ -419,6 +472,11 @@ def run_generation_pipeline(
             "Could not generate subtitles. Check AssemblyAI key or local subtitle settings."
         )
 
+    stock_clips: list = []
+
+    def note_segments(segments: list) -> None:
+        stock_clips.extend(footage_timeline(segments, url_for_path, clip_origin))
+
     temp_audio = AudioFileClip(tts_path)
     try:
         # One shot per clip only holds while each shot can be long enough.
@@ -437,7 +495,8 @@ def run_generation_pipeline(
             os.getenv("FFMPEG_BINARY", "").strip() or "ffmpeg",
         )
         combined_video_path = combine_videos(
-            ordered_paths, temp_audio.duration, n_threads or 2, fmt
+            ordered_paths, temp_audio.duration, n_threads or 2, fmt,
+            on_segments=note_segments,
         )
     finally:
         temp_audio.close()
@@ -615,6 +674,8 @@ def run_generation_pipeline(
         script_model=script_model,
         script_fell_back=script_fell_back,
         sources=sources,
+        search_terms=summarize_searches(searches, clip_origin, stock_clips),
+        stock_clips=stock_clips,
         video_path=final_video_path,
         archived_path=archived_path,
         title=title,

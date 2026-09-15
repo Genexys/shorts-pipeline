@@ -213,6 +213,70 @@ class ResearchSource(Base):
     )
 
 
+class SearchTerm(Base):
+    """One stock-footage search a video ran, and what came of it.
+
+    Kept for the same reason as the clips below: a video with the wrong footage
+    could only be diagnosed by guessing. On 2026-09-15 a Short about the smell
+    of rain closed on a sea turtle, and nothing recorded which search had found
+    it — the terms went to a container log that was deleted with the container.
+
+    `results` is how many candidates the libraries returned, `used` how many of
+    them reached the finished video. A term with results and no use lost out to
+    better terms; a term with no results is one get_search_terms should not
+    have written.
+    """
+
+    __tablename__ = "search_terms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # "script" for the model's terms, "subject" for the subject's own words
+    # when those came up short, "short-clips" for the script terms retried with
+    # a lower minimum clip length.
+    search_pass: Mapped[str] = mapped_column(String(20), nullable=False)
+    term: Mapped[str] = mapped_column(String(255), nullable=False)
+    results: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class StockClip(Base):
+    """One shot of a finished video: when it plays, and the search behind it.
+
+    One row per segment rather than per downloaded file, because the timeline is
+    the question anyone actually asks — "what is that at 24 seconds, and why".
+    A clip held over or reused when footage runs short appears once per time it
+    plays.
+    """
+
+    __tablename__ = "stock_clips"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("generation_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    search_pass: Mapped[str] = mapped_column(String(20), nullable=False)
+    search_term: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class VideoStat(Base):
     """One day's view, like and comment counts for one video.
 
