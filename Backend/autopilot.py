@@ -309,9 +309,10 @@ class Autopilot:
     def send_post_draft(self, session: Session, topic: Topic, job) -> bool:
         """Sends a ready-to-paste community post, with a still from the video.
 
-        The caption is the post text alone. Telegram copies a caption whole, so
-        anything added around it — a heading, the video link — would be pasted
-        into Studio too.
+        For a text post the caption is the post text alone: Telegram copies a
+        caption whole, so anything added around it would be pasted into Studio
+        too. A poll or a quiz is entered field by field, and its draft says
+        which it is and, for a quiz, marks the correct answer — see Post.render.
         """
         script = get_script(session, job.id) or ""
         notes = "\n\n".join(
