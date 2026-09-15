@@ -138,12 +138,23 @@ Only after all three pass is it worth switching `Backend/video.py` from `libx264
 
 Not every GA107 board has an encoder — NVIDIA fused NVENC off on some RTX 3050 SKUs. The Video Encode graph in Task Manager → Performance → GPU tells you which one you have.
 
+### Empty mounts after a reboot
+
+If Docker Desktop starts the containers before its WSL integration is up — typically right after a Windows Update reboot — the bind-mount paths do not resolve, and Docker mounts freshly created empty directories instead. The containers start and report healthy; they just cannot see `secrets/` or `Songs/`. The pipeline treats a missing token as "upload skipped" and missing songs as "no music", both deliberately, so it goes on building silent videos that never upload.
+
+Set `REQUIRE_MOUNTS=true` in `.env` on a host where the token and the music library are known to exist. `worker` and `autopilot` then check before doing any work, and refuse to start if they cannot see them: one clear log line, one Telegram alert per broken container, and a restart every 30 seconds. If the integration has come back by the next attempt, the container starts normally; if not, recreate it:
+
+```bash
+docker compose -f docker-compose.yml -f compose.win.yml up -d --force-recreate worker autopilot
+```
+
 ## Troubleshooting
 
 - `ollama-init` exits non-zero: no internet access or unknown model name; `docker compose logs ollama-init`.
 - `api` never becomes healthy: `docker compose logs api`; usually a missing required variable (`TIKTOK_SESSION_ID`, `PEXELS_API_KEY`).
 - `autopilot` restarts in a loop with `configuration error`: `AUTOPILOT_NICHE` is empty or `AUTOPILOT_WINDOW` is invalid.
-- Upload skipped with `No valid YouTube credentials`: `secrets/youtube_token.json` is missing or invalid; recreate it on a machine with a browser (docs/deploy.md).
+- Upload skipped with `No valid YouTube credentials`: `secrets/youtube_token.json` is missing or invalid; recreate it on a machine with a browser (docs/deploy.md). If the file is there on the host, the container has an empty mount instead — see "Empty mounts after a reboot" above.
+- `worker` or `autopilot` log `refuses to start`: `REQUIRE_MOUNTS` is on and the container cannot see its token or songs. Check from inside, `docker compose exec worker ls /app/secrets /app/Songs`, then recreate the container.
 - Renders are still slow on Windows with `compose.win.yml`: the GPU reservation succeeded but `FFMPEG_BINARY` did not take effect. Check `docker compose ... exec worker printenv FFMPEG_BINARY`; if it is empty, MoviePy is using the imageio binary, which has no nvenc.
 - `h264_nvenc` fails with `Cannot load libnvidia-encode.so`: `NVIDIA_DRIVER_CAPABILITIES` is missing `video`. The default capability set grants compute only.
 - Files in `output/` are owned by root: containers run as root; `sudo chown -R $USER output` if you need to edit them.

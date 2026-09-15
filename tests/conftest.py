@@ -57,6 +57,9 @@ def offline(monkeypatch):
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("FIRECRAWL_API_KEY", "")
+    # Loaded from .env at import like the keys above. A test that reaches an
+    # entry point must not refuse to run because the test box has no mounts.
+    monkeypatch.delenv("REQUIRE_MOUNTS", raising=False)
     # Ollama is free, but reaching it is still a live call, and the suite was
     # quietly relying on the host being unable to resolve "ollama" — run the
     # same tests inside the compose network and three of them fail, because a
