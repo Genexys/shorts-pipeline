@@ -333,3 +333,27 @@ def test_with_nothing_to_judge_relevance_by_nothing_is_filtered(session_factory)
         [_source("https://a.com/x")], [], session_factory, lambda url: _page(LIZARD_FACTS[:1])
     )
     assert len(passages) == 1
+
+
+# -- a research paper's methods are not facts ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "This figure shows the first 40 s corresponding to the first 1000 frames.",
+        "Therefore, we used a Monte Carlo approach, where we randomly selected 250 samples.",
+        "The groups differ only in variables N min ( p = 0.0307, Supplementary Table S5).",
+        "The station was installed in a horse farm in Göd (47°43′N, 19°09′E) in 2017.",
+    ],
+)
+def test_methods_and_statistics_are_not_stored(sentence):
+    assert knowledge.extract_facts(sentence + "\n") == []
+
+
+def test_a_finding_from_the_same_paper_is_kept():
+    finding = (
+        "They registered 12–15 °C differences between the temperatures of black and "
+        "white stripes of living zebras in daylight."
+    )
+    assert [text for text, _, _ in knowledge.extract_facts(finding + "\n")] == [finding]
