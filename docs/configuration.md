@@ -213,6 +213,25 @@ videos a day costs well under the free tier. A failed search, an exhausted
 balance or a missing key all produce the same thing: an empty brief and a
 video that still gets made.
 
+### Knowledge base
+
+Search returns a sentence or two per page, and that sentence is rarely the
+page's best. So the two best sources of each video — reference pages such as
+Wikipedia, `.gov` and `.edu` first, PDFs never — are read in full, and every
+sentence on them that carries something specific (a figure, a comparison, a
+first or a record) is stored in the `knowledge_pages` and `facts` tables and
+added to the brief under the snippets.
+
+Facts are stored **verbatim**: each is a sentence that appears word for word on
+the page it cites, so nothing can be invented on the way in. Reference lists,
+navigation, maintenance tags and sentences addressed to the reader are dropped.
+
+A page is read **once, ever**. The next video citing the same page takes its
+facts from the database. A read costs 1 credit, so two pages a video adds at
+most about 250 credits a month, less as pages repeat. A failed read is not
+remembered and is retried by the next video; any failure in the knowledge base
+leaves the brief as snippets only.
+
 ## Registers
 
 Every video is an **explainer** — how something works — a **curio** (a real
