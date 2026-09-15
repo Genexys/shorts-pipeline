@@ -320,6 +320,9 @@ def run_generation_pipeline(
             lead_with_payoff=fmt.lead_with_payoff,
             anchor=anchor,
             max_words=words_for_seconds(fmt.max_seconds),
+            # Only when the format sets the length: a caller that asked for a
+            # specific word count gets that count.
+            stretch_words=None if target_words else fmt.stretch_words,
             report_model=note_model,
         )
 
