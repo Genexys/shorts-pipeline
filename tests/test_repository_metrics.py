@@ -131,7 +131,7 @@ def test_top_performing_subjects_ranks_shorts_by_percentage(session_factory):
     with session_factory() as session:
         _seed_ranked(session, "short", [("weak", 20.0), ("strong", 80.0), ("middling", 50.0)])
 
-        assert top_performing_subjects(session, "short", 2, min_age_days=7) == [
+        assert top_performing_subjects(session, "short", 2, min_age_days=7, now=NOW) == [
             "strong",
             "middling",
         ]
@@ -141,7 +141,7 @@ def test_worst_performing_subjects_is_the_other_end(session_factory):
     with session_factory() as session:
         _seed_ranked(session, "short", [("weak", 20.0), ("strong", 80.0), ("middling", 50.0)])
 
-        assert worst_performing_subjects(session, "short", 1, min_age_days=7) == ["weak"]
+        assert worst_performing_subjects(session, "short", 1, min_age_days=7, now=NOW) == ["weak"]
 
 
 def test_long_form_ranks_by_duration_not_percentage(session_factory):
@@ -150,7 +150,7 @@ def test_long_form_ranks_by_duration_not_percentage(session_factory):
     with session_factory() as session:
         _seed_ranked(session, "long", [("brief", 40.0), ("held them", 210.0)])
 
-        assert top_performing_subjects(session, "long", 1, min_age_days=7) == ["held them"]
+        assert top_performing_subjects(session, "long", 1, min_age_days=7, now=NOW) == ["held them"]
 
 
 def test_ranking_excludes_videos_younger_than_the_threshold(session_factory):
@@ -160,7 +160,7 @@ def test_ranking_excludes_videos_younger_than_the_threshold(session_factory):
         _seed_ranked(session, "short", [("fresh", 95.0)], age_days=2)
         _seed_ranked(session, "short", [("settled", 30.0)], age_days=30)
 
-        assert top_performing_subjects(session, "short", 5, min_age_days=7) == ["settled"]
+        assert top_performing_subjects(session, "short", 5, min_age_days=7, now=NOW) == ["settled"]
 
 
 def test_ranking_does_not_mix_formats(session_factory):
@@ -168,15 +168,15 @@ def test_ranking_does_not_mix_formats(session_factory):
         _seed_ranked(session, "short", [("a short", 90.0)])
         _seed_ranked(session, "long", [("a long one", 300.0)])
 
-        assert top_performing_subjects(session, "short", 5, min_age_days=7) == ["a short"]
-        assert top_performing_subjects(session, "long", 5, min_age_days=7) == ["a long one"]
+        assert top_performing_subjects(session, "short", 5, min_age_days=7, now=NOW) == ["a short"]
+        assert top_performing_subjects(session, "long", 5, min_age_days=7, now=NOW) == ["a long one"]
 
 
 def test_ranking_returns_nothing_when_no_video_is_old_enough(session_factory):
     with session_factory() as session:
         _seed_ranked(session, "short", [("fresh", 95.0)], age_days=1)
 
-        assert top_performing_subjects(session, "short", 5, min_age_days=7) == []
+        assert top_performing_subjects(session, "short", 5, min_age_days=7, now=NOW) == []
 
 
 # -- research sources --------------------------------------------------------

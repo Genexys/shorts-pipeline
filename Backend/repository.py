@@ -557,21 +557,29 @@ def _ranked_subjects(
 
 
 def top_performing_subjects(
-    session: Session, format_name: str, limit: int, min_age_days: int
+    session: Session,
+    format_name: str,
+    limit: int,
+    min_age_days: int,
+    now: Optional[datetime] = None,
 ) -> list[str]:
     """Subjects that held attention best, within one format."""
-    return _ranked_subjects(session, format_name, limit, min_age_days, best=True)
+    return _ranked_subjects(session, format_name, limit, min_age_days, now=now, best=True)
 
 
 def worst_performing_subjects(
-    session: Session, format_name: str, limit: int, min_age_days: int
+    session: Session,
+    format_name: str,
+    limit: int,
+    min_age_days: int,
+    now: Optional[datetime] = None,
 ) -> list[str]:
     """Subjects that lost viewers earliest, within one format.
 
     Worth as much as the winners and cheaper to act on: it costs nothing to
     stop making something that demonstrably fails.
     """
-    return _ranked_subjects(session, format_name, limit, min_age_days, best=False)
+    return _ranked_subjects(session, format_name, limit, min_age_days, now=now, best=False)
 
 
 def add_script(
