@@ -64,7 +64,9 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
      ducked under the voice (sidechaincompress) + loudnorm to -14 LUFS, -c:v copy
   → copy to output.mp4 and output/<job_id>.mp4
   → (optional) youtube.py: upload via saved token; failure is non-fatal (upload_error)
-  → PipelineResult → worker stores Artifact rows (video, youtube_video)
+  → PipelineResult → worker stores Artifact rows (video, youtube_video), the script,
+     research sources, stock search terms (search_terms) and the footage timeline
+     (stock_clips: which clip plays when, and which search found it)
 ```
 
 ### Frontend ↔ Backend Communication

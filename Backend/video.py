@@ -8,7 +8,7 @@ import requests
 import srt_equalizer
 import assemblyai as aai
 
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 from pathlib import Path
 # Only the audio clip type survives here: the video path is ffmpeg now, and
 # AudioFileClip is still what the pipeline hands to generate_subtitles.
@@ -481,6 +481,7 @@ def combine_videos(
     max_duration: float,
     threads: int,
     fmt: VideoFormat = SHORT,
+    on_segments: Optional[Callable[[List[Tuple[str, float]]], None]] = None,
 ) -> str:
     """
     Combines stock clips into one video of the format's shape and the requested
@@ -495,6 +496,8 @@ def combine_videos(
         max_duration (float): The maximum duration of the combined video.
         threads (int): Threads for the encoder.
         fmt (VideoFormat): Output shape and the per-clip duration cap.
+        on_segments: Told the planned (path, seconds) sequence before encoding,
+            so the caller can record which footage plays when.
 
     Returns:
         str: The path to the combined video.
@@ -514,6 +517,8 @@ def combine_videos(
             "warning",
         )
     segments = plan_clip_segments(sources, float(max_duration), cap)
+    if on_segments:
+        on_segments(list(segments))
 
     log("[+] Combining videos...", "info")
     log(f"[+] {len(segments)} segments covering {max_duration:.1f}s.", "info")

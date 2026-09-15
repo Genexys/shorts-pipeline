@@ -54,11 +54,23 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             script_model="claude-opus-5",
             script_fell_back=False,
             sources=[],
+            search_terms=[
+                {"search_pass": "script", "term": "rain on soil", "results": 9, "used": 1},
+            ],
+            stock_clips=[
+                {"position": 0, "start_seconds": 0.0, "duration_seconds": 3.2,
+                 "search_pass": "script", "search_term": "rain on soil", "url": "u1"},
+            ],
         )
 
     monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
 
     assert worker.process_next_job() is True
+
+    from repository import get_stock_clips
+    with session_factory() as session:
+        clips = get_stock_clips(session, job.id)
+        assert [(c.search_term, c.url) for c in clips] == [("rain on soil", "u1")]
 
     with session_factory() as session:
         updated_job = get_job(session, job.id)

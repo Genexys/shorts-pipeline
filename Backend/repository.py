@@ -14,6 +14,8 @@ from models import (
     GenerationJob,
     ResearchSource,
     Script,
+    SearchTerm,
+    StockClip,
     Topic,
     VideoMetric,
     VideoStat,
@@ -641,6 +643,74 @@ def get_research_sources(session: Session, job_id: str) -> list[ResearchSource]:
         select(ResearchSource)
         .where(ResearchSource.job_id == job_id)
         .order_by(ResearchSource.id)
+    )
+    return list(session.scalars(stmt))
+
+
+def add_search_terms(
+    session: Session, job_id: str, terms: Sequence[dict], commit: bool = True
+) -> int:
+    """Stores the stock searches a job ran. Returns how many were kept.
+
+    Each entry is a plain dict with `search_pass`, `term`, `results` and `used`,
+    so the pipeline does not have to import a model to report what it did.
+    """
+    kept = 0
+    for entry in terms or []:
+        term = str(entry.get("term") or "").strip()
+        if not term:
+            continue
+        session.add(
+            SearchTerm(
+                job_id=job_id,
+                search_pass=str(entry.get("search_pass") or "")[:20],
+                term=term[:255],
+                results=int(entry.get("results") or 0),
+                used=int(entry.get("used") or 0),
+            )
+        )
+        kept += 1
+    if commit:
+        session.commit()
+    else:
+        session.flush()
+    return kept
+
+
+def add_stock_clips(
+    session: Session, job_id: str, clips: Sequence[dict], commit: bool = True
+) -> int:
+    """Stores a job's footage timeline. Returns how many segments were kept."""
+    kept = 0
+    for entry in clips or []:
+        url = str(entry.get("url") or "")
+        if not url:
+            continue
+        session.add(
+            StockClip(
+                job_id=job_id,
+                position=int(entry["position"]),
+                start_seconds=float(entry["start_seconds"]),
+                duration_seconds=float(entry["duration_seconds"]),
+                search_pass=str(entry.get("search_pass") or "")[:20],
+                search_term=str(entry.get("search_term") or "")[:255],
+                url=url[:1024],
+            )
+        )
+        kept += 1
+    if commit:
+        session.commit()
+    else:
+        session.flush()
+    return kept
+
+
+def get_stock_clips(session: Session, job_id: str) -> list[StockClip]:
+    """A job's footage in the order it plays."""
+    stmt = (
+        select(StockClip)
+        .where(StockClip.job_id == job_id)
+        .order_by(StockClip.position)
     )
     return list(session.scalars(stmt))
 

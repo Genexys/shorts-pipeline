@@ -9,6 +9,8 @@ from repository import (
     add_artifact,
     add_research_sources,
     add_script,
+    add_search_terms,
+    add_stock_clips,
     append_event,
     claim_next_queued_job,
     get_job,
@@ -85,6 +87,8 @@ def process_next_job() -> bool:
                     session, job_id, result.script, result.script_model, commit=False
                 )
                 add_research_sources(session, job_id, result.sources, commit=False)
+                add_search_terms(session, job_id, result.search_terms, commit=False)
+                add_stock_clips(session, job_id, result.stock_clips, commit=False)
                 add_artifact(
                     session,
                     job_id,
