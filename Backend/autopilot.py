@@ -57,9 +57,10 @@ import anniversary
 import research
 from posts import generate_post
 from thumbnail import pick_still
-from utils import ENV_FILE, OUTPUT_DIR, PROJECT_ROOT, TEMP_DIR
+from startup_check import require_mounts
+from utils import ENV_FILE, OUTPUT_DIR, PROJECT_ROOT, SONGS_DIR, TEMP_DIR
 from video import probe_duration
-from youtube import fetch_statistics
+from youtube import TOKEN_FILE, fetch_statistics
 
 TICK_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 3600
@@ -663,6 +664,16 @@ class Autopilot:
 
 def main() -> int:
     load_dotenv(ENV_FILE)
+    # The autopilot queues every job with upload switched on, so a blind
+    # autopilot is what turns a mount problem into a published gap. It has no
+    # Songs mount of its own; the worker checks those.
+    require_mounts(
+        "autopilot",
+        token_file=TOKEN_FILE,
+        songs_dir=SONGS_DIR,
+        need_songs=False,
+        notify=send_telegram,
+    )
     init_db()
     try:
         config = AutopilotConfig.from_env()

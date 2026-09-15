@@ -18,7 +18,10 @@ from repository import (
     recover_running_jobs,
     requeue_for_retry,
 )
-from utils import ENV_FILE, SUBTITLES_DIR, TEMP_DIR, check_env_vars, clean_dir
+from notify import send_telegram
+from startup_check import require_mounts, songs_required
+from utils import ENV_FILE, SONGS_DIR, SUBTITLES_DIR, TEMP_DIR, check_env_vars, clean_dir
+from youtube import TOKEN_FILE
 
 
 POLL_SECONDS = 1.0
@@ -137,6 +140,16 @@ def process_next_job() -> bool:
 
 def main() -> None:
     load_dotenv(ENV_FILE)
+    # Before recover_running_jobs and before claiming anything: a worker that
+    # cannot see its token or its songs will still happily build a video, just
+    # a silent one that never uploads.
+    require_mounts(
+        "worker",
+        token_file=TOKEN_FILE,
+        songs_dir=SONGS_DIR,
+        need_songs=songs_required(),
+        notify=send_telegram,
+    )
     check_env_vars()
     init_db()
 
