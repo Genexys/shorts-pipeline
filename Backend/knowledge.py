@@ -85,6 +85,18 @@ _BYLINE = re.compile(
     r"(?:writer|journalist|editor) (?:and|who|based))\b",
     re.IGNORECASE,
 )
+# A research paper's methods and statistics. They are full of numbers, so they
+# score as specific, and on the zebra video's PMC article they were most of what
+# was extracted: "This figure shows the first 40 s", "we used a Monte Carlo
+# approach", "p = 0.0307, Supplementary Table S5", station coordinates.
+_METHODS = re.compile(
+    r"\bp\s*[=<>]\s*0?\.\d|supplementar|\btables?\s+s?\d|\bfig(?:ure)?s?\.?\s*s?\d|"
+    r"this figure|\bwe (?:used|applied|ran|selected|performed|computed|calculated|"
+    r"recorded|installed|randomly)\b|statistical analys|monte carlo|wilcoxon|"
+    r"bonferroni|confidence interval|standard deviation|\bn\s*=\s*\d|"
+    r"\d+\s*°\s*\d+\s*′|\d+′\s*[NSEW]\b",
+    re.IGNORECASE,
+)
 # A sentence talking to the reader is the page's voice, not a fact.
 _ADDRESS = re.compile(r"\b(?:you|your|you'll|you're|let's|we'll|we're)\b", re.IGNORECASE)
 _COMPARE = re.compile(
@@ -243,7 +255,12 @@ def looks_like_prose(sentence: str) -> bool:
         return False
     if sentence[-1] not in ".!?\"”":
         return False
-    if _BOILERPLATE.search(sentence) or _ADDRESS.search(sentence) or _BYLINE.search(sentence):
+    if (
+        _BOILERPLATE.search(sentence)
+        or _ADDRESS.search(sentence)
+        or _BYLINE.search(sentence)
+        or _METHODS.search(sentence)
+    ):
         return False
     # A run of capitalised words is a title, a reference or a list of names.
     capitalised = sum(1 for word in words[1:] if word[:1].isupper())

@@ -412,6 +412,71 @@ def clean_script_text(response: str) -> str:
     cleaned = re.sub(r"\(.*\)", "", cleaned)
     return SCRIPT_PREAMBLE_RE.sub("", cleaned)
 
+_DIGITS = re.compile(r"\d[\d,.]*")
+
+
+def _same_sentence(a: str, b: str) -> bool:
+    return " ".join(a.split()).lower() == " ".join(b.split()).lower()
+
+
+def tighten_script(
+    script: str, max_words: int, floor: int, ai_model: str
+) -> Optional[str]:
+    """The writer's own cut of an overlong draft, or None if it cannot be trusted.
+
+    A blind trim can only cut from the end, and the end is where a script's
+    point is. It cost three published endings: "It wins.", the eleven days
+    riots, and on 2026-09-15 a zebra video's verdict — "Whatever keeps a zebra
+    cool, it isn't that." — cut off a 104-word draft to fit 90. The writer
+    knows which sentence is a restatement; the trim does not.
+
+    Kept only if it is within the length, keeps the first sentence and the last
+    sentence as they were, and introduces no figure the draft did not have.
+    Otherwise the trim below still runs, as it always did.
+    """
+    written = len(script.split())
+    prompt = f"""
+    This narration script is {written} words. It must be at most {max_words} words,
+    and no fewer than {floor}.
+
+    Cut it down. Keep the first sentence exactly as it is, and keep the final
+    paragraph exactly as it is: the first sentence is the hook and the final
+    paragraph is the point. Cut from the middle instead — a restatement, a second
+    example of the same thing, a secondary figure, a clause that qualifies
+    without adding. Do not add anything, do not reword what you keep beyond
+    what the cut requires, and do not change any fact or number.
+
+    Return only the script, keeping its paragraph breaks.
+
+    Script:
+    {script}
+    """
+    try:
+        response = write_creative(prompt, ai_model)
+    except Exception as err:
+        log(f"[!] Could not tighten the script ({err}); trimming instead.", "warning")
+        return None
+
+    tightened = clean_script_text(response or "").strip()
+    tightened = re.sub(r"[ \t]+", " ", tightened)
+    count = len(tightened.split())
+    before_sentences = split_sentences(script)
+    after_sentences = split_sentences(tightened)
+    reasons = []
+    if not floor <= count <= max_words:
+        reasons.append(f"{count} words")
+    if not after_sentences or not _same_sentence(after_sentences[0], before_sentences[0]):
+        reasons.append("changed the opening")
+    if not after_sentences or not _same_sentence(after_sentences[-1], before_sentences[-1]):
+        reasons.append("changed the ending")
+    if not set(_DIGITS.findall(tightened)) <= set(_DIGITS.findall(script)):
+        reasons.append("introduced a figure")
+    if reasons:
+        log(f"[!] Rejected the tightened script ({', '.join(reasons)}); trimming instead.", "warning")
+        return None
+    return tightened
+
+
 def generate_script(
     video_subject: str,
     paragraph_number: int,
@@ -544,6 +609,22 @@ def generate_script(
 
         # Join the selected paragraphs into a single string
         final_script = "\n\n".join(selected_paragraphs)
+
+        if target_words and max_words and len(final_script.split()) > max_words:
+            before = len(final_script.split())
+            tightened = tighten_script(
+                final_script,
+                max_words,
+                int(target_words * SCRIPT_WORD_FLOOR_RATIO),
+                ai_model,
+            )
+            if tightened:
+                log(
+                    f"[*] The writer cut its draft from {before} to "
+                    f"{len(tightened.split())} words, keeping the opening and the ending.",
+                    "info",
+                )
+                final_script = tightened
 
         cut_short = False
         if target_words:
@@ -752,7 +833,8 @@ OPENING_RULES = """
     definition of the subject, not why it matters, not that scientists have
     wondered about it, not what the video will cover. If the first sentence
     would still make sense with the subject swapped for another, it is wasted.
-    Say the fact, then explain it.
+    Say the fact, then explain it. If the video overturns a common belief, open
+    with the overturning, not with the belief.
 """
 
 # Openings that say nothing, each taken from a published video's first
@@ -769,6 +851,11 @@ WEAK_OPENING_PATTERNS = (
     r"\bone of the most (?:fascinating|interesting|common|remarkable)\b",
     r"\bfor centuries\b",
     r"\bwhen it comes to\b",
+    # A common belief first and the correction later: on 2026-09-15 "Most people
+    # have heard that a zebra's stripes work like air conditioning" put the
+    # overturning in the third sentence, past where half the viewers leave.
+    r"\b(?:most people|many people|everyone|you've|you have|we've all) "
+    r"(?:probably |all |long |)(?:have |has |)(?:heard|think|thinks|believe|believes|assume|assumes|been told)\b",
 )
 _WEAK_OPENING_RE = re.compile("|".join(WEAK_OPENING_PATTERNS), re.IGNORECASE)
 
@@ -1313,8 +1400,12 @@ def generate_metadata(
     {{"title": "...", "description": "...", "tags": ["...", "..."]}}
 
     Rules:
+    - The script is the authority. The subject is only the question the video
+      started from, and the script may have found its premise false or unproven.
     - title: catchy, at most 70 characters, plain text, no hashtags, no quotes, no emojis.
-    - description: 2-3 sentences that summarize the video, plain text, no hashtags (they are appended automatically).
+      It must agree with the script: never assert something the script shows is
+      not so.
+    - description: 2-3 sentences that summarize the video, plain text, no hashtags (they are appended automatically). Summarise what the script concludes, not what the subject assumes.
     - tags: 5 to 10 short keywords, each 1-3 ordinary words separated by
       spaces. No hyphens, no underscores, no commas inside a tag.
       Write "blue sky", not "blue-sky".

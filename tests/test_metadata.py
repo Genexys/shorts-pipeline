@@ -1196,3 +1196,108 @@ def test_the_retry_keeps_the_range(monkeypatch):
     gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=70, stretch_words=88)
     assert len(prompts) == 2
     assert all("59 to 88 words" in " ".join(p.split()) for p in prompts)
+
+
+# --- The writer cuts its own draft ------------------------------------------------
+#
+# A blind trim only cuts from the end, where the point is. On 2026-09-15 it took
+# a zebra video's verdict off a 104-word draft.
+
+ZEBRA_DRAFT = (
+    "Most people have heard that a zebra's stripes work like built-in air conditioning, "
+    "stirring up tiny swirling currents that cool the animal down. The temperature gap is "
+    "real: infrared images show sunlit black stripes running 12 to 15 degrees Celsius hotter "
+    "than white ones, reaching 16 degrees on bare hides.\n\n"
+    "But when researchers glued real zebra, horse and cattle hides onto curved cylinders to "
+    "mimic a zebra's back, the airflow above the stripes was negligible more than a "
+    "centimeter or two up, and unusually stable rather than swirling.\n\n"
+    "The stripes barely move the air at all. Whatever keeps a zebra cool, it isn't that."
+)
+ZEBRA_CUT = (
+    "Most people have heard that a zebra's stripes work like built-in air conditioning, "
+    "stirring up tiny swirling currents that cool the animal down. Sunlit black stripes run "
+    "12 to 15 degrees Celsius hotter than white ones.\n\n"
+    "But when researchers glued real zebra hides onto curved cylinders, the airflow above the "
+    "stripes was negligible more than a centimeter or two up.\n\n"
+    "The stripes barely move the air at all. Whatever keeps a zebra cool, it isn't that."
+)
+
+
+def _writer(monkeypatch, draft, cut):
+    calls = []
+
+    def fake(prompt, model, report_model=None):
+        if "It must be at most" in prompt:
+            calls.append("tighten")
+            return cut
+        calls.append("write")
+        return draft
+
+    monkeypatch.setattr(gpt, "write_creative", fake)
+    return calls
+
+
+def test_an_overlong_draft_is_cut_by_its_writer_and_keeps_its_verdict(monkeypatch):
+    calls = _writer(monkeypatch, ZEBRA_DRAFT, ZEBRA_CUT)
+    script = gpt.generate_script(
+        "zebras", 1, "model", "en_us_001", "", target_words=70, max_words=90
+    )
+    assert calls == ["write", "tighten"]
+    assert script.endswith("Whatever keeps a zebra cool, it isn't that.")
+    assert len(script.split()) <= 90
+
+
+def test_a_cut_that_changes_the_ending_is_rejected_for_the_trim(monkeypatch):
+    rewritten = ZEBRA_CUT.replace("it isn't that.", "it is probably something else.")
+    _writer(monkeypatch, ZEBRA_DRAFT, rewritten)
+    script = gpt.generate_script(
+        "zebras", 1, "model", "en_us_001", "", target_words=70, max_words=90
+    )
+    assert "probably something else" not in script
+    assert len(script.split()) <= 90
+
+
+def test_a_cut_that_invents_a_figure_is_rejected(monkeypatch):
+    invented = ZEBRA_CUT.replace("12 to 15 degrees", "20 degrees")
+    _writer(monkeypatch, ZEBRA_DRAFT, invented)
+    script = gpt.generate_script(
+        "zebras", 1, "model", "en_us_001", "", target_words=70, max_words=90
+    )
+    assert "20 degrees" not in script
+
+
+def test_a_cut_still_over_the_limit_is_rejected(monkeypatch):
+    _writer(monkeypatch, ZEBRA_DRAFT, ZEBRA_DRAFT)
+    script = gpt.generate_script(
+        "zebras", 1, "model", "en_us_001", "", target_words=70, max_words=90
+    )
+    assert len(script.split()) <= 90
+
+
+def test_a_draft_within_the_limit_is_not_sent_back(monkeypatch):
+    calls = _writer(monkeypatch, ZEBRA_CUT, "should not be used")
+    gpt.generate_script("zebras", 1, "model", "en_us_001", "", target_words=70, max_words=90)
+    assert calls == ["write"]
+
+
+# --- Belief-first openings, and titles that agree with the script ------------------
+
+
+def test_a_belief_first_opening_is_weak():
+    assert gpt.opens_weakly("Most people have heard that zebra stripes cool them down.")
+    assert gpt.opens_weakly("You've probably heard that goldfish forget everything.")
+    assert not gpt.opens_weakly("Zebra stripes barely move the air at all.")
+
+
+def test_metadata_prompt_puts_the_script_above_the_subject(monkeypatch):
+    seen = {}
+
+    def fake(prompt, model):
+        seen["prompt"] = prompt
+        return '{"title": "T", "description": "D", "tags": ["a"]}'
+
+    monkeypatch.setattr(gpt, "generate_response", fake)
+    gpt.generate_metadata("Why zebra stripes cool them down", ZEBRA_CUT, "model")
+    prompt = " ".join(seen["prompt"].split())
+    assert "The script is the authority" in prompt
+    assert "never assert something the script shows is not so" in prompt
