@@ -1154,17 +1154,7 @@ def test_generate_script_still_trims_at_the_target_without_a_ceiling(monkeypatch
 # subject: asked for "about 70", the writer delivered 70.
 
 
-def test_the_prompt_offers_a_range_when_the_format_allows_stretch(monkeypatch):
-    seen = {}
-    monkeypatch.setattr(gpt, "generate_response", lambda p, m: seen.setdefault("p", p) or "A script.")
-    gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=70, stretch_words=88)
-    prompt = " ".join(seen["p"].split())
-    assert "Length: 59 to 88 words" in prompt
-    assert "Most subjects are fully told in about 70" in prompt
-    assert "Never lengthen by restating" in prompt
-
-
-def test_without_stretch_the_prompt_asks_for_a_number_as_before(monkeypatch):
+def test_the_prompt_asks_for_a_number(monkeypatch):
     seen = {}
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: seen.setdefault("p", p) or "A script.")
     gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=70)
@@ -1172,30 +1162,57 @@ def test_without_stretch_the_prompt_asks_for_a_number_as_before(monkeypatch):
     assert "Length: about 70 words, and no fewer than 59" in prompt
 
 
-def test_a_stretched_script_is_not_trimmed(monkeypatch):
-    # The top of the range must sit under the ceiling, or whatever a subject
-    # was allowed to add is cut straight back off the end.
+def test_a_longer_ask_still_fits_under_the_ceiling(monkeypatch):
+    # An anniversary asks for 85 and the ceiling is 90: what it writes must
+    # arrive whole, not be cut back to the ceiling.
     draft = " ".join(f"word{i}" for i in range(87)) + ". It lands."
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: draft)
     script = gpt.generate_script(
         "s", 1, "model", "en_us_001", "",
-        target_words=70, stretch_words=88, max_words=gpt.words_for_seconds(40.0),
+        target_words=85, max_words=gpt.words_for_seconds(40.0),
     )
     assert script.endswith("It lands.")
     assert len(script.split()) == 89
 
 
-def test_the_retry_keeps_the_range(monkeypatch):
-    prompts = []
+# --- a length per register ---------------------------------------------------------
+#
+# Three of the four Shorts on 2026-09-16 came back at exactly the 90-word
+# ceiling: given a range, the writer filled it. A number is obeyed.
 
-    def fake(prompt, model):
-        prompts.append(prompt)
-        return "Far too short."
 
-    monkeypatch.setattr(gpt, "generate_response", fake)
-    gpt.generate_script("s", 1, "model", "en_us_001", "", target_words=70, stretch_words=88)
-    assert len(prompts) == 2
-    assert all("59 to 88 words" in " ".join(p.split()) for p in prompts)
+def test_each_register_asks_for_its_own_length():
+    assert gpt.target_words_for(gpt.CURIO, 70) == 70
+    assert gpt.target_words_for(gpt.EXPLAINER, 70) == 80
+    assert gpt.target_words_for(gpt.ANNIVERSARY, 70) == 85
+
+
+def test_a_video_with_no_register_keeps_the_format_default():
+    assert gpt.target_words_for(None, 70) == 70
+    assert gpt.target_words_for("", 70) == 70
+    assert gpt.target_words_for("something else", 70) == 70
+
+
+def test_every_register_length_fits_under_the_ceiling():
+    from formats import SHORT
+
+    ceiling = gpt.words_for_seconds(SHORT.max_seconds)
+    assert max(gpt.REGISTER_TARGET_WORDS.values()) < ceiling
+
+
+def test_an_anniversary_is_asked_for_more_words_than_a_curio(monkeypatch):
+    # Long enough not to trip the floor and retry, which would add prompts.
+    draft = " ".join(f"word{i}" for i in range(85)) + "."
+    seen = []
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: seen.append(p) or draft)
+    for register in (gpt.CURIO, gpt.ANNIVERSARY):
+        gpt.generate_script(
+            "s", 1, "model", "en_us_001", "",
+            target_words=gpt.target_words_for(register, 70), register=register,
+        )
+    assert len(seen) == 2
+    assert "Length: about 70 words" in " ".join(seen[0].split())
+    assert "Length: about 85 words" in " ".join(seen[1].split())
 
 
 # --- The writer cuts its own draft ------------------------------------------------

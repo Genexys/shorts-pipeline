@@ -21,10 +21,6 @@ class VideoFormat:
     subtitle_font_size: int
     burn_subtitles: bool
     target_words: int
-    # The most a subject may take when it needs it, or None for a fixed target.
-    # With it, the writer is given a range instead of a number: see
-    # generate_script.
-    stretch_words: Optional[int]
     # Hard ceiling on narration length, in seconds. None means no ceiling.
     # A word target alone does not bound the duration: the model overshoots
     # it, the trim keeps the sentence that crosses it, and the narrator's
@@ -103,14 +99,11 @@ SHORT = VideoFormat(
     # expected to land around 84; measured, it landed on 71, 78, 74 and 75, and
     # the trim did not bite once.
     #
-    # So 70 is what most subjects take, not what every subject gets.
+    # This is only the fallback, for a video with no register — a job from the
+    # frontend. The autopilot sets one on every job, and the length then comes
+    # from REGISTER_TARGET_WORDS in gpt.py: what the video has to do decides how
+    # many words it gets.
     target_words=70,
-    # Every script since the 40-second change came back within eight words of
-    # 70, whatever the subject: asked for "about 70", the writer delivers 70.
-    # That is right for a single absurd fact and a squeeze for a mechanism with
-    # a second step. 88 lets a subject that needs it run to about 39 seconds,
-    # still under the 90-word ceiling below, so nothing it adds is trimmed.
-    stretch_words=88,
     # Forty seconds, and the number comes from this channel's own numbers rather
     # than from a rule of thumb. Fifteen Shorts published 7-12 September,
     # measured on the 14th, with length derived from duration over percentage:
@@ -184,8 +177,6 @@ LONG = VideoFormat(
     # translate it and viewers can turn it off.
     burn_subtitles=False,
     target_words=800,
-    # Long form's length is set by its outline, section by section.
-    stretch_words=None,
     # Long form is bounded by its outline, not by a stopwatch, and a viewer
     # who opened it chose the length.
     max_seconds=None,
