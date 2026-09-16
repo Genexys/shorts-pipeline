@@ -240,6 +240,13 @@ happened on today's date. `AUTOPILOT_CURIO_SHARE` sets how often
 the second is drawn, per video rather than in rotation. A channel that reliably
 alternates is as templated as one that never varies.
 
+A register also sets the length, in `REGISTER_TARGET_WORDS`: a curio is asked
+for 70 words, an explainer 80, an anniversary 85. A curio is one absurd fact and
+the sentence that lands it; an explainer usually has a mechanism with a second
+step; an anniversary spends words on a date, a name and a place before it can
+say what happened. Letting the writer pick inside a range instead did not work —
+given "59 to 88 words", it wrote to the top every time.
+
 A register is not a tone of voice. An 8B model asked to be funny writes
 strained puns and tells the viewer that science is amazing; asked to state
 something absurd plainly, it lets the subject do the work. So a curio script is

@@ -18,6 +18,7 @@ from gpt import (
     generate_script,
     get_search_terms,
     select_music_mood,
+    target_words_for,
     words_for_seconds,
 )
 from logstream import log
@@ -314,15 +315,14 @@ def run_generation_pipeline(
             ai_model,
             voice,
             data["customPrompt"],
-            target_words=target_words or fmt.target_words,
+            # A curio needs fewer words than an anniversary; a caller that
+            # named its own count still gets that count.
+            target_words=target_words or target_words_for(register, fmt.target_words),
             research=brief,
             register=register,
             lead_with_payoff=fmt.lead_with_payoff,
             anchor=anchor,
             max_words=words_for_seconds(fmt.max_seconds),
-            # Only when the format sets the length: a caller that asked for a
-            # specific word count gets that count.
-            stretch_words=None if target_words else fmt.stretch_words,
             report_model=note_model,
         )
 
