@@ -697,6 +697,20 @@ def test_the_blocklist_does_not_catch_every_weak_opening():
     ) is False
 
 
+def test_a_claim_about_how_common_something_was_is_not_filler():
+    # 2026-09-17: the mummy Short's opening was rejected and rewritten, and the
+    # rewrite lost its best detail. "one of the most common" is a claim about
+    # how widespread something was — here, the whole point of the video — while
+    # the opinions beside it in the pattern would fit any subject at all.
+    assert gpt.opens_weakly(
+        "Powdered Egyptian mummy was one of the most common drugs in European "
+        "apothecary shops by the sixteenth century."
+    ) is False
+    assert gpt.opens_weakly(
+        "The octopus is one of the most fascinating creatures in the ocean."
+    ) is True
+
+
 def test_opens_weakly_only_reads_the_first_sentence():
     # Later filler is the body's business; only the opening decides the swipe.
     script = "A lizard squirts blood from its eyes. Scientists have long puzzled over why."
@@ -977,6 +991,20 @@ def test_title_from_opening_keeps_the_ones_that_worked():
         "Hotter water doesn't just catch up.",
     ):
         assert gpt.title_from_opening(f"{opening} And then more text follows.")
+
+
+def test_title_from_opening_keeps_a_hook_the_old_cap_cut_by_three_characters():
+    # 2026-09-17. Both went up under a title the metadata model wrote instead:
+    # "Woodpeckers' Concussion-Free Pecks" and "Cats' Purr Frequencies Healed
+    # Fractures" — the second asserting as settled what its own source calls
+    # complicated. The script's own sentence is the fact-checked one.
+    for opening in (
+        "Woodpeckers have no shock absorbers in their skulls at all.",
+        "A cat purring in your lap is vibrating at 25 to 50 hertz.",
+    ):
+        assert gpt.title_from_opening(f"{opening} And then more text follows.") == (
+            opening.rstrip(".")
+        )
 
 
 def test_title_from_opening_refuses_a_fragment():

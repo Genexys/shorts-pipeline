@@ -853,7 +853,14 @@ WEAK_OPENING_PATTERNS = (
     r"\bplays? (?:a|an) (?:vital|important|key|crucial|significant) role\b",
     r"\bin this video\b",
     r"\b(?:have|has) you ever wondered\b",
-    r"\bone of the most (?:fascinating|interesting|common|remarkable)\b",
+    # "one of the most fascinating/interesting/remarkable" is an opinion that
+    # would fit any subject. "one of the most common" is not: it is a claim
+    # about how widespread something was, and it can carry a whole video. On
+    # 2026-09-17 it cost a Short its best draft — "Powdered Egyptian mummy was
+    # one of the most common drugs in European apothecary shops by the
+    # sixteenth century" was read as throat-clearing and rewritten, losing
+    # "including stolen bodies of the hanged" on the way.
+    r"\bone of the most (?:fascinating|interesting|remarkable)\b",
     r"\bfor centuries\b",
     r"\bwhen it comes to\b",
     # A common belief first and the correction later: on 2026-09-15 "Most people
@@ -885,6 +892,11 @@ ENDING_RULES = """
     no room to explain, or a fact that is in the script only because a source
     happened to mention it. If the strongest thing you have to say is in the
     middle, the script is in the wrong order.
+
+    The ending must not re-deliver the point the opening already made. When the
+    first sentence states the payoff, a last sentence that restates it with a
+    fresh example is still a repeat: the viewer learns nothing after the middle.
+    Carry it forward instead — the consequence, the twist, what it means now.
 """
 
 # Endings that trail off. As with the opening list, the instruction above does
@@ -1061,7 +1073,18 @@ TITLE_MIN_WORDS = 4
 # wandered into the title. Measured against the ones that worked: "Scratching
 # works by hurting you" is 31, "Hotter water doesn't just catch up" is 34. Above
 # this the model's own title stands.
-OPENING_TITLE_MAX_CHARS = 55
+#
+# Raised from 55 on 2026-09-17, because at 55 the gate sat exactly where these
+# sentences land and three characters decided the outcome. Four Shorts that day:
+# "Put a pigeon on a treadmill and its head stops bobbing" (54) passed and made
+# the best title of the week; "A cat purring in your lap is vibrating at 25 to
+# 50 hertz" (56) and "Woodpeckers have no shock absorbers in their skulls at
+# all" (58) were rejected and went up as "Cats' Purr Frequencies Healed
+# Fractures" and "Woodpeckers' Concussion-Free Pecks". A hook truncated in the
+# feed still beats a label that is fully visible and says nothing — and the
+# script's own sentence is also the one that has been fact-checked, where the
+# rejected cat title asserted as settled what its own source calls complicated.
+OPENING_TITLE_MAX_CHARS = 70
 
 # A leading fragment this short is a title, not a paragraph. The prompt forbids
 # titles and the model writes them anyway; taking one as the whole script
