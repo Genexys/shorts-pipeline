@@ -901,6 +901,18 @@ def test_ends_weakly_catches_the_published_trailing_note():
     assert gpt.ends_weakly(script)
 
 
+def test_ends_weakly_catches_advice_where_the_payoff_belongs():
+    # Verbatim from https://youtu.be/0G7qUJQ3uLk. It opens on a correction worth
+    # hearing and closes on dosing: "can help" is advice, not a hedge, which is
+    # why the "may help" pattern beside it did not catch it.
+    script = (
+        "That pop isn't pressure escaping your ear, it's a tiny bubble of air "
+        "slipping in. An oral decongestant an hour before takeoff can help, but "
+        "taken for days it causes more congestion than it relieves."
+    )
+    assert gpt.ends_weakly(script)
+
+
 def test_ends_weakly_accepts_an_ending_that_lands():
     script = "Scratching hurts you. The signals get confused, and you scratch more."
     assert not gpt.ends_weakly(script)
