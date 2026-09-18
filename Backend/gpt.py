@@ -892,12 +892,25 @@ ENDING_RULES = """
     no room to explain, or a fact that is in the script only because a source
     happened to mention it. If the strongest thing you have to say is in the
     middle, the script is in the wrong order.
-
-    The ending must not re-deliver the point the opening already made. When the
-    first sentence states the payoff, a last sentence that restates it with a
-    fresh example is still a repeat: the viewer learns nothing after the middle.
-    Carry it forward instead — the consequence, the twist, what it means now.
 """
+
+# A paragraph telling the ending not to repeat the opening stood here for one
+# day, 2026-09-17 to 09-18, and was removed for making both problems worse.
+#
+# Length: the four Shorts written under it ran 79, 88, 88 and 87 words against
+# register targets of 70 and 80, after the four written without it ran 78, 83,
+# 70 and 76. Giving the ending a second thing to accomplish cost words, and the
+# spread that REGISTER_TARGET_WORDS had just bought went back to clustering
+# under the ceiling.
+#
+# Endings: it did not prevent the failure it was written for. "Carry it forward
+# — the consequence, the twist, what it means now" reads as an invitation to
+# tack on practical advice, and two of the three closed on exactly that: a
+# gripper Short ended on how many grips a spider cadaver survives, after
+# spending its best figure in the middle, and an ear-popping Short ended on
+# decongestant dosing. The rule above already covers both as an aside and a
+# caveat. One script in four loops back to its opening, and the honest read of
+# the cat Short that prompted this is that no phrasing here reliably fixes it.
 
 # Endings that trail off. As with the opening list, the instruction above does
 # the work and this catches what it misses — hedges, tacked-on second causes,
@@ -906,6 +919,11 @@ WEAK_ENDING_PATTERNS = (
     r"\b(?:appears?|seems?) to\b",
     r"\bis (?:thought|believed|considered) to\b",
     r"\bmay (?:also )?(?:play|be|help|contribute|explain)\b",
+    # "can help" reads as advice rather than a hedge, which is how it slipped
+    # past: an ear-popping Short closed on "An oral decongestant an hour before
+    # takeoff can help, but taken for days it causes more congestion than it
+    # relieves" — a dosing caveat where the payoff should be.
+    r"\bcan (?:also )?help\b",
     r"\b(?:also|too) (?:plays?|contributes?|matters?)\b",
     r"\bplays? (?:a|an) (?:powerful|important|key|crucial|significant|vital) role\b",
     r"\b(?:more|further) (?:research|study|work)\b",
