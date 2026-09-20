@@ -92,6 +92,15 @@ LOUDNESS_RANGE = 11.0
 DELIVERY_SAMPLE_RATE = 48000
 DELIVERY_AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k", "-ar", str(DELIVERY_SAMPLE_RATE)]
 
+# Every file we have published carries its moov atom after the media data, so a
+# player cannot start until it has the whole file. Instagram Reels does not just
+# prefer otherwise, it specifies "moov atom at the front of the file", and the
+# upload is rejected without it. ffmpeg writes moov last by default because it
+# only knows the final index once the media is written; +faststart makes a
+# second pass that moves it. Verified on the image's ffmpeg: the atom order goes
+# from "ftyp free mdat moov" to "ftyp moov free mdat".
+DELIVERY_CONTAINER_ARGS = ["-movflags", "+faststart"]
+
 
 def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
     """
@@ -706,6 +715,7 @@ def build_render_command(
         "1:a:0",
         *video_args,
         *DELIVERY_AUDIO_ARGS,
+        *DELIVERY_CONTAINER_ARGS,
         # Video and audio are clamped to whichever ends first, so the last frame
         # is never held over a silent tail.
         "-shortest",
@@ -981,6 +991,7 @@ def normalize_audio(video_path: str, output_path: str) -> str:
         "-c:v",
         "copy",
         *DELIVERY_AUDIO_ARGS,
+        *DELIVERY_CONTAINER_ARGS,
         output_path,
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
@@ -1034,6 +1045,7 @@ def mix_background_music(
         "-c:v",
         "copy",
         *DELIVERY_AUDIO_ARGS,
+        *DELIVERY_CONTAINER_ARGS,
         "-shortest",
         output_path,
     ]
