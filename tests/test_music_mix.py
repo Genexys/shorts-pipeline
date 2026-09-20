@@ -308,3 +308,16 @@ def test_every_audio_encode_sets_the_sample_rate():
     assert "-ar" in video.DELIVERY_AUDIO_ARGS
     assert video.DELIVERY_AUDIO_ARGS[video.DELIVERY_AUDIO_ARGS.index("-ar") + 1] == "48000"
     assert "aresample" not in video.build_music_filter(30.0)
+
+
+def test_normalize_audio_puts_the_index_at_the_front(monkeypatch):
+    # Instagram Reels specifies "moov atom at the front of the file". ffmpeg
+    # writes it last by default, so every video published before 2026-09-20
+    # has it after the media data.
+    captured = {}
+    monkeypatch.setattr(
+        video.subprocess, "run", lambda command, **kw: captured.update(command=command)
+    )
+    video.normalize_audio("in.mp4", "out.mp4")
+    command = captured["command"]
+    assert command[command.index("-movflags") + 1] == "+faststart"
