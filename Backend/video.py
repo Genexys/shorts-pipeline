@@ -72,6 +72,26 @@ LOUDNESS_TARGET_LUFS = -14.0
 LOUDNESS_TRUE_PEAK_DB = -1.5
 LOUDNESS_RANGE = 11.0
 
+# loudnorm runs its analysis at 192 kHz and hands that rate to whatever follows,
+# so the AAC encoder clamped it to its own maximum and every video we have ever
+# shipped carries a 96 kHz track. YouTube accepts it silently, which is why it
+# went unnoticed; Instagram Reels and Threads both specify AAC at 48 kHz or
+# below. Setting it here also stops us storing four times the sample rate the
+# voice was ever recorded at — ElevenLabs returns 44.1 kHz.
+#
+# An output option rather than an aresample filter: appending aresample after
+# loudnorm fails with "Cannot select channel layout for the link between
+# filters", because the filter is asked to negotiate a layout loudnorm has not
+# settled. -ar lets ffmpeg insert the resampler where it already knows both
+# ends. Applied at every site that encodes audio, so no path can ship 96 kHz.
+#
+# Verified on the image's ffmpeg 5.1, not the host's. The host here runs 4.4,
+# where the channel-layout API predates the rewrite and the music graph fails
+# to negotiate sidechaincompress at any sample rate — a difference that makes
+# host-side ffmpeg tests of this pipeline worthless.
+DELIVERY_SAMPLE_RATE = 48000
+DELIVERY_AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k", "-ar", str(DELIVERY_SAMPLE_RATE)]
+
 
 def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
     """
@@ -685,10 +705,7 @@ def build_render_command(
         "-map",
         "1:a:0",
         *video_args,
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        *DELIVERY_AUDIO_ARGS,
         # Video and audio are clamped to whichever ends first, so the last frame
         # is never held over a silent tail.
         "-shortest",
@@ -963,10 +980,7 @@ def normalize_audio(video_path: str, output_path: str) -> str:
         f"LRA={LOUDNESS_RANGE}",
         "-c:v",
         "copy",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        *DELIVERY_AUDIO_ARGS,
         output_path,
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
@@ -1019,10 +1033,7 @@ def mix_background_music(
         "[aout]",
         "-c:v",
         "copy",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
+        *DELIVERY_AUDIO_ARGS,
         "-shortest",
         output_path,
     ]

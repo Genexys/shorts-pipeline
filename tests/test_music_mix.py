@@ -286,3 +286,25 @@ def test_normalize_audio_targets_the_same_level_as_the_music_mix(monkeypatch):
     monkeypatch.setattr(video.subprocess, "run", lambda command, **kw: None)
     graph = video.build_music_filter(30.0)
     assert f"I={video.LOUDNESS_TARGET_LUFS}" in graph
+
+
+def test_normalize_audio_sets_the_delivery_sample_rate(monkeypatch):
+    # loudnorm hands its 192 kHz analysis rate to the encoder, which clamps to
+    # its own 96 kHz maximum. Every video shipped before 2026-09-20 carries a
+    # 96 kHz track; YouTube accepts it, Instagram Reels and Threads specify
+    # 48 kHz or below.
+    captured = {}
+    monkeypatch.setattr(
+        video.subprocess, "run", lambda command, **kw: captured.update(command=command)
+    )
+    video.normalize_audio("in.mp4", "out.mp4")
+    command = captured["command"]
+    assert command[command.index("-ar") + 1] == "48000"
+
+
+def test_every_audio_encode_sets_the_sample_rate():
+    # An output option, not an aresample filter: appending one after loudnorm
+    # fails to negotiate a channel layout on the image's ffmpeg 5.1.
+    assert "-ar" in video.DELIVERY_AUDIO_ARGS
+    assert video.DELIVERY_AUDIO_ARGS[video.DELIVERY_AUDIO_ARGS.index("-ar") + 1] == "48000"
+    assert "aresample" not in video.build_music_filter(30.0)
