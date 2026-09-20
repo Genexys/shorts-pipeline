@@ -681,7 +681,9 @@ def generate_script(
                     f"came back {written} words, under the {floor} floor "
                     f"for a {target_words}-word target"
                 )
-        if problem is None and lead_with_payoff and opens_weakly(final_script):
+        if problem is None and lead_with_payoff and opens_weakly(
+            final_script, register
+        ):
             opening = (split_sentences(final_script) or [""])[0]
             problem = f'opens on setup rather than the fact: "{opening[:80]}"'
         if problem is None and ends_weakly(final_script, cut_short=cut_short):
@@ -840,6 +842,11 @@ OPENING_RULES = """
     would still make sense with the subject swapped for another, it is wasted.
     Say the fact, then explain it. If the video overturns a common belief, open
     with the overturning, not with the belief.
+
+    Do not open on a date, a year or an institution. "In 1997, Andre Geim and
+    his colleagues put a live frog into the throat of a high field magnet"
+    spends fifteen words before the frog leaves the ground. The date is a
+    detail for the second sentence; the first belongs to what happened.
 """
 
 # Openings that say nothing, each taken from a published video's first
@@ -871,11 +878,37 @@ WEAK_OPENING_PATTERNS = (
 )
 _WEAK_OPENING_RE = re.compile("|".join(WEAK_OPENING_PATTERNS), re.IGNORECASE)
 
+# An opening that starts on when it happened, or on who reported it, instead of
+# what happened. Unlike the patterns above these match a shape rather than a
+# phrase, and they are anchored: a date anywhere else in the sentence is fine,
+# and often the right place for it.
+#
+# On 19 and 20 September five of seven Shorts opened this way — "On April 6,
+# 1938,", "In 1956,", "In 1997,", "Archaeologists reported in 2015 that" — and
+# the cost showed up twice over. The hook arrived twelve to twenty words in,
+# and every one of those openings ran 97 to 161 characters, so not one could
+# serve as the title. All seven went up under a label the metadata model wrote.
+DATELINE_OPENING_PATTERNS = (
+    r"^(?:in|on|at|by|during|back in|around)\b.{0,55}?\b(?:1[5-9]\d{2}|20\d{2})\b\s*,",
+    r"^\S+\s+(?:reported|announced|published|found|discovered|showed)\s+in\s+"
+    r"(?:1[5-9]\d{2}|20\d{2})\b",
+)
+_DATELINE_OPENING_RE = re.compile("|".join(DATELINE_OPENING_PATTERNS), re.IGNORECASE)
 
-def opens_weakly(script: str) -> bool:
-    """Whether the first sentence spends itself on setup instead of the fact."""
+
+def opens_weakly(script: str, register: Optional[str] = None) -> bool:
+    """Whether the first sentence spends itself on setup instead of the fact.
+
+    An anniversary video is exempt from the dateline rule: it exists because of
+    the date, and "On September 19, 1982, a professor typed three punctuation
+    marks" is the shape that register is for.
+    """
     first = (split_sentences(script or "") or [""])[0]
-    return bool(_WEAK_OPENING_RE.search(first))
+    if _WEAK_OPENING_RE.search(first):
+        return True
+    if (register or "").strip().lower() == ANNIVERSARY:
+        return False
+    return bool(_DATELINE_OPENING_RE.match(first))
 
 
 # What the last sentence must do. The counterpart to OPENING_RULES, and it comes
@@ -924,6 +957,11 @@ WEAK_ENDING_PATTERNS = (
     # takeoff can help, but taken for days it causes more congestion than it
     # relieves" — a dosing caveat where the payoff should be.
     r"\bcan (?:also )?help\b",
+    # What became of the person, after the video has finished with them. A
+    # levitating-frog Short closed on "Geim later won the 2010 Nobel Prize in
+    # physics for his work on graphene" — true, and about graphene.
+    r"\b(?:later|went on to|would go on to|eventually)\s+"
+    r"(?:won|win|wins|became|become|receiv\w+|found\w*)\b",
     r"\b(?:also|too) (?:plays?|contributes?|matters?)\b",
     r"\bplays? (?:a|an) (?:powerful|important|key|crucial|significant|vital) role\b",
     r"\b(?:more|further) (?:research|study|work)\b",

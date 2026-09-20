@@ -711,6 +711,53 @@ def test_a_claim_about_how_common_something_was_is_not_filler():
     ) is True
 
 
+@pytest.mark.parametrize(
+    "opening",
+    [
+        "On April 6, 1938, a pressurized cylinder at DuPont gave off no gas.",
+        "In 1956, Wilson Greatbatch reached into a bin and pulled out a resistor.",
+        "In 1997, Andre Geim put a live frog into the throat of a magnet.",
+        "Archaeologists reported in 2015 that honey from Egyptian tombs was edible.",
+    ],
+)
+def test_an_opening_that_starts_on_the_date_is_weak(opening):
+    # Five of seven Shorts on 19-20 September opened like this. The hook landed
+    # twelve to twenty words in, and every such opening ran 97 to 161
+    # characters, so none could serve as the title either.
+    assert gpt.opens_weakly(opening) is True
+
+
+def test_an_anniversary_may_open_on_the_date():
+    # It exists because of the date; this is the shape that register is for.
+    opening = (
+        "At 11:44 in the morning on September 19, 1982, a computer science "
+        "professor typed three punctuation marks and invented the smiley."
+    )
+    assert gpt.opens_weakly(opening, gpt.ANNIVERSARY) is False
+    assert gpt.opens_weakly(opening, gpt.CURIO) is True
+
+
+def test_a_date_later_in_the_sentence_is_fine():
+    # Only the opening is anchored — a year is often right where it stands.
+    assert gpt.opens_weakly(
+        "In 1492 he landed on a continent his arithmetic left no room for."
+    ) is False
+    assert gpt.opens_weakly(
+        "The first American-made gasoline automobile was a used horse buggy the "
+        "Duryea brothers bought for $70 in 1893."
+    ) is False
+
+
+def test_ends_weakly_catches_what_became_of_the_person():
+    # Verbatim from https://youtu.be/A-bzaD4yKL4, a Short about levitating a
+    # frog. True, and about graphene.
+    script = (
+        "A live frog floated inside a magnet. Geim later won the 2010 Nobel "
+        "Prize in physics for his work on graphene."
+    )
+    assert gpt.ends_weakly(script)
+
+
 def test_opens_weakly_only_reads_the_first_sentence():
     # Later filler is the body's business; only the opening decides the swipe.
     script = "A lizard squirts blood from its eyes. Scientists have long puzzled over why."
