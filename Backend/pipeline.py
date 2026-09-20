@@ -44,6 +44,7 @@ from video import (
     normalize_audio,
     save_video,
 )
+from instagram import upload_reel
 from youtube import (
     resolve_language,
     upload_captions,
@@ -169,6 +170,9 @@ class PipelineResult:
     # footage was chosen — or in a test — needs neither.
     search_terms: list = field(default_factory=list)
     stock_clips: list = field(default_factory=list)
+    # The Instagram Reel, when the video was cross-posted. A default, because
+    # cross-posting is off by default and every result predating it has none.
+    instagram_media_id: Optional[str] = None
 
 
 def run_generation_pipeline(
@@ -197,6 +201,14 @@ def run_generation_pipeline(
     anchor = (data.get("anchor") or "").strip()
     use_music = data.get("useMusic", False)
     automate_youtube_upload = data.get("automateYoutubeUpload", False)
+    # Off unless INSTAGRAM_CROSSPOST says otherwise, and overridable per job so
+    # the autopilot can later pick which videos are worth a Reel rather than
+    # mirroring all four a day — Meta demotes accounts that post repetitive
+    # content, and four near-identical uploads is what that looks like.
+    crosspost_instagram = data.get(
+        "crosspostInstagram",
+        os.getenv("INSTAGRAM_CROSSPOST", "").strip().lower() in ("1", "true", "yes"),
+    )
     job_id = str(data.get("jobId") or uuid4())
 
     emit("[Video to be generated]", "info")
@@ -652,6 +664,7 @@ def run_generation_pipeline(
     category_id = (os.getenv("YOUTUBE_CATEGORY_ID") or "28").strip() or "28"
     youtube_video_id: Optional[str] = None
     upload_error: Optional[str] = None
+    instagram_media_id: Optional[str] = None
 
     if automate_youtube_upload:
         guard_cancelled()
@@ -694,6 +707,22 @@ def run_generation_pipeline(
             upload_error = str(err)
             emit(f"[!] YouTube upload skipped: {upload_error}", "warning")
 
+    # Only after YouTube, and only when YouTube worked. The Reel is a
+    # cross-post of a published video, not a second original, and a failure
+    # here must never cost the job: by this point the video is already live.
+    if crosspost_instagram and youtube_video_id:
+        guard_cancelled()
+        emit("[+] Cross-posting to Instagram...", "info")
+        try:
+            instagram_media_id = upload_reel(
+                video_path=str(PROJECT_ROOT / archived_path),
+                title=title,
+                description=description,
+            )
+            emit(f"[+] Instagram Reel published: {instagram_media_id}", "success")
+        except Exception as err:
+            emit(f"[!] Instagram cross-post skipped: {err}", "warning")
+
     return PipelineResult(
         script=script,
         ai_model=ai_model,
@@ -707,6 +736,7 @@ def run_generation_pipeline(
         title=title,
         youtube_video_id=youtube_video_id,
         upload_error=upload_error,
+        instagram_media_id=instagram_media_id,
         privacy_status=privacy_status,
         format_name=fmt.name,
         subtitles_path=subtitles_path,

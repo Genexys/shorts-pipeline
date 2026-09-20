@@ -20,6 +20,7 @@ Backend/output*
 Songs/
 venv/
 youtube_token*
+instagram_token*
 *.db
 secrets/
 compose.mac.yml
