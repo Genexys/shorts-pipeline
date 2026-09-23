@@ -212,14 +212,56 @@ def clean_markdown(markdown: str) -> List[str]:
     return paragraphs
 
 
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“])")
+
+# Abbreviations that end in a full stop without ending the sentence. Wikipedia
+# writes "Queen Anne (r. 1702–1714) reintroduced the practice", and a split after
+# "r." stored the fact as "1702–1714) reintroduced the practice almost as soon as
+# she acceded" — no subject, so nobody reading the brief could tell whose reign
+# it was. On the royal-touch page, fetched again on 2026-09-23, 15 of the 25
+# facts kept came out like that; with this list, none do.
+#
+# Case-sensitive on purpose: "(c. 1500)" is circa, "vitamin C." ends a sentence.
+# Initials ("Harry S. Truman") are left out for the same reason — "World War I."
+# and "Plan B." end sentences too, and a split name still keeps its surname.
+ABBREVIATIONS = frozenset(
+    {
+        # reigns, lifespans and dates
+        "r", "c", "ca", "b", "d", "fl", "cf", "approx",
+        # titles and places
+        "St", "Mt", "Ft", "Dr", "Mr", "Mrs", "Ms", "Prof", "Sr", "Jr",
+        "Gen", "Col", "Capt", "Lt", "Sgt", "Rev", "Hon",
+        # Latin
+        "e.g", "i.e", "vs", "viz", "al",
+        # months, as dates are written in reference prose
+        "Jan", "Feb", "Apr", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec",
+    }
+)
+_LAST_TOKEN = re.compile(r"([^\s(\[\"“]+)\.$")
+
+
+def _ends_in_abbreviation(text: str) -> bool:
+    match = _LAST_TOKEN.search(text)
+    return bool(match) and match.group(1) in ABBREVIATIONS
+
+
 def sentences(paragraphs: Sequence[str]) -> List[str]:
     parts: List[str] = []
     for paragraph in paragraphs:
-        parts.extend(
-            piece.strip()
-            for piece in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"“])", paragraph)
-            if piece.strip()
-        )
+        # Split everywhere a sentence could end, then glue back the pieces that
+        # ended on an abbreviation. A lookbehind cannot do this in one pass:
+        # Python's must be fixed-width, and the abbreviations are not.
+        pending = ""
+        for piece in _SENTENCE_BREAK.split(paragraph):
+            piece = piece.strip()
+            if not piece:
+                continue
+            pending = f"{pending} {piece}" if pending else piece
+            if not _ends_in_abbreviation(pending):
+                parts.append(pending)
+                pending = ""
+        if pending:
+            parts.append(pending)
     return parts
 
 

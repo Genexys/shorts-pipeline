@@ -56,6 +56,50 @@ def test_a_removed_tag_lets_the_sentences_either_side_split():
     assert any(s.startswith("In a follow-up paper") for s in sentences)
 
 
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # Verbatim from en.wikipedia.org/wiki/Royal_touch, which the knowledge
+        # base stored on 2026-09-22 as "1702–1714) reintroduced the practice…"
+        # and "1285–1314) reportedly instructed his son and heir, Louis X (r.".
+        "Anne (r. 1702–1714) reintroduced the practice almost as soon as she acceded.",
+        "Philip IV (r. 1285–1314) reportedly instructed his son and heir, Louis X "
+        "(r. 1314–1316), to touch the sick.",
+        "Charles X (r. 1824–1830) touched 121 of his subjects at his coronation on "
+        "29 May 1825.",
+        "Marc Bloch (b. 1886, d. 1944) argued that it was a later invention.",
+        "The chapel was built c. 1500 by the monks of the abbey.",
+        "He was received by Dr. Watson and later moved to St. Petersburg for good.",
+        "Some metals, e.g. Gallium, melt in the hand.",
+    ],
+)
+def test_an_abbreviation_does_not_end_the_sentence(sentence):
+    assert knowledge.sentences([sentence]) == [sentence]
+
+
+@pytest.mark.parametrize(
+    "paragraph, count",
+    [
+        # The cases the abbreviation list must not swallow.
+        ("Oranges are rich in vitamin C. The body cannot make it.", 2),
+        ("He served in World War I. Afterwards he taught.", 2),
+        ("The year was 1492. Ninety men sailed with him.", 2),
+        ("He moved to St. Petersburg. There he died.", 2),
+    ],
+)
+def test_real_sentence_ends_still_split(paragraph, count):
+    assert len(knowledge.sentences([paragraph])) == count
+
+
+def test_a_reign_keeps_its_monarch_as_a_stored_fact():
+    page = (
+        "Charles X (r. 1824–1830) touched 121 of his subjects at his coronation on "
+        "29 May 1825 in an attempt to assert continuity with the Ancien Régime.\n"
+    )
+    [fact] = _texts(page)
+    assert fact.startswith("Charles X")
+
+
 # -- choosing facts ---------------------------------------------------------------
 
 
