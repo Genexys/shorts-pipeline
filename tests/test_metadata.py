@@ -1034,14 +1034,60 @@ def test_title_from_opening_keeps_a_question_mark():
 
 
 def test_title_from_opening_refuses_a_sentence_too_long_for_the_feed():
-    # Published 2026-09-14 at eighty characters: "In Britain, Wednesday the 2nd
-    # of September 1752 was followed by Thursday the 14th". Inside YouTube's
-    # hundred, twice what the Shorts feed shows on a phone.
+    # Published 2026-09-19 at 97 characters. Inside YouTube's hundred, but more
+    # than twice what the Shorts feed shows on a phone.
     script = (
-        "In Britain, Wednesday the 2nd of September 1752 was followed by "
-        "Thursday the 14th. Eleven days never happened."
+        "Bite down on aluminum foil with a metal filling and you've built a tiny "
+        "battery inside your mouth. The foil and the filling are two metals."
     )
     assert gpt.title_from_opening(script) == ""
+
+
+@pytest.mark.parametrize(
+    "opening",
+    [
+        # 2026-09-22, both published under a label the metadata model wrote.
+        # The first missed the old cap of 70 by one character.
+        "English and French kings cured the sick by touching them, or claimed to.",
+        "A skater pulls her arms in and her spin accelerates without a single extra push.",
+    ],
+)
+def test_title_from_opening_admits_what_the_old_cap_cut(opening):
+    assert gpt.title_from_opening(f"{opening} More text follows here.") == opening.rstrip(".")
+
+
+@pytest.mark.parametrize(
+    "opening",
+    [
+        # Every one a claim with its explanation glued on, 20 to 28 words.
+        "Fingerprints have been pulled off objects exposed to temperatures of around "
+        "500 degrees Celsius, recovered with nothing more exotic than superglue.",
+        "Tapping the top of a shaken can doesn't do much, because the carbon dioxide "
+        "bubbles cling to the sides, not the top.",
+        "Touch a ringing tuning fork near the joint and it falls almost silent "
+        "instantly, but the stranger truth is that it was never really loud.",
+        "Cut a magnet in half and you don't get a north piece and a south piece, you "
+        "get two complete magnets, each with its own north and south.",
+    ],
+)
+def test_opening_runs_long_catches_a_claim_with_its_explanation(opening):
+    assert gpt.opening_runs_long(opening) is True
+
+
+@pytest.mark.parametrize(
+    "opening",
+    [
+        # The five that became titles, and two single claims that are merely wordy.
+        "Woodpeckers have no shock absorbers in their skulls at all.",
+        "Columbus never set out to prove the Earth was round.",
+        "Neptune was found on paper before anyone pointed a telescope at it.",
+        "English and French kings cured the sick by touching them, or claimed to.",
+        "That pop isn't pressure escaping your ear, it's a tiny bubble of air slipping in.",
+        "That earthy smell after a downpour is a chemical made by bacteria in the soil.",
+    ],
+)
+def test_opening_runs_long_leaves_a_single_claim_alone(opening):
+    assert gpt.opening_runs_long(opening) is False
 
 
 def test_title_from_opening_keeps_the_ones_that_worked():

@@ -686,6 +686,12 @@ def generate_script(
         ):
             opening = (split_sentences(final_script) or [""])[0]
             problem = f'opens on setup rather than the fact: "{opening[:80]}"'
+        if problem is None and lead_with_payoff and opening_runs_long(final_script):
+            opening = (split_sentences(final_script) or [""])[0]
+            problem = (
+                f"opens on {len(opening.split())} words, a claim with its "
+                f'explanation attached: "{opening[:80]}"'
+            )
         if problem is None and ends_weakly(final_script, cut_short=cut_short):
             # Only reached when the sentence could not simply be dropped, i.e.
             # removing it would leave the script under its floor.
@@ -847,6 +853,12 @@ OPENING_RULES = """
     his colleagues put a live frog into the throat of a high field magnet"
     spends fifteen words before the frog leaves the ground. The date is a
     detail for the second sentence; the first belongs to what happened.
+
+    Keep the first sentence to the claim alone, then stop. "Tapping the top of a
+    shaken can doesn't do much, because the bubbles cling to the sides" hands
+    over the answer in the same breath as the question it raises. End at "doesn't
+    do much." The reason, the mechanism and any "but the stranger thing is" start
+    the second sentence. Under sixteen words.
 """
 
 # Openings that say nothing, each taken from a published video's first
@@ -894,6 +906,24 @@ DATELINE_OPENING_PATTERNS = (
     r"(?:1[5-9]\d{2}|20\d{2})\b",
 )
 _DATELINE_OPENING_RE = re.compile("|".join(DATELINE_OPENING_PATTERNS), re.IGNORECASE)
+
+
+# How long a first sentence may run before it is carrying more than one claim.
+# Across the 29 Shorts published by 21 September, sorted by opening length, the
+# five whose opening could serve as the title all ran 10 to 13 words; 14 to 16
+# were single claims that were merely wordy; and from 18 up, every one was a
+# claim with its explanation glued on — "Fingerprints have been pulled off
+# objects exposed to 500 degrees Celsius, recovered with nothing more exotic
+# than superglue" (21), "Cut a magnet in half and you don't get a north piece
+# and a south piece, you get two complete magnets" (28). Nothing fell at 17, so
+# the line goes in the gap rather than through either group.
+OPENING_MAX_WORDS = 16
+
+
+def opening_runs_long(script: str) -> bool:
+    """Whether the first sentence is a claim with its explanation attached."""
+    first = (split_sentences(script or "") or [""])[0]
+    return len(first.split()) > OPENING_MAX_WORDS
 
 
 def opens_weakly(script: str, register: Optional[str] = None) -> bool:
@@ -1140,7 +1170,17 @@ TITLE_MIN_WORDS = 4
 # feed still beats a label that is fully visible and says nothing — and the
 # script's own sentence is also the one that has been fact-checked, where the
 # rejected cat title asserted as settled what its own source calls complicated.
-OPENING_TITLE_MAX_CHARS = 70
+#
+# Raised again from 70 on 2026-09-23, for the same reason at a larger scale. Of
+# the seven Shorts since the 21st only one opening became the title, and the
+# closest miss was "English and French kings cured the sick by touching them,
+# or claimed to" at 71 — one character over, published as "Medieval Kings and
+# Scrofula". "A skater pulls her arms in and her spin accelerates without a
+# single extra push" (79) went up as "Spinning Ice Skater Speeds Up". The line
+# that decides whether a sentence reads as a paragraph is its word count, which
+# OPENING_MAX_WORDS now holds at sixteen; this only has to admit what that lets
+# through.
+OPENING_TITLE_MAX_CHARS = 85
 
 # A leading fragment this short is a title, not a paragraph. The prompt forbids
 # titles and the model writes them anyway; taking one as the whole script
