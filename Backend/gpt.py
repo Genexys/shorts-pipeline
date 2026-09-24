@@ -193,20 +193,29 @@ def generate_response(prompt: str, ai_model: str) -> str:
     return content
 
 
+# How something came to be known. Not every subject has that story; see
+# ANGLES_UNFIT_FOR.
+WORKED_OUT_ANGLE = "Trace how this was worked out, and what it changed once it was known."
+
 # Every video used to come out of one prompt, so they all opened the same way
 # and unfolded the same way. YouTube's inauthentic-content policy asks that
 # "the substance of each video should be materially varied", and a fixed
 # narrative shape is exactly what "produced using a template" describes.
 # One of these is drawn per video and steers the structure, not the subject.
+#
+# The writer quotes them. "The one difference that matters" went out on
+# 2026-09-14 and again on 2026-09-24, and "That is the everyday version." on
+# 2026-09-12, so those two are worded so that nothing in them reads as a line,
+# and the prompt says the words are not for the script.
 SCRIPT_ANGLES = (
     "Open with one specific, surprising number or fact, then explain why it is true.",
     "Name a belief most people hold about this, then show what is actually the case.",
     "Walk through what happens step by step, in the order it happens.",
-    "Compare two things that look alike and explain the one difference that matters.",
+    "Compare two things that look alike, and build the script on what separates them.",
     "Start from the question a curious person would ask first, and answer it directly.",
-    "Trace how this was worked out, and what it changed once it was known.",
+    WORKED_OUT_ANGLE,
     "Describe the problem this solves, and what the world looked like before it.",
-    "Take the reader from the everyday version of this to the surprising one underneath.",
+    "Start where the viewer meets this every day, and end on what is surprising beneath it.",
 )
 
 
@@ -288,9 +297,21 @@ def register_rules(register: Optional[str]) -> str:
     return SCRIPT_REGISTER_RULES.get(register or EXPLAINER, "")
 
 
-def choose_script_angle() -> str:
-    """Picks the narrative shape for one video."""
-    return random.choice(SCRIPT_ANGLES)
+# Shapes a register's subjects do not have. An explainer asks how something
+# works, and most of those questions have no story of discovery: given "trace
+# how this was worked out" for why a helium balloon drifts backward when a car
+# brakes, the writer made one up on 2026-09-23 — "The insight came from
+# dropping a bad analogy" — and closed on "So the balloon became an instrument
+# rather than an oddity", the turn of a history that never happened.
+ANGLES_UNFIT_FOR = {
+    EXPLAINER: (WORKED_OUT_ANGLE,),
+}
+
+
+def choose_script_angle(register: Optional[str] = None) -> str:
+    """Picks the narrative shape for one video, from those its register fits."""
+    unfit = ANGLES_UNFIT_FOR.get((register or "").strip().lower(), ())
+    return random.choice([angle for angle in SCRIPT_ANGLES if angle not in unfit])
 
 def parse_string_array(response: str) -> List[str]:
     """Parses a JSON array of strings out of an LLM response, tolerating noise.
@@ -544,10 +565,12 @@ def generate_script(
         # An explicit prompt from the caller wins, as it always has.
         prompt = customPrompt
     else:
-        angle = angle or choose_script_angle()
+        angle = angle or choose_script_angle(register)
         log(f"[+] Script angle: {angle}", "info")
         prompt = f"""
             Structure this script like so: {angle}
+            That line is for you: it sets the order things are told in, and
+            none of its words belong in the script.
 
         """ + """
             Generate a script for a video, depending on the subject of the video.
@@ -1724,7 +1747,7 @@ def generate_long_script(
     Returns:
         Optional[str]: The joined script, or None if nothing usable came back.
     """
-    angle = angle or choose_script_angle()
+    angle = angle or choose_script_angle(register)
     log(f"[+] Script angle: {angle}", "info")
     outline = generate_outline(video_subject, section_count, ai_model, angle)
     if not outline:
