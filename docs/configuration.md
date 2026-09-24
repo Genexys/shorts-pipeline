@@ -225,6 +225,10 @@ added to the brief under the snippets.
 Facts are stored **verbatim**: each is a sentence that appears word for word on
 the page it cites, so nothing can be invented on the way in. Reference lists,
 navigation, maintenance tags and sentences addressed to the reader are dropped.
+A sentence whose subject is only "he", "she" or "they" is stored together with
+the earlier sentence in its paragraph that names them, with "…" marking any
+sentences in between, since on its own it is a fact about nobody. Pages stored
+before this keep their facts as they were.
 
 A page is read **once, ever**. The next video citing the same page takes its
 facts from the database. A read costs 1 credit, so two pages a video adds at
