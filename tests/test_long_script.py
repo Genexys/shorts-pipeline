@@ -224,6 +224,56 @@ def test_choose_script_angle_returns_a_known_angle():
     assert gpt.choose_script_angle() in gpt.SCRIPT_ANGLES
 
 
+def test_an_explainer_is_never_asked_how_it_was_worked_out(monkeypatch):
+    # 2026-09-23: given that shape for a helium balloon in a braking car, the
+    # writer invented a history — "The insight came from dropping a bad analogy".
+    offered = []
+    monkeypatch.setattr(
+        gpt.random, "choice", lambda options: offered.append(list(options)) or options[0]
+    )
+
+    gpt.choose_script_angle(gpt.EXPLAINER)
+    gpt.choose_script_angle(gpt.ANNIVERSARY)
+    gpt.choose_script_angle(None)
+
+    assert gpt.WORKED_OUT_ANGLE not in offered[0]
+    assert len(offered[0]) == len(gpt.SCRIPT_ANGLES) - 1
+    # An anniversary is a discovery; how it was worked out is the story.
+    assert gpt.WORKED_OUT_ANGLE in offered[1]
+    assert offered[2] == list(gpt.SCRIPT_ANGLES)
+
+
+def test_both_writers_choose_the_angle_for_their_register(monkeypatch):
+    registers = []
+    monkeypatch.setattr(
+        gpt, "choose_script_angle", lambda register=None: registers.append(register) or "A"
+    )
+    monkeypatch.setattr(
+        gpt, "generate_response", lambda p, m: '["One"]' if "Plan a" in p else "text."
+    )
+
+    gpt.generate_script("s", 1, "m", "en_us_001", "", register=gpt.EXPLAINER)
+    gpt.generate_long_script("s", 300, "m", "en_us_001", "", register=gpt.CURIO)
+
+    assert registers == [gpt.EXPLAINER, gpt.CURIO]
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    # Both went out on air as lines of narration.
+    ["the one difference that matters", "the everyday version"],
+)
+def test_no_angle_carries_a_phrase_that_was_read_out(phrase):
+    assert not any(phrase in angle.lower() for angle in gpt.SCRIPT_ANGLES)
+
+
+def test_the_prompt_keeps_the_angle_out_of_the_script(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: prompts.append(p) or "text.")
+    gpt.generate_script("s", 1, "m", "en_us_001", "", angle="ANGLE-MARKER")
+    assert "none of its words belong in the script" in " ".join(prompts[0].split())
+
+
 def test_generate_script_puts_the_angle_in_the_prompt(monkeypatch):
     prompts = []
 
@@ -432,6 +482,35 @@ def test_figures_used_ignores_single_digits():
 
 def test_figures_used_is_empty_for_no_sections():
     assert gpt.figures_used([]) == set()
+
+
+def test_each_section_reads_everything_written_so_far(monkeypatch):
+    # Published 2026-09-24: a video on Doolittle's blind flight put hands
+    # outside the cockpit in four sections of eight. Each section saw only the
+    # last 400 characters of the one before, so the start of the first — where
+    # the hands were — was out of view by the second.
+    first = (
+        "Doolittle took off under a canvas hood at Mitchel Field. "
+        + "Then the flight went on. " * 30
+    )
+    drafts = iter([first, "Second section prose.", "Third section prose."])
+    prompts = []
+
+    def fake(prompt, model):
+        prompts.append(prompt)
+        return next(drafts)
+
+    monkeypatch.setattr(gpt, "generate_response", fake)
+    monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two", "Three"])
+
+    gpt.generate_long_script("s", 300, "model", "en_us_001", "", section_count=3)
+
+    assert len(first) > 400
+    assert "under a canvas hood at Mitchel Field" in prompts[2]
+    assert "Second section prose." in prompts[2]
+    assert "in any wording" in prompts[1]
+    # The first section has nothing to avoid repeating.
+    assert "already been said" not in prompts[0]
 
 
 def test_long_script_reports_the_model_that_wrote(monkeypatch):

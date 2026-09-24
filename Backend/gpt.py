@@ -193,20 +193,29 @@ def generate_response(prompt: str, ai_model: str) -> str:
     return content
 
 
+# How something came to be known. Not every subject has that story; see
+# ANGLES_UNFIT_FOR.
+WORKED_OUT_ANGLE = "Trace how this was worked out, and what it changed once it was known."
+
 # Every video used to come out of one prompt, so they all opened the same way
 # and unfolded the same way. YouTube's inauthentic-content policy asks that
 # "the substance of each video should be materially varied", and a fixed
 # narrative shape is exactly what "produced using a template" describes.
 # One of these is drawn per video and steers the structure, not the subject.
+#
+# The writer quotes them. "The one difference that matters" went out on
+# 2026-09-14 and again on 2026-09-24, and "That is the everyday version." on
+# 2026-09-12, so those two are worded so that nothing in them reads as a line,
+# and the prompt says the words are not for the script.
 SCRIPT_ANGLES = (
     "Open with one specific, surprising number or fact, then explain why it is true.",
     "Name a belief most people hold about this, then show what is actually the case.",
     "Walk through what happens step by step, in the order it happens.",
-    "Compare two things that look alike and explain the one difference that matters.",
+    "Compare two things that look alike, and build the script on what separates them.",
     "Start from the question a curious person would ask first, and answer it directly.",
-    "Trace how this was worked out, and what it changed once it was known.",
+    WORKED_OUT_ANGLE,
     "Describe the problem this solves, and what the world looked like before it.",
-    "Take the reader from the everyday version of this to the surprising one underneath.",
+    "Start where the viewer meets this every day, and end on what is surprising beneath it.",
 )
 
 
@@ -288,9 +297,21 @@ def register_rules(register: Optional[str]) -> str:
     return SCRIPT_REGISTER_RULES.get(register or EXPLAINER, "")
 
 
-def choose_script_angle() -> str:
-    """Picks the narrative shape for one video."""
-    return random.choice(SCRIPT_ANGLES)
+# Shapes a register's subjects do not have. An explainer asks how something
+# works, and most of those questions have no story of discovery: given "trace
+# how this was worked out" for why a helium balloon drifts backward when a car
+# brakes, the writer made one up on 2026-09-23 — "The insight came from
+# dropping a bad analogy" — and closed on "So the balloon became an instrument
+# rather than an oddity", the turn of a history that never happened.
+ANGLES_UNFIT_FOR = {
+    EXPLAINER: (WORKED_OUT_ANGLE,),
+}
+
+
+def choose_script_angle(register: Optional[str] = None) -> str:
+    """Picks the narrative shape for one video, from those its register fits."""
+    unfit = ANGLES_UNFIT_FOR.get((register or "").strip().lower(), ())
+    return random.choice([angle for angle in SCRIPT_ANGLES if angle not in unfit])
 
 def parse_string_array(response: str) -> List[str]:
     """Parses a JSON array of strings out of an LLM response, tolerating noise.
@@ -440,7 +461,7 @@ def _same_sentence(a: str, b: str) -> bool:
 
 
 def tighten_script(
-    script: str, max_words: int, floor: int, ai_model: str
+    script: str, target: int, max_words: int, floor: int, ai_model: str
 ) -> Optional[str]:
     """The writer's own cut of an overlong draft, or None if it cannot be trusted.
 
@@ -450,21 +471,25 @@ def tighten_script(
     cool, it isn't that." — cut off a 104-word draft to fit 90. The writer
     knows which sentence is a restatement; the trim does not.
 
+    Asked for the target, never the ceiling. Told "at most 90", it returned 84,
+    88, 89 and 89 — a limit is filled, like the range REGISTER_TARGET_WORDS
+    replaced. The ceiling is only what a cut may not exceed.
+
     Kept only if it is within the length, keeps the first sentence and the last
     sentence as they were, and introduces no figure the draft did not have.
     Otherwise the trim below still runs, as it always did.
     """
     written = len(script.split())
     prompt = f"""
-    This narration script is {written} words. It must be at most {max_words} words,
+    This narration script is {written} words. Cut it to about {target} words,
     and no fewer than {floor}.
 
-    Cut it down. Keep the first sentence exactly as it is, and keep the final
-    paragraph exactly as it is: the first sentence is the hook and the final
-    paragraph is the point. Cut from the middle instead — a restatement, a second
-    example of the same thing, a secondary figure, a clause that qualifies
-    without adding. Do not add anything, do not reword what you keep beyond
-    what the cut requires, and do not change any fact or number.
+    Keep the first sentence exactly as it is, and keep the final paragraph
+    exactly as it is: the first sentence is the hook and the final paragraph is
+    the point. Cut from the middle instead — a restatement, a second example of
+    the same thing, a secondary figure, a clause that qualifies without adding.
+    Do not add anything, do not reword what you keep beyond what the cut
+    requires, and do not change any fact or number.
 
     Return only the script, keeping its paragraph breaks.
 
@@ -540,10 +565,12 @@ def generate_script(
         # An explicit prompt from the caller wins, as it always has.
         prompt = customPrompt
     else:
-        angle = angle or choose_script_angle()
+        angle = angle or choose_script_angle(register)
         log(f"[+] Script angle: {angle}", "info")
         prompt = f"""
             Structure this script like so: {angle}
+            That line is for you: it sets the order things are told in, and
+            none of its words belong in the script.
 
         """ + """
             Generate a script for a video, depending on the subject of the video.
@@ -616,10 +643,16 @@ def generate_script(
         # Join the selected paragraphs into a single string
         final_script = "\n\n".join(selected_paragraphs)
 
-        if target_words and max_words and len(final_script.split()) > max_words:
+        allowed = (
+            min(target_words + TARGET_SLACK_WORDS, max_words)
+            if target_words and max_words
+            else None
+        )
+        if allowed and len(final_script.split()) > allowed:
             before = len(final_script.split())
             tightened = tighten_script(
                 final_script,
+                target_words,
                 max_words,
                 int(target_words * SCRIPT_WORD_FLOOR_RATIO),
                 ai_model,
@@ -1078,6 +1111,10 @@ RESEARCH_RULES = """
     plausible-sounding explanation.
     If the subject itself is not borne out by the notes, write about what the
     notes actually show rather than defending the premise.
+    Pages mention more than one person. A note that says "he", "she" or "they"
+    is about whoever that note, or the page title beside it, names — which may
+    not be the person this video is about. If neither names anyone, leave the
+    note out rather than guess who it was.
     Where the notes do not support a specific, write the general statement
     instead. Do not cite the notes by number, and do not mention that notes
     exist.
@@ -1209,6 +1246,16 @@ NARRATION_WORDS_PER_SECOND = 2.26
 # words is three seconds at the slowest measured pace, and a closing line is
 # short by nature — the one this exists for was two words long.
 CLOSING_GRACE_WORDS = 6
+
+# How far a draft may run past its register's target before the writer is
+# asked to cut it back to the target. The cut used to wait for the ceiling and
+# aim at it: the four it made on 23 and 24 September came back at 84 to 89
+# words, and the curios of the week before, asked for 70, averaged 80. The
+# target is the length that pays. Across the 32 Shorts from 13 to 22 September
+# with 300 views or more, people watched about 18 seconds whatever the length
+# (18.1 at 79 words or fewer, 18.4 at 87 or more), so every word past the
+# target came off the share watched: 54% against 46%.
+TARGET_SLACK_WORDS = 6
 
 
 def words_for_seconds(seconds: Optional[float]) -> Optional[int]:
@@ -1700,7 +1747,7 @@ def generate_long_script(
     Returns:
         Optional[str]: The joined script, or None if nothing usable came back.
     """
-    angle = angle or choose_script_angle()
+    angle = angle or choose_script_angle(register)
     log(f"[+] Script angle: {angle}", "info")
     outline = generate_outline(video_subject, section_count, ai_model, angle)
     if not outline:
@@ -1722,16 +1769,29 @@ def generate_long_script(
         # for the brief's headline figure, and one published video stated "1
         # trillion odours" in six sections out of eight. A section has to see
         # what was actually written, not just what was planned.
-        previous = sections[-1] if sections else ""
+        #
+        # Nor was the tail of the section before. On 2026-09-24 a video on
+        # Doolittle's blind flight put hands outside the cockpit in four
+        # sections of eight, named the biplane in four and the plaque in
+        # three: each section saw the last 400 characters of the one before
+        # it, and the figure guard below reads digits, so "thirty to forty
+        # feet" went out twice in words. The whole script so far is under a
+        # thousand words, so every section now reads all of it.
+        written = "\n\n".join(sections)
         used = figures_used(sections)
         continuity = ""
-        if previous:
+        if written:
             continuity = (
-                f"\n        The previous section ended like this:\n"
-                f"        \"{previous[-400:]}\"\n\n"
-                f"        - Open by carrying that thought forward. No summary of it, no\n"
+                f"\n        Everything said so far, in order:\n"
+                f"        \"\"\"\n{written}\n        \"\"\"\n\n"
+                f"        - Open by carrying its last thought forward. No summary of it, no\n"
                 f"          'in this section', no restating the subject. One sentence that\n"
-                f"          follows from the line above, then move on to your own material.\n"
+                f"          follows from its final line, then move on to your own material.\n"
+                f"        - All of that has already been said. Do not say any of it again,\n"
+                f"          in any wording: no fact, figure, place, date, quotation or detail\n"
+                f"          that appears above, and no second introduction of anyone already\n"
+                f"          introduced. If your notes only repeat it, go further into your\n"
+                f"          own heading instead.\n"
             )
         if used:
             continuity += (

@@ -395,6 +395,14 @@ def test_research_rules_forbids_invented_precision_without_sources():
     assert "fabricated precision" in rules
 
 
+def test_research_rules_say_a_pronoun_is_not_the_protagonist():
+    # Pages already stored before the knowledge base learned to pair "he" with
+    # the sentence naming him still hold facts that say only "he".
+    rules = gpt.research_rules("[1] A page\nHe kept his hands outside the cockpit.")
+    assert '"he", "she" or "they"' in rules
+    assert "rather than guess who it was" in rules
+
+
 def test_research_rules_treats_a_blank_brief_as_none():
     assert gpt.research_rules("   \n  ") == gpt.NO_RESEARCH_RULES
 
@@ -993,7 +1001,8 @@ def test_drop_weak_ending_leaves_a_good_ending_alone():
 
 def test_generate_script_drops_a_trailing_aside_without_a_retry(monkeypatch):
     calls = {"n": 0}
-    body = " ".join(f"word{i}" for i in range(60)) + "."
+    # Within the target's slack, so the writer is not asked to cut it either.
+    body = " ".join(f"word{i}" for i in range(55)) + "."
 
     def fake(prompt, model):
         calls["n"] += 1
@@ -1377,7 +1386,7 @@ def _writer(monkeypatch, draft, cut):
     calls = []
 
     def fake(prompt, model, report_model=None):
-        if "It must be at most" in prompt:
+        if "Cut it to about" in prompt:
             calls.append("tighten")
             return cut
         calls.append("write")
@@ -1426,7 +1435,47 @@ def test_a_cut_still_over_the_limit_is_rejected(monkeypatch):
 
 def test_a_draft_within_the_limit_is_not_sent_back(monkeypatch):
     calls = _writer(monkeypatch, ZEBRA_CUT, "should not be used")
+    assert len(ZEBRA_CUT.split()) <= 70 + gpt.TARGET_SLACK_WORDS
     gpt.generate_script("zebras", 1, "model", "en_us_001", "", target_words=70, max_words=90)
+    assert calls == ["write"]
+
+
+ZEBRA_PADDED = ZEBRA_CUT.replace(
+    "centimeter or two up.",
+    "centimeter or two up. The hides were real, and so was the sunlight on them.",
+)
+
+
+def test_a_draft_over_its_target_is_cut_back_to_it_under_the_ceiling(monkeypatch):
+    # The cut used to wait for the 90-word ceiling and ask for "at most 90". On
+    # 2026-09-24 a curio asked for 70 words went out at 89.
+    prompts = []
+
+    def fake(prompt, model, report_model=None):
+        prompts.append(prompt)
+        return ZEBRA_CUT if "Cut it to about" in prompt else ZEBRA_PADDED
+
+    monkeypatch.setattr(gpt, "write_creative", fake)
+    script = gpt.generate_script(
+        "zebras", 1, "model", "en_us_001", "", target_words=70, max_words=90
+    )
+
+    assert 70 + gpt.TARGET_SLACK_WORDS < len(ZEBRA_PADDED.split()) < 90
+    assert len(prompts) == 2
+    instructions = " ".join(prompts[1].split("Script:")[0].split())
+    assert "Cut it to about 70 words" in instructions
+    # A ceiling in the instruction is a number to fill.
+    assert "90" not in instructions
+    assert len(script.split()) == len(ZEBRA_CUT.split())
+
+
+def test_the_ceiling_still_bounds_a_target_that_sits_near_it(monkeypatch):
+    # An anniversary asks for 85 words under a 90-word ceiling: the cut starts
+    # past 90, not 91.
+    calls = _writer(monkeypatch, ZEBRA_PADDED, ZEBRA_CUT)
+    gpt.generate_script(
+        "zebras", 1, "model", "en_us_001", "", target_words=85, max_words=90
+    )
     assert calls == ["write"]
 
 

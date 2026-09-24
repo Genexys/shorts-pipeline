@@ -100,6 +100,78 @@ def test_a_reign_keeps_its_monarch_as_a_stored_fact():
     assert fact.startswith("Charles X")
 
 
+# -- who "he" is ------------------------------------------------------------------
+
+# Verbatim from ethw.org/Milestones:First_Blind_Takeoff,_Flight_and_Landing,_1929.
+# The last sentence was stored on its own, and on 2026-09-24 a video said twice
+# that Doolittle flew with his hands outside the cockpit. It was Kelsey.
+KELSEY = (
+    "Benjamin Kelsey graduated M.I.T. with a BS in June 1928, and stayed to teach "
+    "and conduct research work in the aeronautics department. He flew for "
+    "commercial concerns as well as privately obtaining a transport pilot's "
+    "license. He joined the United States Army Air Corps and was commissioned a "
+    "second lieutenant on May 2, 1929. He was assigned to the Full Flight "
+    "Laboratory at Doolittle's request and at Harry Guggenheim's insistence flew "
+    "as Doolittle's safety pilot during the NY-2 Husky instrument flights. During "
+    "the first 'blind' instrument flight on September 24, 1929, he showed "
+    "observers that he was not in control by keeping his hands visible outside "
+    "the cockpit.\n"
+)
+
+
+def test_an_unnamed_he_is_stored_with_the_sentence_that_names_him():
+    [hands] = [fact for fact in _texts(KELSEY) if "hands visible" in fact]
+    assert hands.startswith("Benjamin Kelsey graduated M.I.T.")
+    # Three sentences stood between them, and the quote says so.
+    assert " … During the first 'blind' instrument flight" in hands
+
+
+def test_the_pairing_is_scored_on_the_sentence_itself():
+    [text, score, _] = next(
+        fact for fact in knowledge.extract_facts(KELSEY) if "hands visible" in fact[0]
+    )
+    alone = text.split(" … ")[-1]
+    assert score == knowledge.specificity(alone)
+
+
+def test_a_neighbouring_antecedent_is_joined_without_an_ellipsis():
+    paragraph = [
+        "Ninety men sailed with Columbus from Palos in August.",
+        "He reached the Bahamas after 33 days at sea, on 12 October.",
+    ]
+    assert knowledge.with_antecedent(paragraph, 1) == " ".join(paragraph)
+
+
+@pytest.mark.parametrize(
+    "sentence, unnamed",
+    [
+        ("He touched 35 people between 1 January and 30 June 1337.", True),
+        ("Their study registered 12–15 °C differences between stripes.", True),
+        ("In 1926, he received a doctorate in aeronautical engineering.", True),
+        # A month is capitalised and still nobody.
+        ("During the flight on September 24, 1929, he kept his hands up.", True),
+        ("When James Doolittle was selected, he was borrowed from the Army.", False),
+        ("Kelsey joined the Army Air Corps on May 2, 1929.", False),
+        ("The hood kept him from seeing out, and he flew on the dials.", False),
+    ],
+)
+def test_which_sentences_leave_their_subject_unnamed(sentence, unnamed):
+    assert knowledge.leaves_subject_unnamed(sentence) is unnamed
+
+
+def test_an_unnamed_he_that_opens_its_paragraph_is_stored_as_before():
+    # Nothing earlier in the paragraph to borrow; the page title still travels
+    # with the fact into the brief.
+    page = "He touched 35 people between 1 January and 30 June 1337.\n"
+    assert _texts(page) == ["He touched 35 people between 1 January and 30 June 1337."]
+
+
+def test_a_pairing_that_would_run_too_long_is_not_made():
+    long_first = "Benjamin Kelsey " + "worked on it " * 30 + "for years."
+    paragraph = [long_first, "He flew 3 test flights in 1929 over the field."]
+    assert knowledge.with_antecedent(paragraph, 1) == paragraph[1]
+
+
 # -- choosing facts ---------------------------------------------------------------
 
 
