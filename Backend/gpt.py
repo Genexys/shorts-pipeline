@@ -1722,16 +1722,29 @@ def generate_long_script(
         # for the brief's headline figure, and one published video stated "1
         # trillion odours" in six sections out of eight. A section has to see
         # what was actually written, not just what was planned.
-        previous = sections[-1] if sections else ""
+        #
+        # Nor was the tail of the section before. On 2026-09-24 a video on
+        # Doolittle's blind flight put hands outside the cockpit in four
+        # sections of eight, named the biplane in four and the plaque in
+        # three: each section saw the last 400 characters of the one before
+        # it, and the figure guard below reads digits, so "thirty to forty
+        # feet" went out twice in words. The whole script so far is under a
+        # thousand words, so every section now reads all of it.
+        written = "\n\n".join(sections)
         used = figures_used(sections)
         continuity = ""
-        if previous:
+        if written:
             continuity = (
-                f"\n        The previous section ended like this:\n"
-                f"        \"{previous[-400:]}\"\n\n"
-                f"        - Open by carrying that thought forward. No summary of it, no\n"
+                f"\n        Everything said so far, in order:\n"
+                f"        \"\"\"\n{written}\n        \"\"\"\n\n"
+                f"        - Open by carrying its last thought forward. No summary of it, no\n"
                 f"          'in this section', no restating the subject. One sentence that\n"
-                f"          follows from the line above, then move on to your own material.\n"
+                f"          follows from its final line, then move on to your own material.\n"
+                f"        - All of that has already been said. Do not say any of it again,\n"
+                f"          in any wording: no fact, figure, place, date, quotation or detail\n"
+                f"          that appears above, and no second introduction of anyone already\n"
+                f"          introduced. If your notes only repeat it, go further into your\n"
+                f"          own heading instead.\n"
             )
         if used:
             continuity += (

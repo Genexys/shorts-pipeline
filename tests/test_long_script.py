@@ -434,6 +434,35 @@ def test_figures_used_is_empty_for_no_sections():
     assert gpt.figures_used([]) == set()
 
 
+def test_each_section_reads_everything_written_so_far(monkeypatch):
+    # Published 2026-09-24: a video on Doolittle's blind flight put hands
+    # outside the cockpit in four sections of eight. Each section saw only the
+    # last 400 characters of the one before, so the start of the first — where
+    # the hands were — was out of view by the second.
+    first = (
+        "Doolittle took off under a canvas hood at Mitchel Field. "
+        + "Then the flight went on. " * 30
+    )
+    drafts = iter([first, "Second section prose.", "Third section prose."])
+    prompts = []
+
+    def fake(prompt, model):
+        prompts.append(prompt)
+        return next(drafts)
+
+    monkeypatch.setattr(gpt, "generate_response", fake)
+    monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two", "Three"])
+
+    gpt.generate_long_script("s", 300, "model", "en_us_001", "", section_count=3)
+
+    assert len(first) > 400
+    assert "under a canvas hood at Mitchel Field" in prompts[2]
+    assert "Second section prose." in prompts[2]
+    assert "in any wording" in prompts[1]
+    # The first section has nothing to avoid repeating.
+    assert "already been said" not in prompts[0]
+
+
 def test_long_script_reports_the_model_that_wrote(monkeypatch):
     # The long branch never called report_model, so script_model stayed at the
     # model the request asked for and every long video was flagged a fallback.
