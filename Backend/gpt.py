@@ -440,7 +440,7 @@ def _same_sentence(a: str, b: str) -> bool:
 
 
 def tighten_script(
-    script: str, max_words: int, floor: int, ai_model: str
+    script: str, target: int, max_words: int, floor: int, ai_model: str
 ) -> Optional[str]:
     """The writer's own cut of an overlong draft, or None if it cannot be trusted.
 
@@ -450,21 +450,25 @@ def tighten_script(
     cool, it isn't that." — cut off a 104-word draft to fit 90. The writer
     knows which sentence is a restatement; the trim does not.
 
+    Asked for the target, never the ceiling. Told "at most 90", it returned 84,
+    88, 89 and 89 — a limit is filled, like the range REGISTER_TARGET_WORDS
+    replaced. The ceiling is only what a cut may not exceed.
+
     Kept only if it is within the length, keeps the first sentence and the last
     sentence as they were, and introduces no figure the draft did not have.
     Otherwise the trim below still runs, as it always did.
     """
     written = len(script.split())
     prompt = f"""
-    This narration script is {written} words. It must be at most {max_words} words,
+    This narration script is {written} words. Cut it to about {target} words,
     and no fewer than {floor}.
 
-    Cut it down. Keep the first sentence exactly as it is, and keep the final
-    paragraph exactly as it is: the first sentence is the hook and the final
-    paragraph is the point. Cut from the middle instead — a restatement, a second
-    example of the same thing, a secondary figure, a clause that qualifies
-    without adding. Do not add anything, do not reword what you keep beyond
-    what the cut requires, and do not change any fact or number.
+    Keep the first sentence exactly as it is, and keep the final paragraph
+    exactly as it is: the first sentence is the hook and the final paragraph is
+    the point. Cut from the middle instead — a restatement, a second example of
+    the same thing, a secondary figure, a clause that qualifies without adding.
+    Do not add anything, do not reword what you keep beyond what the cut
+    requires, and do not change any fact or number.
 
     Return only the script, keeping its paragraph breaks.
 
@@ -616,10 +620,16 @@ def generate_script(
         # Join the selected paragraphs into a single string
         final_script = "\n\n".join(selected_paragraphs)
 
-        if target_words and max_words and len(final_script.split()) > max_words:
+        allowed = (
+            min(target_words + TARGET_SLACK_WORDS, max_words)
+            if target_words and max_words
+            else None
+        )
+        if allowed and len(final_script.split()) > allowed:
             before = len(final_script.split())
             tightened = tighten_script(
                 final_script,
+                target_words,
                 max_words,
                 int(target_words * SCRIPT_WORD_FLOOR_RATIO),
                 ai_model,
@@ -1213,6 +1223,16 @@ NARRATION_WORDS_PER_SECOND = 2.26
 # words is three seconds at the slowest measured pace, and a closing line is
 # short by nature — the one this exists for was two words long.
 CLOSING_GRACE_WORDS = 6
+
+# How far a draft may run past its register's target before the writer is
+# asked to cut it back to the target. The cut used to wait for the ceiling and
+# aim at it: the four it made on 23 and 24 September came back at 84 to 89
+# words, and the curios of the week before, asked for 70, averaged 80. The
+# target is the length that pays. Across the 32 Shorts from 13 to 22 September
+# with 300 views or more, people watched about 18 seconds whatever the length
+# (18.1 at 79 words or fewer, 18.4 at 87 or more), so every word past the
+# target came off the share watched: 54% against 46%.
+TARGET_SLACK_WORDS = 6
 
 
 def words_for_seconds(seconds: Optional[float]) -> Optional[int]:
