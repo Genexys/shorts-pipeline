@@ -395,6 +395,14 @@ def test_research_rules_forbids_invented_precision_without_sources():
     assert "fabricated precision" in rules
 
 
+def test_research_rules_say_a_pronoun_is_not_the_protagonist():
+    # Pages already stored before the knowledge base learned to pair "he" with
+    # the sentence naming him still hold facts that say only "he".
+    rules = gpt.research_rules("[1] A page\nHe kept his hands outside the cockpit.")
+    assert '"he", "she" or "they"' in rules
+    assert "rather than guess who it was" in rules
+
+
 def test_research_rules_treats_a_blank_brief_as_none():
     assert gpt.research_rules("   \n  ") == gpt.NO_RESEARCH_RULES
 

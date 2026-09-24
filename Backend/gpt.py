@@ -1078,6 +1078,10 @@ RESEARCH_RULES = """
     plausible-sounding explanation.
     If the subject itself is not borne out by the notes, write about what the
     notes actually show rather than defending the premise.
+    Pages mention more than one person. A note that says "he", "she" or "they"
+    is about whoever that note, or the page title beside it, names — which may
+    not be the person this video is about. If neither names anyone, leave the
+    note out rather than guess who it was.
     Where the notes do not support a specific, write the general statement
     instead. Do not cite the notes by number, and do not mention that notes
     exist.

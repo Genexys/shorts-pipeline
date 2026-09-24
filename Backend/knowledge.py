@@ -14,9 +14,10 @@ are stored and handed to the writer alongside the snippets.
 Two properties matter more than cleverness:
 
 - Verbatim. Every fact is a sentence that appears word for word on the page it
-  cites. Nothing is summarised or rephrased by a model, so nothing can be
-  invented on the way in; the writer does the rephrasing, under the same
-  research rules as before.
+  cites — or, when that sentence only says "he" or "she", the sentence that
+  names them as well, with "…" where the page had others in between. Nothing
+  is summarised or rephrased by a model, so nothing can be invented on the way
+  in; the writer does the rephrasing, under the same research rules as before.
 - Read once. A page is fetched the first time a video cites it and never again.
   Reference pages recur across related subjects, and each fetch is a credit.
 
@@ -54,6 +55,9 @@ FACTS_IN_BRIEF = 12
 # sentences the splitter could not separate, or a reference-list entry.
 FACT_MIN_WORDS = 8
 FACT_MAX_WORDS = 60
+# A fact that carries the sentence naming its "he" may run to this. Past it the
+# sentence is stored on its own, as it always was.
+FACT_WITH_ANTECEDENT_MAX_WORDS = 90
 
 # Pages worth reading first when a video has a choice. Encyclopaedic and
 # institutional pages are dense with specifics and rarely wrong about them.
@@ -245,12 +249,14 @@ def _ends_in_abbreviation(text: str) -> bool:
     return bool(match) and match.group(1) in ABBREVIATIONS
 
 
-def sentences(paragraphs: Sequence[str]) -> List[str]:
-    parts: List[str] = []
+def paragraph_sentences(paragraphs: Sequence[str]) -> List[List[str]]:
+    """Each paragraph's sentences, still grouped by paragraph."""
+    grouped: List[List[str]] = []
     for paragraph in paragraphs:
         # Split everywhere a sentence could end, then glue back the pieces that
         # ended on an abbreviation. A lookbehind cannot do this in one pass:
         # Python's must be fixed-width, and the abbreviations are not.
+        parts: List[str] = []
         pending = ""
         for piece in _SENTENCE_BREAK.split(paragraph):
             piece = piece.strip()
@@ -262,7 +268,72 @@ def sentences(paragraphs: Sequence[str]) -> List[str]:
                 pending = ""
         if pending:
             parts.append(pending)
-    return parts
+        grouped.append(parts)
+    return grouped
+
+
+def sentences(paragraphs: Sequence[str]) -> List[str]:
+    return [sentence for group in paragraph_sentences(paragraphs) for sentence in group]
+
+
+# A sentence whose subject is only "he" or "she" is a fact about nobody once it
+# leaves its paragraph. On 2026-09-24 the ETHW page on the first blind flight
+# gave "During the first 'blind' instrument flight on September 24, 1929, he
+# showed observers that he was not in control by keeping his hands visible
+# outside the cockpit" — "he" being Doolittle's safety pilot, Benjamin Kelsey,
+# named four sentences earlier. Stored alone, it went out twice in a video as
+# Doolittle flying with his hands outside the cockpit.
+_PRONOUN_SUBJECT = re.compile(r"^(?:He|She|They|His|Her|Their)\b")
+# The same after an opening clause: "In 1926, he", "During the flight on
+# September 24, 1929, he". Up to three commas, so a date can sit inside it.
+_CLAUSE_THEN_PRONOUN = re.compile(r"^((?:[^,;:]{1,80},\s*){1,3})(?:he|she|they)\b")
+# Capitalised, and still not anyone the pronoun could mean.
+_CALENDAR = frozenset(
+    {
+        "January", "February", "March", "April", "May", "June", "July",
+        "August", "September", "October", "November", "December",
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    }
+)
+
+
+def leaves_subject_unnamed(sentence: str) -> bool:
+    """Whether the sentence's subject is a pronoun it does not resolve itself.
+
+    "When James Doolittle was selected, he…" names him in the clause and is
+    left alone; so is "In Paris, he…", which cannot be told apart from it
+    without knowing that Paris is a place — the cost of that is only the
+    sentence being stored as it always was.
+    """
+    if _PRONOUN_SUBJECT.match(sentence):
+        return True
+    clause = _CLAUSE_THEN_PRONOUN.match(sentence)
+    if not clause:
+        return False
+    words = [word.strip(",'\"“”‘’") for word in clause.group(1).split()[1:]]
+    return not any(word[:1].isupper() and word not in _CALENDAR for word in words)
+
+
+def with_antecedent(paragraph: Sequence[str], index: int) -> str:
+    """The sentence, led by the one earlier in its paragraph that says who.
+
+    That is the nearest sentence before it whose own subject is named. Adjacent
+    sentences are joined as they stand; a gap is marked with "…", as a quote
+    marks what it leaves out. A sentence that opens its paragraph has nothing
+    to borrow and stays as it is, as does one whose pairing would run too long.
+    """
+    sentence = paragraph[index]
+    if not leaves_subject_unnamed(sentence):
+        return sentence
+    for back in range(index - 1, -1, -1):
+        if leaves_subject_unnamed(paragraph[back]):
+            continue
+        joiner = " " if back == index - 1 else " … "
+        paired = f"{paragraph[back]}{joiner}{sentence}"
+        if len(paired.split()) > FACT_WITH_ANTECEDENT_MAX_WORDS:
+            return sentence
+        return paired
+    return sentence
 
 
 def specificity(sentence: str) -> float:
@@ -318,15 +389,23 @@ def extract_facts(markdown: str, limit: int = FACTS_PER_PAGE) -> List[tuple]:
     """The page's most specific sentences as (text, score, digest), in page order."""
     seen = set()
     scored = []
-    for position, sentence in enumerate(sentences(clean_markdown(markdown))):
-        if not looks_like_prose(sentence):
-            continue
-        score = specificity(sentence)
-        key = digest(sentence)
-        if score <= 0 or key in seen:
-            continue
-        seen.add(key)
-        scored.append((position, sentence, score, key))
+    position = -1
+    for paragraph in paragraph_sentences(clean_markdown(markdown)):
+        for index, sentence in enumerate(paragraph):
+            position += 1
+            if not looks_like_prose(sentence):
+                continue
+            # Scored on the sentence alone: the one naming its subject is there
+            # to say who, and its own figures should not lift the ranking.
+            score = specificity(sentence)
+            if score <= 0:
+                continue
+            text = with_antecedent(paragraph, index)
+            key = digest(text)
+            if key in seen:
+                continue
+            seen.add(key)
+            scored.append((position, text, score, key))
     best = sorted(scored, key=lambda item: (-item[2], item[0]))[:limit]
     return [(text, score, key) for _, text, score, key in sorted(best)]
 
