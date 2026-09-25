@@ -228,7 +228,9 @@ navigation, maintenance tags and sentences addressed to the reader are dropped.
 A sentence whose subject is only "he", "she" or "they" is stored together with
 the earlier sentence in its paragraph that names them, with "…" marking any
 sentences in between, since on its own it is a fact about nobody. Pages stored
-before this keep their facts as they were.
+before this keep their facts as they were. Search snippets get the same care:
+sentences at the start of a snippet about a "he" or "she" it never names are
+left out of the brief, and a snippet with nothing else is not shown at all.
 
 A page is read **once, ever**. The next video citing the same page takes its
 facts from the database. A read costs 1 credit, so two pages a video adds at
