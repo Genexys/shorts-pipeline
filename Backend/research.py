@@ -241,9 +241,17 @@ def format_brief(sources: Sequence[Source]) -> str:
     """The sources as prompt text. Empty string when there are none."""
     if not sources:
         return ""
+    # Imported here: knowledge imports this module for its key and hosts.
+    from knowledge import named_snippet
+
+    # A snippet that was only about someone it never names says nothing the
+    # writer can attribute, and is left out. The source still counts and is
+    # still cited; only what the writer reads changes.
+    shown = [(source, named_snippet(source.snippet)) for source in sources]
+    shown = [(source, snippet) for source, snippet in shown if snippet]
     blocks = [
-        f"[{index}] {source.title or source.url}\n{source.snippet}"
-        for index, source in enumerate(sources, 1)
+        f"[{index}] {source.title or source.url}\n{snippet}"
+        for index, (source, snippet) in enumerate(shown, 1)
     ]
     return "\n\n".join(blocks)
 

@@ -336,6 +336,32 @@ def with_antecedent(paragraph: Sequence[str], index: int) -> str:
     return sentence
 
 
+def named_snippet(snippet: str) -> str:
+    """A search snippet without its opening sentences about someone unnamed.
+
+    A snippet is a cut from a page with nothing before it, so a "he" at its
+    start was named further up the page, where the writer cannot see. On
+    2026-09-25 Vox's "He proved it by shaving his own stomach, and seeing that
+    he didn't produce any belly button lint until his hair grew back", under
+    the title "This scientist solved the mystery of belly button lint", went
+    out as Karl Kruszelnicki's experiment — the only scientist the other notes
+    named. It was Georg Steinhauser's. The research rules already said to leave
+    such a note out; the writer guessed anyway, so it is never shown one.
+
+    Once a sentence in the snippet names its own subject, later pronouns have
+    something to refer to and stay.
+    """
+    parts = sentences([snippet])
+    kept: List[str] = []
+    for sentence in parts:
+        if not kept and leaves_subject_unnamed(sentence):
+            continue
+        kept.append(sentence)
+    if len(kept) == len(parts):
+        return snippet
+    return " ".join(kept)
+
+
 def specificity(sentence: str) -> float:
     """How much a sentence says that a summary would not.
 

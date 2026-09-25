@@ -222,6 +222,53 @@ def test_format_brief_is_empty_without_sources():
     assert format_brief([]) == ""
 
 
+# Verbatim from the search behind https://youtu.be/ZgRapo7Cv2A (2026-09-25),
+# which said Kruszelnicki shaved his stomach. It was Georg Steinhauser.
+KRUSZELNICKI = Source(
+    title="IgNobel (3): navel-gazing - PMC - NIH",
+    url="https://pmc.ncbi.nlm.nih.gov/articles/PMC137346/",
+    snippet="These are the findings of a massive survey of belly-button lint (BBL) "
+    "conducted by Dr. Karl Kruszelnicki of the University of Sydney, who won the "
+    "coveted ...",
+)
+VOX = Source(
+    title="This scientist solved the mystery of belly button lint - Vox",
+    url="https://www.vox.com/2014/12/13/7382269/belly-button-lint",
+    snippet="He proved it by shaving his own stomach, and seeing that he didn't "
+    "produce any belly button lint until his hair grew back. He also confirmed the ...",
+)
+
+
+def test_a_snippet_about_someone_it_never_names_is_not_shown():
+    brief = format_brief([KRUSZELNICKI, VOX])
+    assert "shaving his own stomach" not in brief
+    assert "Kruszelnicki" in brief
+    # Numbered by what is shown, so no gap for the writer to wonder about.
+    assert "[2]" not in brief
+
+
+def test_a_pronoun_after_the_name_in_the_same_snippet_stays():
+    source = Source(
+        title="Belly button lint",
+        url="https://e.org/lint",
+        snippet="Georg Steinhauser collected lint for three years. He found that "
+        "shaving the abdomen stopped it.",
+    )
+    assert source.snippet in format_brief([source])
+
+
+def test_only_the_unnamed_opening_of_a_snippet_goes():
+    source = Source(
+        title="Lint",
+        url="https://e.org/lint",
+        snippet="He shaved his stomach in 2009. Georg Steinhauser's paper followed. "
+        "He called it hard facts on a soft matter.",
+    )
+    brief = format_brief([source])
+    assert "shaved his stomach" not in brief
+    assert "Georg Steinhauser's paper followed. He called it" in brief
+
+
 def test_source_lines_caps_the_list():
     many = [Source(title=f"t{i}", url=f"https://e.org/{i}", snippet="s") for i in range(9)]
     assert len(source_lines(many)) == research.DESCRIPTION_MAX_SOURCES
