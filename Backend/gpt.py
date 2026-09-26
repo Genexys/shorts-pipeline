@@ -475,6 +475,14 @@ def tighten_script(
     88, 89 and 89 — a limit is filled, like the range REGISTER_TARGET_WORDS
     replaced. The ceiling is only what a cut may not exceed.
 
+    Told only what to cut, it cut what the rest leaned on. On 2026-09-26 a
+    kettle Short lost "Push air through a hairdryer and you get a rushing
+    noise;" as a second example and kept "…finally pinned down the difference",
+    which then pointed at nothing; a curio on pigeon-guided missiles lost "The
+    National Defense Research Committee called the idea eccentric and
+    impractical, and funded it anyway", the one line that made it a curio. So
+    it is also told what is never cut.
+
     Kept only if it is within the length, keeps the first sentence and the last
     sentence as they were, and introduces no figure the draft did not have.
     Otherwise the trim below still runs, as it always did.
@@ -488,6 +496,13 @@ def tighten_script(
     exactly as it is: the first sentence is the hook and the final paragraph is
     the point. Cut from the middle instead — a restatement, a second example of
     the same thing, a secondary figure, a clause that qualifies without adding.
+
+    Two things are never cut. First, anything a sentence you keep points back
+    to: if "the difference", "this", "both" or "that" stays, so does what it
+    names. Second, the detail that makes the story surprising or funny — cut
+    the explanation around it instead. An official calling an idea impractical
+    and funding it anyway is what the video is for.
+
     Do not add anything, do not reword what you keep beyond what the cut
     requires, and do not change any fact or number.
 
