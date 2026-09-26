@@ -1433,6 +1433,52 @@ def test_a_cut_still_over_the_limit_is_rejected(monkeypatch):
     assert len(script.split()) <= 90
 
 
+# The drafts as written on 2026-09-26, before the cut.
+KETTLE_DRAFT = (
+    "Why a kettle whistles puzzled scientists for more than a hundred years. Push air "
+    "through a hairdryer and you get a rushing noise; push steam up a kettle's spout and "
+    "you get one clear note. Two Cambridge researchers, Henrywood and Agarwal, finally "
+    "pinned down the difference.\n\n"
+    "The steam meets a hole far narrower than the spout, and pulses, shedding vortices "
+    "that make the sound. It works like an organ pipe, except the air is blown through "
+    "the neck rather than over it. Your kettle whistles the same way your mouth does."
+)
+PIGEON_DRAFT = (
+    "The military paid twenty-five thousand dollars to put pigeons inside the nose of a "
+    "missile. The National Defense Research Committee called the idea eccentric and "
+    "impractical, and funded it anyway. Skinner trained birds by operant conditioning to "
+    "peck at a ship on a screen, and cables running from their heads steered the weapon "
+    "toward the target.\n\n"
+    "The Navy revived the work as Project Orcon, then cancelled it in 1953. Early "
+    "electronic guidance used the same method, with processors in place of the birds."
+)
+
+
+def _cut_prompt(monkeypatch, draft, target):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "write_creative",
+        lambda prompt, model, report_model=None: prompts.append(prompt) or draft,
+    )
+    gpt.tighten_script(draft, target, 90, int(target * 0.85), "model")
+    return " ".join(prompts[0].split("Script:")[0].split())
+
+
+def test_the_cut_keeps_what_a_kept_sentence_points_back_to(monkeypatch):
+    # The kettle Short lost the hairdryer and kept "…pinned down the
+    # difference", which then pointed at nothing.
+    instructions = _cut_prompt(monkeypatch, KETTLE_DRAFT, 80)
+    assert 'if "the difference", "this", "both" or "that" stays, so does what it names' in instructions
+
+
+def test_the_cut_keeps_the_detail_that_makes_the_story(monkeypatch):
+    # The pigeon curio lost "…called the idea eccentric and impractical, and
+    # funded it anyway" — the one line that made it a curio.
+    instructions = _cut_prompt(monkeypatch, PIGEON_DRAFT, 70)
+    assert "the detail that makes the story surprising or funny" in instructions
+    assert "cut the explanation around it instead" in instructions
+
+
 def test_a_draft_within_the_limit_is_not_sent_back(monkeypatch):
     calls = _writer(monkeypatch, ZEBRA_CUT, "should not be used")
     assert len(ZEBRA_CUT.split()) <= 70 + gpt.TARGET_SLACK_WORDS
