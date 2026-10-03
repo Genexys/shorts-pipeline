@@ -6,6 +6,7 @@ the classification is tested against what the SDK actually raises.
 """
 
 import json
+import types
 from types import SimpleNamespace
 
 import anthropic
@@ -28,7 +29,7 @@ from repository import (
     queue_topic_job,
 )
 
-PRIMARY = "claude-opus-5"
+PRIMARY = "claude-opus-5-5"
 FALLBACK = "claude-sonnet-5-5"
 URL = "https://api.anthropic.com/v1/messages"
 CREDIT_MESSAGE = (
@@ -98,6 +99,7 @@ class _Calls:
 
         class _Client:
             messages = _Messages()
+            beta = types.SimpleNamespace(messages=messages)
 
         return _Client()
 
