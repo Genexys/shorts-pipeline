@@ -49,8 +49,9 @@ _SEMICOLON = re.compile(r"\s*;\s+")
 def for_narration(script: str) -> str:
     """The script as the voice should receive it, not as it is written.
 
-    Only the audio is affected. The stored script keeps its punctuation, and the
-    subtitles are transcribed from the audio, so nothing downstream sees this.
+    Only the narration is affected. The stored script keeps its punctuation;
+    the subtitles show the narrated text, so they read the full stop the
+    viewer hears.
     """
     spoken = _SEMICOLON_CLAUSE.sub(lambda m: f". {m.group(1).upper()}", script or "")
     return _SEMICOLON.sub(". ", spoken)

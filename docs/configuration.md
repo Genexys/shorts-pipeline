@@ -25,7 +25,7 @@ Use `.env.example` as your template.
 | `OLLAMA_MODEL` | Fallback model if frontend does not send a model value. | `llama3.1:8b` |
 | `OLLAMA_TIMEOUT` | Seconds to wait for one Ollama response. | `180` |
 | `ELEVENLABS_API_KEY` | Narration for formats that ask for it. Empty keeps everything on the free TikTok voice. See [Narration](#narration). | empty |
-| `ASSEMBLY_AI_API_KEY` | If set, subtitles are generated with AssemblyAI; otherwise local subtitle generation is used. | empty |
+| `ASSEMBLY_AI_API_KEY` | If set, AssemblyAI times the subtitles: its transcript is aligned to the script, and the script's own words are shown at the times it heard them (its transcript is shown instead when fewer than half the words line up). If empty, local subtitle generation is used. | empty |
 | `POSTGRES_DB` | Database name for Docker Postgres service. | `moneyprinter` |
 | `POSTGRES_USER` | Database user for Docker Postgres service. | `moneyprinter` |
 | `POSTGRES_PASSWORD` | Database password for Docker Postgres service. | `moneyprinter` |
@@ -175,6 +175,21 @@ Neither library can fail a job. A search that errors or is unconfigured
 returns nothing and the other one carries the video; if both come up short,
 the shot cap stretches so the footage still covers the runtime without
 repeating.
+
+**Black openings are skipped.** Many stock clips open on a fade up from
+black, and a shot used to start on the clip's first frame. Before combining,
+the first four seconds of each clip are checked with `blackdetect`, cropped
+the way the format frames them:
+
+- black from the first frame: the shot starts after it;
+- black running to the end of those four seconds, or the clip's own fade-out:
+  the shot stops before it;
+- black that comes and goes inside them, or black throughout: the clip is not
+  used.
+
+If that would leave no clips, all of them are used as before. The combined
+video is then checked again, and any black of half a second or more is logged
+as `Black in the combined video at ...`.
 
 ## Notes
 

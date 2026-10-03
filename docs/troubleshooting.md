@@ -34,10 +34,21 @@ IMAGEMAGICK_BINARY="C:\\Program Files\\ImageMagick-7.1.1-Q16-HDRI\\magick.exe"
 - Try a broader video subject
 - Retry generation; stock results vary by query
 
+## `Black in the combined video at ...`
+
+A shot is black where it plays. Clips that open on black are trimmed or left
+out before combining (see [Stock footage](configuration.md#stock-footage)), so
+this means black the check did not catch: dark footage, or black after the
+first four seconds of a clip. The job carries on. The footage timeline in
+`stock_clips` says which clip plays at that time.
+
 ## Subtitles fail
 
 - If using AssemblyAI, verify `ASSEMBLY_AI_API_KEY`
 - If not using AssemblyAI, local subtitle generation should still work
+- `AssemblyAI's words do not line up with the script` means fewer than half the
+  script's words were heard as written, so the subtitles show AssemblyAI's
+  transcript, with its spelling, rather than the script
 
 ## YouTube upload skipped
 
