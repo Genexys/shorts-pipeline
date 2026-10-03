@@ -24,7 +24,7 @@ Use `.env.example` as your template.
 | `OLLAMA_MODEL` | Fallback model if frontend does not send a model value. | `llama3.1:8b` |
 | `OLLAMA_TIMEOUT` | Seconds to wait for one Ollama response. | `180` |
 | `ELEVENLABS_API_KEY` | Narration for formats that ask for it. Empty keeps everything on the free TikTok voice. See [Narration](#narration). | empty |
-| `ASSEMBLY_AI_API_KEY` | If set, subtitles are generated with AssemblyAI; otherwise local subtitle generation is used. | empty |
+| `ASSEMBLY_AI_API_KEY` | If set, AssemblyAI times the subtitles: its transcript is aligned to the script, and the script's own words are shown at the times it heard them (its transcript is shown instead when fewer than half the words line up). If empty, local subtitle generation is used. | empty |
 | `POSTGRES_DB` | Database name for Docker Postgres service. | `moneyprinter` |
 | `POSTGRES_USER` | Database user for Docker Postgres service. | `moneyprinter` |
 | `POSTGRES_PASSWORD` | Database password for Docker Postgres service. | `moneyprinter` |

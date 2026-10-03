@@ -1,6 +1,8 @@
+import difflib
 import os
 import re
 import subprocess
+import unicodedata
 
 from PIL import Image
 import uuid
@@ -124,12 +126,225 @@ def save_video(video_url: str, directory: str = str(TEMP_DIR)) -> str:
     return str(video_path)
 
 
-def __generate_subtitles_assemblyai(audio_path: str, voice: str) -> str:
+# Captions. They used to be AssemblyAI's transcript of the narration, so they
+# carried its spelling rather than the script's: on 2026-10-02 a runway Short
+# captioned "18L–36R" as "ATNL 36R.", and on 2026-09-30 the physicist Jiwon Han
+# was captioned "Jiwan". The script is the text, so AssemblyAI is now used for
+# timing only: its words are aligned to the narrated script, and the script's
+# own words are shown at the times AssemblyAI heard them.
+
+# Under this share of the script's words found word for word in the
+# transcript, the two are too far apart to pin one to the other, and
+# AssemblyAI's own captions are used as before.
+CAPTION_MIN_MATCH = 0.5
+
+# A silence this long clears the caption, as the breaks between AssemblyAI's
+# cues did; a shorter one holds the caption until the next word. It is also
+# how much of a neighbouring silence a word AssemblyAI missed may borrow.
+CAPTION_PAUSE_SECONDS = 0.5
+
+# (text, start seconds, end seconds)
+TimedWord = Tuple[str, float, float]
+
+
+def _srt_timestamp(total_seconds: float) -> str:
+    """Seconds in the SRT time format, HH:MM:SS,mmm."""
+    milliseconds_total = int(round(total_seconds * 1000))
+    hours, remainder = divmod(milliseconds_total, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+
+
+def _caption_key(token: str) -> str:
+    """A word as compared rather than shown: no case, accents or punctuation.
+
+    "17L–35R" in the script and "17L/35R" in the transcript are the same
+    word, and so are "number," and "number".
+    """
+    decomposed = unicodedata.normalize("NFKD", token.casefold())
+    return "".join(char for char in decomposed if char.isalnum())
+
+
+def caption_tokens(sentences: List[str]) -> List[str]:
+    """The narrated words as they should be shown, punctuation attached.
+
+    A token with no letters or digits in it, such as a free-standing dash,
+    cannot be matched to anything heard, so it rides along with the word
+    before it.
+    """
+    tokens: List[str] = []
+    leading = ""
+    for token in " ".join(sentences).split():
+        if not _caption_key(token):
+            if tokens:
+                tokens[-1] = f"{tokens[-1]} {token}"
+            else:
+                leading = f"{leading}{token} "
+            continue
+        tokens.append(f"{leading}{token}")
+        leading = ""
+    return tokens
+
+
+def _spread(tokens: List[str], start: float, end: float) -> List[TimedWord]:
+    """Shares a stretch of time between tokens in proportion to their length."""
+    weights = [max(len(token), 1) for token in tokens]
+    total = sum(weights)
+    timed: List[TimedWord] = []
+    cursor = start
+    for token, weight in zip(tokens, weights):
+        share = (end - start) * weight / total
+        timed.append((token, cursor, cursor + share))
+        cursor += share
+    return timed
+
+
+def _borrow_for_missed(
+    tokens: List[str], times: List[Optional[Tuple[float, float]]]
+) -> None:
+    """Times the script words AssemblyAI did not hear, in place.
+
+    Each run of them shares the time of the word before it, plus up to
+    CAPTION_PAUSE_SECONDS of the silence that follows; at the very start, the
+    word after it and the silence before. Never called with every token
+    missing: the alignment is rejected long before that.
+    """
+    index = 0
+    while index < len(tokens):
+        if times[index] is not None:
+            index += 1
+            continue
+        stop = index
+        while stop < len(tokens) and times[stop] is None:
+            stop += 1
+        if index > 0:
+            first, last = index - 1, stop
+            start = times[first][0]
+            end = times[first][1] + CAPTION_PAUSE_SECONDS
+            if stop < len(tokens):
+                end = max(times[first][1], min(end, times[stop][0]))
+        else:
+            first, last = index, stop + 1
+            start = max(0.0, times[stop][0] - CAPTION_PAUSE_SECONDS)
+            end = times[stop][1]
+        for offset, (_, word_start, word_end) in enumerate(
+            _spread(tokens[first:last], start, end)
+        ):
+            times[first + offset] = (word_start, word_end)
+        index = stop
+
+
+def align_script_to_words(
+    tokens: List[str], words: List[Tuple[str, int, int]]
+) -> Optional[List[TimedWord]]:
+    """The script's own words, timed from what AssemblyAI heard.
+
+    Pure. `tokens` is caption_tokens() of the narrated sentences; `words` is
+    AssemblyAI's transcript as (text, start ms, end ms). The two are matched on
+    _caption_key with difflib:
+
+    - where they agree, the script's word takes the transcript's timing;
+    - where they differ ("18L–36R." heard as "ATNL 36R."), the script's words
+      share the time the transcript's words took;
+    - words AssemblyAI added are dropped;
+    - script words it missed borrow time from their neighbours.
+
+    Returns None when there is nothing to align, or when under
+    CAPTION_MIN_MATCH of the script's words were heard as written.
+    """
+    if not tokens or not words:
+        return None
+    matcher = difflib.SequenceMatcher(
+        None,
+        [_caption_key(token) for token in tokens],
+        [_caption_key(text) for text, _, _ in words],
+        # Common words are what pin a long script to its transcript; the
+        # heuristic would ignore them past 200 tokens.
+        autojunk=False,
+    )
+    times: List[Optional[Tuple[float, float]]] = [None] * len(tokens)
+    matched = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            matched += i2 - i1
+            for offset in range(i2 - i1):
+                _, start, end = words[j1 + offset]
+                times[i1 + offset] = (start / 1000, end / 1000)
+        elif tag == "replace":
+            spread = _spread(
+                tokens[i1:i2], words[j1][1] / 1000, words[j2 - 1][2] / 1000
+            )
+            for offset, (_, start, end) in enumerate(spread):
+                times[i1 + offset] = (start, end)
+    if matched < CAPTION_MIN_MATCH * len(tokens):
+        return None
+    _borrow_for_missed(tokens, times)
+    return [(token, start, end) for token, (start, end) in zip(tokens, times)]
+
+
+def build_caption_srt(timed: List[TimedWord], max_chars: int) -> str:
+    """SRT cues of at most `max_chars`, each timed from its own words.
+
+    The words are packed with the greedy rule srt_equalizer re-wraps with,
+    so the lines are the ones viewers saw before. The cut is made here rather
+    than left to srt_equalizer because it times each piece of a cue by its
+    share of the characters, and AssemblyAI's cues run three or four seconds:
+    on the runway Short "About 4" appeared 1.4 s before it was said, because
+    "172.5" before it takes a second and a half to say and five characters to
+    write. Over that video and the coffee one, a caption was on average 0.3 s
+    away from its words.
+
+    A cue never runs across a silence of CAPTION_PAUSE_SECONDS. Inside speech
+    it stays up until the next one starts, so the captions do not blink
+    between words.
+    """
+    groups: List[List[TimedWord]] = []
+    for word in timed:
+        if groups:
+            current = groups[-1]
+            text = " ".join(token for token, _, _ in current)
+            paused = word[1] - current[-1][2] >= CAPTION_PAUSE_SECONDS
+            # srt_equalizer's own test, trailing space included.
+            if not paused and len(text) + 1 + len(word[0]) + 1 <= max_chars:
+                current.append(word)
+                continue
+        groups.append([word])
+
+    cues = []
+    for index, group in enumerate(groups):
+        start, end = group[0][1], group[-1][2]
+        if index + 1 < len(groups):
+            following = groups[index + 1][0][1]
+            if following - end < CAPTION_PAUSE_SECONDS:
+                end = following
+        # srt drops a cue that ends where it starts, which at millisecond
+        # precision a very short word can.
+        end = max(end, start + 0.001)
+        text = " ".join(token for token, _, _ in group)
+        cues.append(
+            f"{len(cues) + 1}\n{_srt_timestamp(start)} --> {_srt_timestamp(end)}\n{text}\n"
+        )
+    return "\n".join(cues)
+
+
+def __generate_subtitles_assemblyai(
+    audio_path: str,
+    voice: str,
+    sentences: Optional[List[str]] = None,
+    max_chars: int = SHORT.subtitle_max_chars,
+) -> str:
     """
     Generates subtitles from a given audio file and returns the path to the subtitles.
 
+    The text is the narrated script's; AssemblyAI supplies the timing. When its
+    words cannot be lined up with the script, its own captions are used.
+
     Args:
         audio_path (str): The path to the audio file to generate subtitles from.
+        voice (str): The voice's language prefix.
+        sentences (List[str]): What was narrated, in order.
+        max_chars (int): Characters per caption.
 
     Returns:
         str: The generated subtitles
@@ -151,9 +366,19 @@ def __generate_subtitles_assemblyai(audio_path: str, voice: str) -> str:
     config = aai.TranscriptionConfig(language_code=lang_code)
     transcriber = aai.Transcriber(config=config)
     transcript = transcriber.transcribe(audio_path)
-    subtitles = transcript.export_subtitles_srt()
 
-    return subtitles
+    heard = [(word.text, word.start, word.end) for word in transcript.words or []]
+    timed = align_script_to_words(caption_tokens(sentences or []), heard)
+    if timed is None:
+        log(
+            "[!] AssemblyAI's words do not line up with the script; using its "
+            "own captions.",
+            "warning",
+        )
+        return transcript.export_subtitles_srt()
+
+    log("[+] Captions use the script's words on AssemblyAI's timing.", "info")
+    return build_caption_srt(timed, max_chars)
 
 
 def __generate_subtitles_locally(
@@ -169,14 +394,6 @@ def __generate_subtitles_locally(
         str: The generated subtitles
     """
 
-    def convert_to_srt_time_format(total_seconds: float) -> str:
-        # Convert total seconds to the SRT time format: HH:MM:SS,mmm
-        milliseconds_total = int(round(total_seconds * 1000))
-        hours, remainder = divmod(milliseconds_total, 3_600_000)
-        minutes, remainder = divmod(remainder, 60_000)
-        seconds, milliseconds = divmod(remainder, 1000)
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
-
     start_time = 0
     subtitles = []
 
@@ -185,7 +402,7 @@ def __generate_subtitles_locally(
         end_time = start_time + duration
 
         # Format: subtitle index, start time --> end time, sentence
-        subtitle_entry = f"{i}\n{convert_to_srt_time_format(start_time)} --> {convert_to_srt_time_format(end_time)}\n{sentence}\n"
+        subtitle_entry = f"{i}\n{_srt_timestamp(start_time)} --> {_srt_timestamp(end_time)}\n{sentence}\n"
         subtitles.append(subtitle_entry)
 
         start_time += duration  # Update start time for the next subtitle
@@ -215,7 +432,8 @@ def generate_subtitles(
 
     def equalize_subtitles(srt_path: str, width: int) -> None:
         # Re-wrap the cues. Shorts want one word at a time; longer videos want
-        # readable lines.
+        # readable lines. Captions aligned to the script arrive cut to this
+        # width already (build_caption_srt), and pass through unchanged.
         srt_equalizer.equalize_srt_file(srt_path, srt_path, width)
 
     # Save subtitles
@@ -224,7 +442,9 @@ def generate_subtitles(
 
     if ASSEMBLY_AI_API_KEY is not None and ASSEMBLY_AI_API_KEY != "":
         log("[+] Creating subtitles using AssemblyAI", "info")
-        subtitles = __generate_subtitles_assemblyai(audio_path, voice)
+        subtitles = __generate_subtitles_assemblyai(
+            audio_path, voice, sentences, max_chars
+        )
     else:
         log("[+] Creating subtitles locally", "info")
         subtitles = __generate_subtitles_locally(sentences, audio_clips)

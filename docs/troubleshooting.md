@@ -46,6 +46,9 @@ first four seconds of a clip. The job carries on. The footage timeline in
 
 - If using AssemblyAI, verify `ASSEMBLY_AI_API_KEY`
 - If not using AssemblyAI, local subtitle generation should still work
+- `AssemblyAI's words do not line up with the script` means fewer than half the
+  script's words were heard as written, so the subtitles show AssemblyAI's
+  transcript, with its spelling, rather than the script
 
 ## YouTube upload skipped
 
