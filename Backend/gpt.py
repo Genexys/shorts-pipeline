@@ -1535,29 +1535,98 @@ def append_hashtags(description: str, hashtags: List[str]) -> str:
     return f"{body[:room]}\n\n{block}"
 
 
-# How much of the script the metadata model needs to see. Five keywords and two
-# sentences of summary do not need eight hundred words of context, and asking
-# for them with that much cost the tags outright: both long videos published on
-# 2026-09-14 came back with a valid title and description and no tags at all,
-# while every Short that day — same prompt, ninety words — got five to seven.
-# Cut on sentence boundaries, so the model never reads a half-sentence.
+# How much of the script the local model sees when it has to write the
+# metadata. Five keywords and two sentences of summary do not need eight hundred
+# words of context, and asking an 8B model for them with that much cost the tags
+# outright: both long videos published on 2026-09-14 came back with a valid
+# title and description and no tags at all, while every Short that day — same
+# prompt, ninety words — got five to seven. Cut on sentence boundaries, so the
+# model never reads a half-sentence.
+#
+# The writer is not held to it. Two hundred words of a long script are its
+# first two sections, and on 2026-10-01 a video about the first CT scan went up
+# as "The Dawn of Radiography", with a description and tags about Röntgen: the
+# sections it was shown were the X-ray backstory, and the scan itself arrived
+# in section seven.
 METADATA_SCRIPT_WORDS = 200
 
 
-def metadata_excerpt(script: str) -> str:
+def metadata_excerpt(script: str, limit: int = METADATA_SCRIPT_WORDS) -> str:
     """As much of the script as the metadata model should read.
 
     Cut on a sentence boundary where there is one, and hard at the word count
     where there is not: trim_to_words never drops a script's first sentence, so
     a script written as one very long sentence would otherwise arrive whole.
     """
-    excerpt = trim_to_words(
-        script or "", METADATA_SCRIPT_WORDS, ceiling=METADATA_SCRIPT_WORDS
-    )
+    excerpt = trim_to_words(script or "", limit, ceiling=limit)
     words = excerpt.split()
-    if len(words) <= METADATA_SCRIPT_WORDS:
+    if len(words) <= limit:
         return excerpt
-    return " ".join(words[:METADATA_SCRIPT_WORDS])
+    return " ".join(words[:limit])
+
+
+# What the metadata may say, which is only ever what the script says. Each rule
+# is a published description or title from the week of 2026-09-27, all written
+# by the local model, and five of the eight statements on that week's videos
+# that needed a correction were in metadata rather than narration:
+#
+# - "The metre was initially defined by a platinum bar, but not for its length"
+#   — in neither the script nor its sources, and false twice over.
+# - "they published the IEEE 802.3-1985 Standard", of DEC, Intel and Xerox. The
+#   IEEE published it; the script never said otherwise.
+# - "Edison's Hydroelectric Rival", for a plant built under Edison's licence on
+#   Edison's dynamos, and "more cost-effective in the long run", which history
+#   reversed.
+# - "creating the first pacemaker by mistake", where the source said "helped
+#   create" and the first implant was someone else's.
+# - "it's actually the same size as when it's overhead", under a script whose
+#   first line says the horizon Moon is farther away and smaller.
+METADATA_RULES = """
+    - The script is the authority. The subject is only the question the video
+      started from, and the script may have found its premise false or unproven.
+    - Every statement in the title and description must be one the script
+      makes. Add nothing to it: no date, cause, consequence, comparison,
+      verdict or detail the script does not state, and nothing from the subject
+      line that the script does not repeat.
+    - Never make a claim stronger than the script makes it. Use "first",
+      "invented", "only", "unique" or "the world's" only where the script uses
+      that word for the same thing. "Helped create" stays "helped create", and
+      "may" stays "may".
+    - Do not describe how people or organisations stood towards each other —
+      rival, enemy, partner, inspiration — unless the script does.
+"""
+
+
+def metadata_prompt(
+    video_subject: str, script: str, format_label: str, whole: bool
+) -> str:
+    """The metadata request, over the whole script or the local model's excerpt."""
+    scope = (
+        "    - title: name what the whole video is about, not only its opening.\n"
+        if whole
+        else ""
+    )
+    return f"""
+    You write metadata for a {format_label}.
+
+    Subject: {video_subject}
+
+    Script:
+    {script if whole else metadata_excerpt(script)}
+
+    Return ONLY a JSON object with exactly these keys:
+    {{"title": "...", "description": "...", "tags": ["...", "..."]}}
+
+    Rules:
+{METADATA_RULES}    - title: catchy, at most 70 characters, plain text, no hashtags, no quotes, no emojis.
+      It must agree with the script: never assert something the script shows is
+      not so.
+{scope}    - description: 2-3 sentences that summarize the video, plain text, no hashtags (they are appended automatically). Summarise what the script concludes, not what the subject assumes.
+    - tags: 5 to 10 short keywords, each 1-3 ordinary words separated by
+      spaces. No hyphens, no underscores, no commas inside a tag.
+      Write "blue sky", not "blue-sky".
+    - Do not add any text before or after the JSON object.
+    """
 
 
 def generate_metadata(
@@ -1571,34 +1640,22 @@ def generate_metadata(
     """
     Generate YouTube title, description and tags with a single JSON request.
 
+    Written by the stronger model, reading the whole script, when one is
+    configured. This was the local model's job on the grounds that metadata is
+    structured extraction, and the title and description are not: they are the
+    two claims every viewer reads, and the week of 2026-09-27 put more false
+    statements into them than into the narration (see METADATA_RULES). The
+    local model still writes them when the writer cannot, from the excerpt it
+    can manage.
+
     Returns:
         Tuple[str, str, List[str]]: validated (title, description, tags).
     """
-    prompt = f"""
-    You write metadata for a {format_label}.
-
-    Subject: {video_subject}
-
-    Script:
-    {metadata_excerpt(script)}
-
-    Return ONLY a JSON object with exactly these keys:
-    {{"title": "...", "description": "...", "tags": ["...", "..."]}}
-
-    Rules:
-    - The script is the authority. The subject is only the question the video
-      started from, and the script may have found its premise false or unproven.
-    - title: catchy, at most 70 characters, plain text, no hashtags, no quotes, no emojis.
-      It must agree with the script: never assert something the script shows is
-      not so.
-    - description: 2-3 sentences that summarize the video, plain text, no hashtags (they are appended automatically). Summarise what the script concludes, not what the subject assumes.
-    - tags: 5 to 10 short keywords, each 1-3 ordinary words separated by
-      spaces. No hyphens, no underscores, no commas inside a tag.
-      Write "blue sky", not "blue-sky".
-    - Do not add any text before or after the JSON object.
-    """
-
-    response = generate_response(prompt, ai_model)
+    response = writer.write(metadata_prompt(video_subject, script, format_label, True))
+    if not response:
+        response = generate_response(
+            metadata_prompt(video_subject, script, format_label, False), ai_model
+        )
 
     raw = extract_json_object(response)
     if raw is None:
