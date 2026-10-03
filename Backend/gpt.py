@@ -2,6 +2,7 @@ import re
 import os
 import json
 import random
+import unicodedata
 from ollama import Client, ResponseError
 
 from dotenv import load_dotenv
@@ -1471,6 +1472,34 @@ def validate_metadata(
     return title, description, tags
 
 
+# Letters NFKD leaves whole, because they are letters in their own right rather
+# than a base letter carrying an accent. Without these, Ørsted would still come
+# out as "rsted".
+UNDECOMPOSED_LETTERS = str.maketrans(
+    {
+        "ß": "ss", "ø": "o", "Ø": "O", "ł": "l", "Ł": "L", "æ": "ae", "Æ": "Ae",
+        "œ": "oe", "Œ": "Oe", "đ": "d", "Đ": "D", "ð": "d", "Ð": "D",
+        "þ": "th", "Þ": "Th", "ı": "i",
+    }
+)
+
+
+def ascii_words(text: str) -> List[str]:
+    """The runs of ASCII letters and digits in `text`, accents folded, not lost.
+
+    Hashtags and keywords are cut from ASCII alphanumerics, and an accented
+    letter used to count as a separator: on 2026-10-01 the long CT-scanner
+    video was published with #WilhelmRNtgen, because "Röntgen" split at the ö
+    into "R" and "ntgen". Decomposing first and dropping the combining marks
+    turns it into "Rontgen", the spelling an English search would use anyway.
+    """
+    decomposed = unicodedata.normalize(
+        "NFKD", (text or "").translate(UNDECOMPOSED_LETTERS)
+    )
+    folded = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return re.findall(r"[A-Za-z0-9]+", folded)
+
+
 def keywords_from_subject(
     subject: str, limit: int = SUBJECT_KEYWORD_COUNT
 ) -> List[str]:
@@ -1480,7 +1509,7 @@ def keywords_from_subject(
     back without usable tags, and a video with four topical keywords is worth
     considerably more than one with none.
     """
-    words = re.findall(r"[A-Za-z0-9]+", subject or "")
+    words = ascii_words(subject)
     keywords: List[str] = []
     seen: set[str] = set()
     for word in words:
@@ -1502,7 +1531,7 @@ def to_hashtag(text: str) -> str:
     YouTube hashtags cannot contain spaces or punctuation, so the words are
     stripped to alphanumerics and joined in CamelCase.
     """
-    words = re.findall(r"[A-Za-z0-9]+", text or "")
+    words = ascii_words(text)
     if not words:
         return ""
     hashtag = "#" + "".join(word[:1].upper() + word[1:] for word in words)
