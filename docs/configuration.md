@@ -13,6 +13,7 @@ Use `.env.example` as your template.
 | `PIXABAY_API_KEY` | *Optional.* A second stock library, merged with Pexels. Empty uses Pexels alone. Long videos need it — see [Stock footage](#stock-footage). |
 | `ANTHROPIC_API_KEY` | *Optional.* Writes the topic and the script with a stronger model — see [The writer](#the-writer). Empty keeps everything on Ollama. |
 | `SCRIPT_MODEL` | *Optional.* Model for those two calls. | `claude-opus-5` |
+| `SCRIPT_FALLBACK_MODEL` | *Optional.* Second Claude model, used only while `SCRIPT_MODEL` is overloaded or down — see [The writer](#the-writer). Unset uses the default; set to an empty value to go straight to Ollama instead. | `claude-sonnet-5-5` |
 | `FIRECRAWL_API_KEY` | *Optional.* Grounds scripts in real search results and lists the sources in the description — see [Research](#research). Empty writes scripts with no specifics at all. |
 
 ## Optional
@@ -297,8 +298,40 @@ were, and telling those apart is exactly the discrimination a small model
 lacks. It can write joke-shaped text; it cannot reliably tell whether the joke
 landed.
 
-Failure is never fatal. A missing key, a rate limit, an outage or a refusal all
-fall back to Ollama for that call — a video written locally beats no video.
+Failure is never fatal: whatever happens, the call ends with some model's text
+— a video written locally beats no video. But the local model is the last
+resort, not the first, and what happens before it depends on what went wrong.
+
+**Overload or outage.** A 529, 500, 502, 503 or 504, a rate limit (429), a
+dropped connection or a timeout is waited out: the primary model is asked again
+after 30 s, 60 s and 120 s (`OUTAGE_BACKOFF_SECONDS` in `Backend/writer.py`),
+three and a half minutes in all. The SDK's own retries are off for these
+requests; they are a fraction of a second apart, and on 2026-09-28 they gave up
+on an overloaded Opus at once, so llama3.1:8b wrote five of a long video's
+eight sections and its search terms.
+
+If the ladder runs out, `SCRIPT_FALLBACK_MODEL` (Sonnet by default) writes the
+call, with only the SDK's quick retries. The process then remembers the outage
+for ten minutes: every call in that time goes straight to the fallback model
+without climbing the ladder again, since a long video makes eight section calls
+and the search terms, and three and a half minutes each would hold the queue
+for half an hour. Only if the fallback model fails too does Ollama write. With
+`SCRIPT_FALLBACK_MODEL` set to an empty value, Ollama writes instead, and still
+without the ladder for those ten minutes.
+
+**Refusal.** Asked once more with the purpose of the request stated, as before.
+A refusal is not an outage: no waiting, no fallback model, and a second refusal
+goes to Ollama.
+
+Anything else — an unknown model, a malformed request, an empty answer — goes
+to Ollama at once, as before.
+
+**Who wrote it.** The script records the model that actually wrote it
+(`scriptModel` on the video artifact). A long script is written a section at a
+time and can change hands part way, so it is filed under its weakest writer,
+ranked local < fallback Claude < primary: Opus and Sonnet make a Sonnet script,
+and any section by Ollama makes an Ollama script. The video artifact carries
+`scriptFellBack` when the primary did not write it, as before.
 
 At three videos a day this is roughly 240k input and 32k output tokens a month:
 about two dollars on the default model, and noise beside the narration bill.

@@ -519,7 +519,10 @@ def test_long_script_reports_the_model_that_wrote(monkeypatch):
     # https://youtu.be/Pk7gdtLRH7A went out marked "written by llama3.1:8b"
     # when Opus had written every section of it.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
-    monkeypatch.setattr(gpt.writer, "write", lambda prompt: "A section of prose.")
+    monkeypatch.setattr(
+        gpt.writer, "write",
+        lambda prompt: gpt.writer.Written("A section of prose.", "claude-opus-5"),
+    )
     monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two"])
 
     seen = []
@@ -534,7 +537,7 @@ def test_long_script_reports_the_model_that_wrote(monkeypatch):
 def test_long_script_reports_a_fallback_in_any_section(monkeypatch):
     # Part Opus and part Ollama is not an Opus script.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
-    drafts = iter(["A section of prose.", None])
+    drafts = iter([gpt.writer.Written("A section of prose.", "claude-opus-5"), None])
     monkeypatch.setattr(gpt.writer, "write", lambda prompt: next(drafts))
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: "A local section.")
     monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two"])

@@ -67,7 +67,7 @@ def test_scrub_removes_the_key(monkeypatch):
 def test_write_returns_the_text(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
     _patch_client(monkeypatch, response=_Response("A script."))
-    assert writer.write("prompt") == "A script."
+    assert writer.write("prompt") == ("A script.", "claude-opus-5")
 
 
 def test_write_survives_an_api_failure(monkeypatch):
@@ -100,7 +100,9 @@ def test_creative_calls_fall_back_to_ollama(monkeypatch):
 
 
 def test_creative_calls_prefer_the_stronger_model(monkeypatch):
-    monkeypatch.setattr(writer, "write", lambda prompt: "from claude")
+    monkeypatch.setattr(
+        writer, "write", lambda prompt: writer.Written("from claude", "claude-opus-5")
+    )
     monkeypatch.setattr(
         gpt, "generate_response",
         lambda p, m: pytest.fail("should not have asked Ollama"),
@@ -113,7 +115,10 @@ def test_search_terms_go_through_the_creative_path(monkeypatch):
     # returned "sulfur compounds" and "lacrimal glands" where the stronger one
     # returned "onion slices closeup" and "knife cutting board".
     monkeypatch.setattr(
-        writer, "write", lambda prompt: '["chopping onion", "knife cutting board"]'
+        writer, "write",
+        lambda prompt: writer.Written(
+            '["chopping onion", "knife cutting board"]', "claude-opus-5"
+        ),
     )
     monkeypatch.setattr(
         gpt, "generate_response",
@@ -138,7 +143,9 @@ def test_write_creative_reports_the_model_that_wrote(monkeypatch):
 
     seen = []
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
-    monkeypatch.setattr(gpt.writer, "write", lambda prompt: "Written by Opus.")
+    monkeypatch.setattr(
+        gpt.writer, "write", lambda prompt: writer.Written("Written by Opus.", "claude-opus-5")
+    )
 
     text = gpt.write_creative("p", "llama3.1:8b", report_model=seen.append)
 
@@ -195,7 +202,7 @@ def test_write_retries_once_when_the_model_declines(monkeypatch):
         [_Response(None, stop_reason="refusal"), _Response("A script.")],
     )
 
-    assert writer.write("Subject: painted cows") == "A script."
+    assert writer.write("Subject: painted cows") == ("A script.", "claude-opus-5")
     assert len(sent) == 2
     assert sent[0] == "Subject: painted cows"
     # The retry says what the request is for, and still carries the original.
@@ -214,12 +221,13 @@ def test_write_gives_up_after_a_second_refusal(monkeypatch):
     assert len(sent) == 2
 
 
-def test_write_does_not_retry_a_network_failure(monkeypatch):
-    # Rewording will not fix a timeout, and the caller has a local model
-    # waiting. Only a refusal is worth asking differently.
+def test_write_does_not_retry_an_unrecognised_failure(monkeypatch):
+    # Rewording will not fix a failure, and only an overload or a dropped
+    # connection is worth waiting out (see test_writer_resilience.py). Anything
+    # else goes to the local model at once.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
     calls = []
-    _patch_client(monkeypatch, error=RuntimeError("connection reset"), recorder=calls)
+    _patch_client(monkeypatch, error=RuntimeError("something broke"), recorder=calls)
 
     assert writer.write("Subject: anything") is None
     # One client, one create; a second attempt would add two more entries.
@@ -230,5 +238,5 @@ def test_write_does_not_retry_a_first_attempt_that_worked(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
     sent = _patch_sequence(monkeypatch, [_Response("A script.")])
 
-    assert writer.write("Subject: anything") == "A script."
+    assert writer.write("Subject: anything") == ("A script.", "claude-opus-5")
     assert len(sent) == 1
