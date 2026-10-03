@@ -108,7 +108,7 @@ def write_creative(
     The writer says which Claude model answered, since the fallback model
     stands in for the primary when that one is overloaded.
     """
-    written = writer.write(prompt)
+    written = writer.write_with_model(prompt)
     if written:
         if report_model:
             report_model(written.model)

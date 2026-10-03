@@ -150,7 +150,7 @@ def test_an_overload_is_waited_out_on_the_primary(env):
     # sub-second retries gave up at once; llama wrote five of eight sections.
     calls = env.calls(primary=[_status_error(529), _status_error(529), _Response("Opus.")])
 
-    assert writer.write("prompt") == writer.Written("Opus.", PRIMARY)
+    assert writer.write_with_model("prompt") == writer.Written("Opus.", PRIMARY)
     assert env.sleeps == [30, 60]
     assert calls.models() == [PRIMARY] * 3
     # The ladder is the retry policy; the SDK's own retries would triple it.
@@ -174,14 +174,14 @@ def test_an_overload_is_waited_out_on_the_primary(env):
 def test_every_kind_of_outage_climbs_the_ladder(env, error):
     env.calls(primary=[error, _Response("Opus.")])
 
-    assert writer.write("prompt") == writer.Written("Opus.", PRIMARY)
+    assert writer.write_with_model("prompt") == writer.Written("Opus.", PRIMARY)
     assert env.sleeps == [30]
 
 
 def test_an_exhausted_ladder_hands_over_to_the_fallback_model(env):
     calls = env.calls(primary=[_status_error(529)] * 4, fallback=[_Response("Sonnet.")])
 
-    assert writer.write("prompt") == writer.Written("Sonnet.", FALLBACK)
+    assert writer.write_with_model("prompt") == writer.Written("Sonnet.", FALLBACK)
     assert env.sleeps == list(writer.OUTAGE_BACKOFF_SECONDS)
     assert calls.models() == [PRIMARY] * 4 + [FALLBACK]
     # The fallback keeps the SDK's quick retries for a blip, and no ladder.
@@ -196,12 +196,12 @@ def test_later_calls_skip_the_ladder_while_the_outage_is_remembered(env):
         fallback=[_Response("One."), _Response("Two."), _Response("Three.")],
     )
 
-    writer.write("section one")
+    writer.write_with_model("section one")
     env.sleeps.clear()
     env.clock.now += writer.OUTAGE_MEMORY_SECONDS - 60
 
-    assert writer.write("section two") == writer.Written("Two.", FALLBACK)
-    assert writer.write("section three") == writer.Written("Three.", FALLBACK)
+    assert writer.write_with_model("section two") == writer.Written("Two.", FALLBACK)
+    assert writer.write_with_model("section three") == writer.Written("Three.", FALLBACK)
     assert env.sleeps == []
     assert calls.models().count(PRIMARY) == 4
 
@@ -212,17 +212,17 @@ def test_the_primary_is_tried_again_once_the_memory_lapses(env):
         fallback=[_Response("Sonnet.")],
     )
 
-    writer.write("first")
+    writer.write_with_model("first")
     env.clock.now += writer.OUTAGE_MEMORY_SECONDS + 1
 
-    assert writer.write("later") == writer.Written("Opus is back.", PRIMARY)
+    assert writer.write_with_model("later") == writer.Written("Opus is back.", PRIMARY)
     assert calls.models()[-1] == PRIMARY
 
 
 def test_a_failed_fallback_leaves_the_call_to_the_local_model(env):
     env.calls(primary=[_status_error(529)] * 4, fallback=[_status_error(529)])
 
-    assert writer.write("prompt") is None
+    assert writer.write_with_model("prompt") is None
 
 
 def test_an_empty_fallback_setting_goes_straight_to_the_local_model(env, monkeypatch):
@@ -230,10 +230,10 @@ def test_an_empty_fallback_setting_goes_straight_to_the_local_model(env, monkeyp
     calls = env.calls(primary=[_status_error(529)] * 4)
 
     assert writer.fallback_model_name() == ""
-    assert writer.write("prompt") is None
+    assert writer.write_with_model("prompt") is None
     # And during the outage, without waiting through the ladder again.
     env.sleeps.clear()
-    assert writer.write("next") is None
+    assert writer.write_with_model("next") is None
     assert env.sleeps == []
     assert calls.models() == [PRIMARY] * 4
 
@@ -255,7 +255,7 @@ def test_a_refusal_is_not_an_outage(env):
         primary=[_Response(None, stop_reason="refusal"), _Response("A script.")]
     )
 
-    assert writer.write("Subject: painted cows") == writer.Written("A script.", PRIMARY)
+    assert writer.write_with_model("Subject: painted cows") == writer.Written("A script.", PRIMARY)
     assert env.sleeps == []
     assert calls.models() == [PRIMARY, PRIMARY]
     assert writer.RETRY_PREAMBLE in calls.requests[1][2]
@@ -293,14 +293,14 @@ def test_the_real_sdk_retries_nothing_behind_the_ladder(env, monkeypatch):
 
     monkeypatch.setattr(writer, "_client", client)
 
-    assert writer.write("prompt") == writer.Written("Sonnet.", FALLBACK)
+    assert writer.write_with_model("prompt") == writer.Written("Sonnet.", FALLBACK)
     assert sent == [PRIMARY] * 4 + [FALLBACK]
 
 
 def test_a_request_error_is_neither_waited_out_nor_handed_over(env):
     calls = env.calls(primary=[_status_error(404, "model: nope", "not_found_error")])
 
-    assert writer.write("prompt") is None
+    assert writer.write_with_model("prompt") is None
     assert env.sleeps == []
     assert calls.models() == [PRIMARY]
 
@@ -313,7 +313,7 @@ def test_an_empty_balance_alerts_the_owner_and_skips_the_fallback(env):
     # nobody knew until a video was reviewed by hand.
     calls = env.calls(primary=[_status_error(400, CREDIT_MESSAGE, "invalid_request_error")])
 
-    assert writer.write("prompt") is None
+    assert writer.write_with_model("prompt") is None
     # The fallback model bills the same account, and waiting will not refill it.
     assert calls.models() == [PRIMARY]
     assert env.sleeps == []
@@ -327,13 +327,13 @@ def test_the_alert_is_sent_once_every_few_hours(env):
     credit = _status_error(400, CREDIT_MESSAGE, "invalid_request_error")
     env.calls(primary=[credit] * 3)
 
-    writer.write("one")
+    writer.write_with_model("one")
     env.clock.now += 60
-    writer.write("two")
+    writer.write_with_model("two")
     assert len(env.alerts) == 1
 
     env.clock.now += writer.ACCOUNT_ALERT_INTERVAL_SECONDS
-    writer.write("three")
+    writer.write_with_model("three")
     assert len(env.alerts) == 2
 
 
@@ -349,7 +349,7 @@ def test_the_alert_is_sent_once_every_few_hours(env):
 def test_key_and_billing_errors_are_account_problems(env, error):
     calls = env.calls(primary=[error])
 
-    assert writer.write("prompt") is None
+    assert writer.write_with_model("prompt") is None
     assert calls.models() == [PRIMARY]
     assert len(env.alerts) == 1
 
@@ -357,7 +357,7 @@ def test_key_and_billing_errors_are_account_problems(env, error):
 def test_a_rejected_key_is_reported_as_the_key(env):
     env.calls(primary=[_status_error(401, "invalid x-api-key", "authentication_error")])
 
-    writer.write("prompt")
+    writer.write_with_model("prompt")
 
     assert "API key" in env.alerts[0]
     assert "local model" in env.alerts[0]
@@ -366,14 +366,14 @@ def test_a_rejected_key_is_reported_as_the_key(env):
 def test_an_ordinary_bad_request_is_not_an_account_problem(env):
     env.calls(primary=[_status_error(400, "max_tokens: too large", "invalid_request_error")])
 
-    assert writer.write("prompt") is None
+    assert writer.write_with_model("prompt") is None
     assert env.alerts == []
 
 
 def test_the_alert_never_carries_the_key(env):
     env.calls(primary=[_status_error(401, "bad key sk-test-key", "authentication_error")])
 
-    writer.write("prompt")
+    writer.write_with_model("prompt")
 
     assert "sk-test-key" not in env.alerts[0]
 
@@ -385,7 +385,7 @@ def test_a_failing_alert_does_not_fail_the_call(env, monkeypatch):
     monkeypatch.setattr(writer, "send_telegram", broken)
     env.calls(primary=[_status_error(400, CREDIT_MESSAGE, "invalid_request_error")])
 
-    assert writer.write("prompt") is None
+    assert writer.write_with_model("prompt") is None
 
 
 # -- who wrote it ------------------------------------------------------------
@@ -406,7 +406,7 @@ def test_the_weakest_writer_wins(env):
 
 
 def test_write_creative_reports_the_fallback_model_that_wrote(env, monkeypatch):
-    monkeypatch.setattr(writer, "write", lambda prompt: writer.Written("By Sonnet.", FALLBACK))
+    monkeypatch.setattr(writer, "write_with_model", lambda prompt: writer.Written("By Sonnet.", FALLBACK))
     seen = []
 
     assert gpt.write_creative("p", "llama3.1:8b", report_model=seen.append) == "By Sonnet."
@@ -423,7 +423,7 @@ def test_a_long_script_reports_its_weakest_section(env, monkeypatch):
             None,
         ]
     )
-    monkeypatch.setattr(writer, "write", lambda prompt: next(drafts))
+    monkeypatch.setattr(writer, "write_with_model", lambda prompt: next(drafts))
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: "Local prose.")
     monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two", "Three"])
     seen = []
@@ -438,7 +438,7 @@ def test_a_long_script_reports_its_weakest_section(env, monkeypatch):
 
 def test_a_long_script_part_sonnet_is_reported_as_sonnet(env, monkeypatch):
     drafts = iter([writer.Written("Opus prose.", PRIMARY), writer.Written("Sonnet.", FALLBACK)])
-    monkeypatch.setattr(writer, "write", lambda prompt: next(drafts))
+    monkeypatch.setattr(writer, "write_with_model", lambda prompt: next(drafts))
     monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two"])
     seen = []
 

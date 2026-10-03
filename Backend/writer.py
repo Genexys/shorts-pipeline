@@ -304,7 +304,7 @@ def _ask(model: str, prompt: str, patient: bool) -> Tuple[Optional[str], str]:
     return text, kind
 
 
-def write(prompt: str) -> Optional[Written]:
+def write_with_model(prompt: str) -> Optional[Written]:
     """One completion from a Claude model, and which one; None if none can be had.
 
     Never raises. The primary is waited out through an overload, then the
@@ -350,3 +350,13 @@ def write(prompt: str) -> Optional[Written]:
     if kind == OUTAGE:
         log(f"[!] {fallback} unavailable too; the local model writes this one.", "warning")
     return None
+
+
+def write(prompt: str) -> Optional[str]:
+    """The completion alone, for callers that do not record who wrote it.
+
+    The metadata and the source judge only need the words; write_creative,
+    which files a script under its author, uses write_with_model.
+    """
+    written = write_with_model(prompt)
+    return written.text if written else None
