@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from logstream import log
 from speech import split_sentences
 import writer
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 from utils import ENV_FILE, MUSIC_MOODS
 
 # Load environment variables
@@ -453,15 +453,111 @@ def clean_script_text(response: str) -> str:
     cleaned = re.sub(r"\(.*\)", "", cleaned)
     return SCRIPT_PREAMBLE_RE.sub("", cleaned)
 
-_DIGITS = re.compile(r"\d[\d,.]*")
+# A figure, without the punctuation that follows it: "30." ending one sentence
+# and "30," inside another are the same number.
+_DIGITS = re.compile(r"\d(?:[\d,.]*\d)?")
 
 
 def _same_sentence(a: str, b: str) -> bool:
     return " ".join(a.split()).lower() == " ".join(b.split()).lower()
 
 
+_NAME_EDGES = ",;:!?.\"“”‘’()[]—–-"
+
+
+def names_in(script: str) -> set:
+    """Capitalised words that are names, places or months, as far as case shows.
+
+    Crude on purpose. A word opening a sentence is capitalised whatever it is,
+    so it counts only when it is visibly a name: possessive ("Denver's") or
+    followed by another capitalised word ("Wilson Greatbatch"). That misses a
+    lone name at the start of a sentence, which is the price of not flagging
+    every "Steam" and "Bees". It only has to notice that a cut removed
+    "Vulcan Street"; a capitalised common word caught alongside costs nothing
+    but a slightly longer script.
+    """
+    found = set()
+    for sentence in split_sentences(script or ""):
+        words = [word.strip(_NAME_EDGES) for word in sentence.split()]
+        for index, word in enumerate(words):
+            name = re.sub(r"[’']s$", "", word)
+            if len(name) < 3 or not name[:1].isupper():
+                continue
+            if index == 0:
+                following = words[1] if len(words) > 1 else ""
+                if name == word and not following[:1].isupper():
+                    continue
+            found.add(name)
+    return found
+
+
+def names_dropped(draft: str, cut: str) -> List[str]:
+    """Names in the draft that appear nowhere in the cut, in any position."""
+    return sorted(
+        name
+        for name in names_in(draft)
+        if not re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", cut)
+    )
+
+
+def _cut_prompt(
+    script: str, target: int, floor: int, subject: str, keep: Sequence[str] = ()
+) -> str:
+    written = len(script.split())
+    question = (
+        f"\n    The video answers this: {subject.strip()}\n" if subject.strip() else ""
+    )
+    keep_line = (
+        f"\n    Your last cut removed {', '.join(keep)}. Every one of them stays this"
+        f" time.\n"
+        if keep
+        else ""
+    )
+    return f"""
+    This narration script is {written} words. Cut it to about {target} words,
+    and no fewer than {floor}.
+{question}
+    Keep the first sentence exactly as it is, and keep the final paragraph
+    exactly as it is: the first sentence is the hook and the final paragraph is
+    the point. Cut from the middle instead — a restatement, a second example of
+    the same thing, a secondary figure, a clause that qualifies without adding.
+
+    Some things are never cut:
+    - Anything a sentence you keep points back to: if "the difference", "this",
+      "both" or "that" stays, so does what it names.
+    - The detail that makes the story surprising or funny. Cut the explanation
+      around it instead. An official calling an idea impractical and funding it
+      anyway is what the video is for.
+    - Whatever answers the question above, all of it, including the half people
+      forget to ask: why a mirror swaps left and right but not up and down, or
+      why a glass sweats more on a humid day.
+    - Who built, made, ran, owned or discovered something, and who a named
+      person is.
+    - Any word that narrows a claim: only, one, some, partly, may, in North
+      America, until the other was ready. Without it the claim is broader than
+      the facts, and false.
+    - The real case that shows something actually happened. Keep it over a
+      hypothetical example.
+    If reaching {target} words would cost any of these, stop above it. A longer
+    script is fine; a wrong one is not.
+{keep_line}
+    Do not add anything, do not reword what you keep beyond what the cut
+    requires, and do not change any fact or number.
+
+    Return only the script, keeping its paragraph breaks.
+
+    Script:
+    {script}
+    """
+
+
 def tighten_script(
-    script: str, target: int, max_words: int, floor: int, ai_model: str
+    script: str,
+    target: int,
+    max_words: int,
+    floor: int,
+    ai_model: str,
+    subject: str = "",
 ) -> Optional[str]:
     """The writer's own cut of an overlong draft, or None if it cannot be trusted.
 
@@ -486,55 +582,60 @@ def tighten_script(
     Kept only if it is within the length, keeps the first sentence and the last
     sentence as they were, and introduces no figure the draft did not have.
     Otherwise the trim below still runs, as it always did.
+
+    Told what is never cut, it still cut names. On 2026-09-30 the Appleton
+    Short lost "The Appleton Edison Electric Light Company incorporated that
+    May" and "A second followed on Vulcan Street in November", and with them
+    every sign that the plant ran on Edison's system; it went up titled as
+    Edison's rival. A missing name is where a misattribution starts, and it is
+    the one loss a check can see. So a cut that drops one is asked for once
+    more, with the names listed. If the second cut drops them too and the draft already fits
+    under the ceiling, the draft stands: keeping it costs a few seconds. Over
+    the ceiling the alternative is the trim, which cuts the ending, and the cut
+    is kept.
     """
-    written = len(script.split())
-    prompt = f"""
-    This narration script is {written} words. Cut it to about {target} words,
-    and no fewer than {floor}.
+    def ask(keep: Sequence[str] = ()) -> Optional[str]:
+        try:
+            response = write_creative(
+                _cut_prompt(script, target, floor, subject, keep), ai_model
+            )
+        except Exception as err:
+            log(f"[!] Could not tighten the script ({err}); trimming instead.", "warning")
+            return None
+        tightened = clean_script_text(response or "").strip()
+        tightened = re.sub(r"[ \t]+", " ", tightened)
+        count = len(tightened.split())
+        before_sentences = split_sentences(script)
+        after_sentences = split_sentences(tightened)
+        reasons = []
+        if not floor <= count <= max_words:
+            reasons.append(f"{count} words")
+        if not after_sentences or not _same_sentence(after_sentences[0], before_sentences[0]):
+            reasons.append("changed the opening")
+        if not after_sentences or not _same_sentence(after_sentences[-1], before_sentences[-1]):
+            reasons.append("changed the ending")
+        if not set(_DIGITS.findall(tightened)) <= set(_DIGITS.findall(script)):
+            reasons.append("introduced a figure")
+        if reasons:
+            log(f"[!] Rejected the tightened script ({', '.join(reasons)}); trimming instead.", "warning")
+            return None
+        return tightened
 
-    Keep the first sentence exactly as it is, and keep the final paragraph
-    exactly as it is: the first sentence is the hook and the final paragraph is
-    the point. Cut from the middle instead — a restatement, a second example of
-    the same thing, a secondary figure, a clause that qualifies without adding.
-
-    Two things are never cut. First, anything a sentence you keep points back
-    to: if "the difference", "this", "both" or "that" stays, so does what it
-    names. Second, the detail that makes the story surprising or funny — cut
-    the explanation around it instead. An official calling an idea impractical
-    and funding it anyway is what the video is for.
-
-    Do not add anything, do not reword what you keep beyond what the cut
-    requires, and do not change any fact or number.
-
-    Return only the script, keeping its paragraph breaks.
-
-    Script:
-    {script}
-    """
-    try:
-        response = write_creative(prompt, ai_model)
-    except Exception as err:
-        log(f"[!] Could not tighten the script ({err}); trimming instead.", "warning")
+    tightened = ask()
+    if tightened is None:
         return None
+    dropped = names_dropped(script, tightened)
+    if not dropped:
+        return tightened
 
-    tightened = clean_script_text(response or "").strip()
-    tightened = re.sub(r"[ \t]+", " ", tightened)
-    count = len(tightened.split())
-    before_sentences = split_sentences(script)
-    after_sentences = split_sentences(tightened)
-    reasons = []
-    if not floor <= count <= max_words:
-        reasons.append(f"{count} words")
-    if not after_sentences or not _same_sentence(after_sentences[0], before_sentences[0]):
-        reasons.append("changed the opening")
-    if not after_sentences or not _same_sentence(after_sentences[-1], before_sentences[-1]):
-        reasons.append("changed the ending")
-    if not set(_DIGITS.findall(tightened)) <= set(_DIGITS.findall(script)):
-        reasons.append("introduced a figure")
-    if reasons:
-        log(f"[!] Rejected the tightened script ({', '.join(reasons)}); trimming instead.", "warning")
+    log(f"[*] The cut dropped {', '.join(dropped)}; asking for one that keeps them.", "warning")
+    second = ask(dropped)
+    if second is not None and not names_dropped(script, second):
+        return second
+    if len(script.split()) <= max_words:
+        log("[!] The cut still drops names; keeping the draft, which fits.", "warning")
         return None
-    return tightened
+    return second or tightened
 
 
 def generate_script(
@@ -671,6 +772,7 @@ def generate_script(
                 max_words,
                 int(target_words * SCRIPT_WORD_FLOOR_RATIO),
                 ai_model,
+                subject=video_subject,
             )
             if tightened:
                 log(
@@ -1270,7 +1372,20 @@ CLOSING_GRACE_WORDS = 6
 # with 300 views or more, people watched about 18 seconds whatever the length
 # (18.1 at 79 words or fewer, 18.4 at 87 or more), so every word past the
 # target came off the share watched: 54% against 46%.
-TARGET_SLACK_WORDS = 6
+#
+# Raised from 6 on 2026-10-03, because the cut was costing more than the words.
+# Of the fifteen it made from 27 September to 3 October, nine damaged the script.
+# The damage was not a weaker line: a fact went wrong or missing.
+# - The runway Short lost Fairbanks, the one airport that has actually
+#   renumbered.
+# - The pacemaker Short lost "and heart sounds", the accurate half of what the
+#   device was for.
+# - The CD Short lost "to hold one channel until the other was ready", and a
+#   narrow true claim became a broad false one.
+# - The Mars orbiter Short lost the only sentence placing the error in software.
+# Each of those drafts was 9 to 12 words over its target. At 12, those four
+# are not cut at all, and neither are five other drafts that were.
+TARGET_SLACK_WORDS = 12
 
 
 def words_for_seconds(seconds: Optional[float]) -> Optional[int]:

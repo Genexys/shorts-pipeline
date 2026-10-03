@@ -253,6 +253,21 @@ step; an anniversary spends words on a date, a name and a place before it can
 say what happened. Letting the writer pick inside a range instead did not work —
 given "59 to 88 words", it wrote to the top every time.
 
+A draft more than `TARGET_SLACK_WORDS` (12) over its target goes back to the
+writer to be cut to the target. The cut keeps the first sentence and the final
+paragraph, and it may not remove:
+- what a kept sentence refers to;
+- the surprising detail;
+- whatever answers the video's question;
+- who built or discovered something;
+- a word that narrows a claim;
+- the real case that shows something happened.
+
+A cut that drops a name is asked for once more. If the second cut drops it too,
+the draft stands, as long as it fits under the ceiling. The slack was 6 until
+2026-10-03, when nine of fifteen cuts in a week had removed a fact rather than
+padding.
+
 A register is not a tone of voice. An 8B model asked to be funny writes
 strained puns and tells the viewer that science is amazing; asked to state
 something absurd plainly, it lets the subject do the work. So a curio script is
