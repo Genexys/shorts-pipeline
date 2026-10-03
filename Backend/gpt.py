@@ -313,6 +313,28 @@ def choose_script_angle(register: Optional[str] = None) -> str:
     unfit = ANGLES_UNFIT_FOR.get((register or "").strip().lower(), ())
     return random.choice([angle for angle in SCRIPT_ANGLES if angle not in unfit])
 
+# Typographic double quotes, which a model sometimes uses to delimit the
+# strings of what is otherwise a JSON array. On 2026-10-01 the writer answered a
+# condensation explainer with [“condensation on glass”, “iced drink glass”, …]:
+# none of it parsed, and the widening fallback searched the subject's bare
+# words instead — "glass", "water", "sweat", "hot" — which put a sweaty woman at
+# a gym and fire and embers over a video about a glass of iced water. Single
+# quotes are left alone: ’ is an apostrophe inside a term far more often than a
+# delimiter, and the strings are double-quoted anyway.
+TYPOGRAPHIC_DOUBLE_QUOTES = str.maketrans(
+    {
+        "\u201c": '"',  # “
+        "\u201d": '"',  # ”
+        "\u201e": '"',  # „
+        "\u201f": '"',  # ‟
+        "\u2033": '"',  # ″
+        "\u301d": '"',  # 〝
+        "\u301e": '"',  # 〞
+        "\uff02": '"',  # ＂
+    }
+)
+
+
 def parse_string_array(response: str) -> List[str]:
     """Parses a JSON array of strings out of an LLM response, tolerating noise.
 
@@ -320,6 +342,10 @@ def parse_string_array(response: str) -> List[str]:
     collecting quoted strings. Entries that are not strings are dropped: a
     number surviving into the result used to crash the caller that joins it
     for logging.
+
+    Each of those is tried on the response as written before typographic
+    quotes are straightened, so a valid array whose terms quote something with
+    “ ” keeps those quotes as content rather than being broken by them.
 
     Args:
         response (str): Raw model output.
@@ -337,23 +363,30 @@ def parse_string_array(response: str) -> List[str]:
             if isinstance(item, str) and item.strip()
         ]
 
-    try:
-        found = usable(json.loads(response))
-        if found:
-            return found
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    match = re.search(r"\[[\s\S]*\]", response or "")
-    if match:
+    def as_json(text: str) -> List[str]:
         try:
-            found = usable(json.loads(match.group()))
+            found = usable(json.loads(text))
             if found:
                 return found
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             pass
 
-    quoted = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', response or "")
+        match = re.search(r"\[[\s\S]*\]", text)
+        if match:
+            try:
+                return usable(json.loads(match.group()))
+            except json.JSONDecodeError:
+                pass
+        return []
+
+    written = response or ""
+    straightened = written.translate(TYPOGRAPHIC_DOUBLE_QUOTES)
+    for text in dict.fromkeys((written, straightened)):
+        found = as_json(text)
+        if found:
+            return found
+
+    quoted = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', straightened)
     return [item.strip() for item in quoted if item.strip()]
 
 
