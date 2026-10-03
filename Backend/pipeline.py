@@ -35,6 +35,7 @@ from utils import (
 )
 from video import (
     combine_videos,
+    find_usable_footage,
     make_silence,
     promote_strongest_opening,
     probe_duration,
@@ -517,24 +518,30 @@ def run_generation_pipeline(
 
     temp_audio = AudioFileClip(tts_path)
     try:
+        # Measured once, before the opening is chosen, so the opening is
+        # judged on the frames its shot will actually show.
+        footage = find_usable_footage(video_paths, fmt)
+        usable_paths = [path for path in video_paths if path in footage]
         # One shot per clip only holds while each shot can be long enough.
         # Below this many clips the run needs more shots than it has footage,
         # and the video starts repeating itself part way through.
         least_clips = math.ceil(temp_audio.duration / fmt.max_clip_duration)
-        if len(video_paths) < least_clips:
+        if len(usable_paths) < least_clips:
             emit(
-                f"[!] Only {len(video_paths)} clips for {temp_audio.duration:.0f}s; "
+                f"[!] Only {len(usable_paths)} clips for {temp_audio.duration:.0f}s; "
                 f"{least_clips} are needed to avoid repeating footage.",
                 "warning",
             )
         ordered_paths = promote_strongest_opening(
-            video_paths,
+            usable_paths,
             TEMP_DIR / f"{job_id}-openings",
             os.getenv("FFMPEG_BINARY", "").strip() or "ffmpeg",
+            starts={path: start for path, (start, _) in footage.items()},
         )
         combined_video_path = combine_videos(
             ordered_paths, temp_audio.duration, n_threads or 2, fmt,
             on_segments=note_segments,
+            footage=footage,
         )
     finally:
         temp_audio.close()

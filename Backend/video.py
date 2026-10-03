@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 
 from PIL import Image
@@ -8,7 +9,7 @@ import requests
 import srt_equalizer
 import assemblyai as aai
 
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 # Only the audio clip type survives here: the video path is ffmpeg now, and
 # AudioFileClip is still what the pipeline hands to generate_subtitles.
@@ -467,12 +468,8 @@ def build_fade_filter(fmt: VideoFormat, duration: float) -> str:
     return ",".join(parts)
 
 
-def build_concat_filter(
-    segment_count: int,
-    fmt: VideoFormat = SHORT,
-    durations: Optional[List[float]] = None,
-) -> str:
-    """Crops each segment to the format's ratio, scales it, then concatenates.
+def build_crop_filter(fmt: VideoFormat = SHORT) -> str:
+    """Centre-crops any frame to the format's ratio.
 
     The crop is an expression rather than arithmetic in Python, so one filter
     handles both cases and no source has to be probed for its dimensions:
@@ -480,11 +477,20 @@ def build_concat_filter(
     cut at the sides. Both stay centred.
     """
     ratio = fmt.aspect_ratio
-    crop = (
+    return (
         f"crop=w='if(lt(iw/ih,{ratio}),iw,ih*{ratio})'"
         f":h='if(lt(iw/ih,{ratio}),iw/{ratio},ih)'"
         ":x='(iw-ow)/2':y='(ih-oh)/2'"
     )
+
+
+def build_concat_filter(
+    segment_count: int,
+    fmt: VideoFormat = SHORT,
+    durations: Optional[List[float]] = None,
+) -> str:
+    """Crops each segment to the format's ratio, scales it, then concatenates."""
+    crop = build_crop_filter(fmt)
     chains = []
     for index in range(segment_count):
         seconds = durations[index] if durations else 4.0
@@ -505,12 +511,176 @@ def build_concat_filter(
     return ";".join(chains)
 
 
+# Black openings. Every shot used to start on its clip's first frame, and stock
+# clips often open on a fade up from black. blackdetect over the 25 videos
+# rendered from 2026-09-27 to 10-03 found black in ten, and every span was black
+# in that clip's own footage: in nine of the ten it began on a shot's first
+# frame, and the rest were clips that dip to black part way in. The worst,
+# ffbe3dc8, showed 2.7 s of pure black under the subtitles: its flower clip
+# stays black for 4.7 s, longer than the whole shot. The check runs on the
+# picture as it will be framed, because the crop decides what is left: a
+# 1920x426 Pixabay clip measured 0.9 s of black at full width and was black for
+# its entire 2.7 s shot once cut to 9:16.
+BLACK_PROBE_SECONDS = 4.0
+# blackdetect's own threshold, and the one the renders were audited with.
+BLACK_PIXEL_THRESHOLD = 0.10
+# Shortest black worth acting on at the start of a clip. Below this it passes
+# as a cut.
+BLACK_MIN_SECONDS = 0.2
+# How near the edge of the probed window a span must reach to count as running
+# into it: blackdetect reports a lead-in from 0 and ends a span that runs off
+# the window up to a frame before its end.
+BLACK_EDGE_SECONDS = 0.1
+# A finished video is audited for black that lasts at least this long.
+RENDER_BLACK_MIN_SECONDS = 0.5
+BLACK_PROBE_TIMEOUT_SECONDS = 60
+
+
+def parse_black_spans(ffmpeg_stderr: str) -> List[Tuple[float, float]]:
+    """The (start, end) pairs blackdetect printed, in seconds."""
+    return [
+        (float(start), float(end))
+        for start, end in re.findall(
+            r"black_start:\s*(-?[\d.]+)\s+black_end:\s*(-?[\d.]+)", ffmpeg_stderr or ""
+        )
+    ]
+
+
+def detect_black_spans(
+    path: str,
+    seconds: float,
+    fmt: VideoFormat = SHORT,
+    min_seconds: float = BLACK_MIN_SECONDS,
+) -> Optional[List[Tuple[float, float]]]:
+    """Stretches of black in the first `seconds` of a video, as the format frames it.
+
+    Returns None if the check could not run. It is advisory, so a failure
+    leaves the footage to be used as it is rather than costing the render.
+    """
+    command = [
+        _ffmpeg_binary(), "-hide_banner", "-nostats",
+        "-t", f"{seconds:.3f}", "-i", path,
+        "-an",
+        "-vf",
+        f"{build_crop_filter(fmt)},"
+        f"blackdetect=d={min_seconds}:pix_th={BLACK_PIXEL_THRESHOLD}",
+        "-f", "null", "-",
+    ]
+    try:
+        result = subprocess.run(
+            command, check=True, capture_output=True, text=True,
+            timeout=max(BLACK_PROBE_TIMEOUT_SECONDS, seconds),
+        )
+        return parse_black_spans(result.stderr)
+    except Exception as err:
+        log(f"[!] Could not check {Path(path).name} for black: {err}", "warning")
+        return None
+
+
+def usable_footage(
+    spans: List[Tuple[float, float]], probed: float, duration: float
+) -> Optional[Tuple[float, float]]:
+    """Where a clip's shot should start and how much of it may be used.
+
+    Pure, so the rule can be tested without ffmpeg. `spans` is the black found
+    in the first `probed` seconds of a clip `duration` long.
+
+    Black from the first frame is a fade-in: the shot starts after it. Black
+    running off the end of the window is a fade-out, or black that may go on
+    past where we looked: the shot stops before it. Black that comes and goes
+    inside the window means the clip dips to black, and it does it again where
+    we did not look — the filament-bulb clip in 5ae3b3fc flickered off at 0,
+    2.8 and 6.8 seconds, and a skeleton on a black ground in 0257be12 dipped at
+    2.3 and again at 8.3 — so the clip is not used. Nor is one that is black
+    for the whole window, or that leaves too little to make a shot.
+
+    Returns:
+        (start offset, usable seconds), or None to drop the clip.
+    """
+    start, end = 0.0, duration
+    for black_start, black_end in spans:
+        leading = black_start <= BLACK_EDGE_SECONDS
+        trailing = black_end >= probed - BLACK_EDGE_SECONDS
+        if leading and trailing:
+            return None
+        if leading:
+            start = max(start, black_end)
+        elif trailing:
+            end = min(end, black_start)
+        else:
+            return None
+    if end - start < MIN_SHOT_SECONDS:
+        return None
+    return start, end - start
+
+
+def find_usable_footage(
+    video_paths: List[str], fmt: VideoFormat = SHORT
+) -> Dict[str, Tuple[float, float]]:
+    """Each usable clip's (start offset, usable seconds), keyed by path.
+
+    Clips that are black where it matters are left out. If that would leave
+    nothing, every clip is used from its first frame as before: a shot that
+    opens on black beats a failed render.
+    """
+    durations = {path: probe_duration(path) for path in video_paths}
+    footage: Dict[str, Tuple[float, float]] = {}
+    for path in video_paths:
+        duration = durations[path]
+        probed = min(BLACK_PROBE_SECONDS, duration)
+        spans = detect_black_spans(path, probed, fmt)
+        if spans is None:
+            footage[path] = (0.0, duration)
+            continue
+        window = usable_footage(spans, probed, duration)
+        if window is None:
+            shown = ", ".join(f"{start:.2f}-{end:.2f}s" for start, end in spans)
+            log(f"[!] Not using {Path(path).name}: black at {shown}.", "warning")
+            continue
+        if window[0] > 0:
+            log(
+                f"[+] Starting {Path(path).name} at {window[0]:.2f}s, after its "
+                "black opening.",
+                "info",
+            )
+        footage[path] = window
+
+    if not footage and video_paths:
+        log(
+            "[!] Every clip is black where it would play; using them as they are.",
+            "warning",
+        )
+        return {path: (0.0, durations[path]) for path in video_paths}
+    return footage
+
+
+def report_black_spans(
+    video_path: str, duration: float, fmt: VideoFormat = SHORT
+) -> List[Tuple[float, float]]:
+    """Warns about every stretch of black in a combined video. Advisory only.
+
+    Run on the combined picture, so a regression in the opening check, or a
+    kind of black it does not catch, shows up in the job log rather than in a
+    published video.
+    """
+    spans = detect_black_spans(
+        video_path, duration + 1.0, fmt, RENDER_BLACK_MIN_SECONDS
+    )
+    if spans is None:
+        return []
+    if spans:
+        shown = ", ".join(f"{start:.2f}-{end:.2f}s" for start, end in spans)
+        log(f"[!] Black in the combined video at {shown}.", "warning")
+    return spans
+
+
 def combine_videos(
     video_paths: List[str],
     max_duration: float,
     threads: int,
     fmt: VideoFormat = SHORT,
     on_segments: Optional[Callable[[List[Tuple[str, float]]], None]] = None,
+    footage: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> str:
     """
     Combines stock clips into one video of the format's shape and the requested
@@ -527,6 +697,8 @@ def combine_videos(
         fmt (VideoFormat): Output shape and the per-clip duration cap.
         on_segments: Told the planned (path, seconds) sequence before encoding,
             so the caller can record which footage plays when.
+        footage: find_usable_footage() for these clips, when the caller has
+            already measured it. Clips missing from it are not used.
 
     Returns:
         str: The path to the combined video.
@@ -534,7 +706,10 @@ def combine_videos(
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     combined_video_path = TEMP_DIR / f"{uuid.uuid4()}.mp4"
 
-    sources = [(path, probe_duration(path)) for path in video_paths]
+    if footage is None:
+        footage = find_usable_footage(video_paths, fmt)
+    sources = [(path, footage[path][1]) for path in video_paths if path in footage]
+    starts = {path: start for path, (start, _) in footage.items()}
     cap = effective_clip_cap(
         float(max_duration), len(sources), float(fmt.max_clip_duration)
     )
@@ -554,6 +729,11 @@ def combine_videos(
 
     command = [_ffmpeg_binary(), "-y"]
     for path, duration in segments:
+        start = starts.get(path, 0.0)
+        if start > 0:
+            # An input seek, so the decoder skips the black instead of the
+            # filter graph receiving and discarding it.
+            command += ["-ss", f"{start:.3f}"]
         command += ["-t", f"{duration:.3f}", "-i", path]
     command += [
         "-filter_complex",
@@ -568,6 +748,7 @@ def combine_videos(
     command.append(str(combined_video_path))
 
     subprocess.run(command, check=True, capture_output=True, text=True)
+    report_black_spans(str(combined_video_path), float(max_duration), fmt)
     return str(combined_video_path)
 
 
@@ -1083,14 +1264,17 @@ def make_silence(seconds: float, output_path: str) -> str:
     return output_path
 
 
-# Where to sample a clip when judging how striking it opens. Far enough in to
-# clear a fade or a title card, early enough to be what the viewer actually
-# sees first.
+# Where to sample a clip when judging how striking it opens, counted from where
+# its shot starts. Far enough in to clear a title card, early enough to be what
+# the viewer actually sees first.
 OPENING_SAMPLE_SECONDS = 0.5
 
 
 def promote_strongest_opening(
-    video_paths: List[str], work_dir: Path, ffmpeg: str = "ffmpeg"
+    video_paths: List[str],
+    work_dir: Path,
+    ffmpeg: str = "ffmpeg",
+    starts: Optional[Dict[str, float]] = None,
 ) -> List[str]:
     """Moves the most striking clip to the front, leaving the rest in order.
 
@@ -1100,21 +1284,28 @@ def promote_strongest_opening(
     by contrast would front-load the good footage and leave a dull tail, and
     the order after the first shot is already varied on purpose.
 
+    `starts` is where each clip's shot begins once its black opening is
+    skipped (find_usable_footage). Judged at a fixed half second instead, a
+    clip that fades up over four seconds is scored on a black frame, and one
+    whose shot starts later is scored on a frame nobody sees.
+
     Returns the list unchanged if fewer than two clips, or if no frame can be
     read — a worse opening beats a failed render.
     """
     if len(video_paths) < 2:
         return list(video_paths)
 
+    starts = starts or {}
     work_dir.mkdir(parents=True, exist_ok=True)
     best_index, best_score = 0, None
     for index, path in enumerate(video_paths):
         frame = work_dir / f"opening_{index}.png"
+        sample = starts.get(path, 0.0) + OPENING_SAMPLE_SECONDS
         try:
             subprocess.run(
                 [
                     ffmpeg, "-v", "error", "-y",
-                    "-ss", f"{OPENING_SAMPLE_SECONDS}",
+                    "-ss", f"{sample:.3f}",
                     "-i", path, "-frames:v", "1", str(frame),
                 ],
                 check=True, capture_output=True, text=True,
