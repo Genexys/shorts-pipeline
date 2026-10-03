@@ -41,7 +41,7 @@ Use `.env.example` as your template.
 
 | Variable | Description | Default |
 |---|---|---|
-| `YOUTUBE_PRIVACY_STATUS` | Privacy of uploaded videos: `private`, `unlisted` or `public`. Invalid values fall back to `private` with a warning. | `private` |
+| `YOUTUBE_PRIVACY_STATUS` | Privacy of uploaded videos: `private`, `unlisted` or `public`. Invalid values fall back to `private` with a warning. A long video the local model helped write goes up `private` regardless — see [The writer](#the-writer). | `private` |
 | `YOUTUBE_CATEGORY_ID` | YouTube category id for uploads (`28` = Science & Technology). | `28` |
 | `YOUTUBE_CLIENT_SECRETS_FILE` | Path to the OAuth client JSON. | `Backend/client_secret.json` |
 | `YOUTUBE_TOKEN_FILE` | Path to the saved OAuth token. | `Backend/youtube_token.json` |
@@ -341,7 +341,18 @@ to Ollama at once, as before.
 time and can change hands part way, so it is filed under its weakest writer,
 ranked local < fallback Claude < primary: Opus and Sonnet make a Sonnet script,
 and any section by Ollama makes an Ollama script. The video artifact carries
-`scriptFellBack` when the primary did not write it, as before.
+`scriptFellBack` (not written by the primary) and `scriptLocal` (written, at
+least in part, by the local model instead of Claude); both stay false when no
+key is configured, since Ollama writing is then the design and not a fallback.
+
+**A long video the local model helped write goes up private**, whatever
+`YOUTUBE_PRIVACY_STATUS` says, and is not cross-posted to Instagram. The
+autopilot's Telegram report says so plainly, so it can be watched and
+published by hand in YouTube Studio. On 2026-09-28 such a video went out public
+with a fabricated claim about a real doctor (https://youtu.be/uynIVYwuEvw).
+A Short keeps the configured status, and its report carries the usual
+`⚠️ written by …` line. The privacy actually used is recorded on the
+`youtube_video` artifact as `privacyStatus`.
 
 At three videos a day this is roughly 240k input and 32k output tokens a month:
 about two dollars on the default model, and noise beside the narration bill.

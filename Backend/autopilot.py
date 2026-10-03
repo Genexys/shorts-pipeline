@@ -278,6 +278,10 @@ class Autopilot:
         # A list, not a string: a run can degrade in more than one way at once,
         # and the second warning used to silently overwrite the first.
         warnings: list = []
+        script_warning = ""
+        script_model = ""
+        written_locally = False
+        uploaded_private = False
         for artifact in list_artifacts(session, job_id):
             metadata = artifact.metadata_json or {}
             if artifact.artifact_type == "video":
@@ -297,12 +301,29 @@ class Autopilot:
                     # script: the fallback restates its own sentences and skips
                     # the turn a curio lives on. Until now this was a log line
                     # in a container that a deploy throws away.
-                    warnings.append(
+                    script_warning = (
                         f"⚠️ written by {metadata.get('scriptModel')} — "
                         "the stronger model was unavailable or declined"
                     )
+                script_model = metadata.get("scriptModel") or ""
+                written_locally = (
+                    bool(metadata.get("scriptLocal")) and metadata.get("format") == "long"
+                )
             elif artifact.artifact_type == "youtube_video":
                 second_line = artifact.path
+                uploaded_private = metadata.get("privacyStatus") == "private"
+        if written_locally and uploaded_private:
+            # The pipeline held it back: a long video the local model had a
+            # hand in went out public on 2026-09-28 with a fabricated claim
+            # about a real doctor. Nothing else will publish it, so the report
+            # has to say plainly that the owner must.
+            script_warning = (
+                "🔒 uploaded as PRIVATE for review — part of the script was "
+                f"written by the local model ({script_model}). Watch it, then "
+                "publish it by hand in YouTube Studio if it holds up."
+            )
+        if script_warning:
+            warnings.append(script_warning)
         tail = "".join(f"\n{line}" for line in warnings)
         return f"✅ {title}\n{second_line}{tail}\njob {job_id}"
 

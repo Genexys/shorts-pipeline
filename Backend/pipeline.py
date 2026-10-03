@@ -10,7 +10,7 @@ from moviepy import AudioFileClip, concatenate_audioclips
 
 import knowledge
 import research
-from formats import LONG, resolve_format
+from formats import LONG, VideoFormat, resolve_format
 from gpt import (
     generate_long_script,
     keywords_from_subject,
@@ -138,6 +138,20 @@ def summarize_searches(searches: list, clip_origin: dict, timeline: list) -> lis
     ]
 
 
+def held_for_review(fmt: VideoFormat, script_local: bool) -> bool:
+    """Whether a video goes up private, whatever YOUTUBE_PRIVACY_STATUS says.
+
+    On 2026-09-28 claude-opus-5 was overloaded through a long video, the local
+    model wrote five of its eight sections, and it went out public with a
+    fabricated claim about a real doctor (https://youtu.be/uynIVYwuEvw). A long
+    video is eight sections of claims, so one the local model had any hand in
+    stays private until the owner has watched it and published it by hand.
+
+    A Short keeps the configured status; its report still carries the warning.
+    """
+    return fmt is LONG and script_local
+
+
 @dataclass
 class PipelineResult:
     video_path: str            # "output.mp4" relative to PROJECT_ROOT
@@ -165,6 +179,10 @@ class PipelineResult:
     # Everything research found, not only what the script used. The leftovers
     # are what a community post can say that the video did not.
     sources: list
+    # Whether script_fell_back went all the way to the local model rather than
+    # to the second Claude model. Only this one holds a long video back for
+    # review. A default, so a result built in a test needs none.
+    script_local: bool = False
     # Every stock search and every shot's origin, as plain dicts for
     # add_search_terms and add_stock_clips. Defaults, so a result built before
     # footage was chosen — or in a test — needs neither.
@@ -339,6 +357,9 @@ def run_generation_pipeline(
         )
 
     script_fell_back = writer.is_configured() and script_model != writer.model_name()
+    # Behind the same condition: with no key, Ollama writing is the design, not
+    # a fallback, and a keyless setup keeps its configured privacy.
+    script_local = script_fell_back and writer.rank(script_model) == writer.LOCAL
     if script_fell_back:
         emit(
             f"[!] Script written by {script_model} rather than "
@@ -658,9 +679,11 @@ def run_generation_pipeline(
         else:
             thumbnail_path = archived_thumbnail
 
-    privacy_status, privacy_warning = resolve_privacy_status(
+    configured_privacy, privacy_warning = resolve_privacy_status(
         os.getenv("YOUTUBE_PRIVACY_STATUS")
     )
+    held = held_for_review(fmt, script_local)
+    privacy_status = "private" if held else configured_privacy
     category_id = (os.getenv("YOUTUBE_CATEGORY_ID") or "28").strip() or "28"
     youtube_video_id: Optional[str] = None
     upload_error: Optional[str] = None
@@ -670,6 +693,12 @@ def run_generation_pipeline(
         guard_cancelled()
         if privacy_warning:
             emit(f"[!] {privacy_warning}", "warning")
+        if held:
+            emit(
+                f"[!] Part of this script was written by {script_model}; uploading "
+                "as private for review.",
+                "warning",
+            )
         emit(f"[+] Uploading to YouTube as {privacy_status}...", "info")
         try:
             youtube_video_id = upload_video(
@@ -710,7 +739,9 @@ def run_generation_pipeline(
     # Only after YouTube, and only when YouTube worked. The Reel is a
     # cross-post of a published video, not a second original, and a failure
     # here must never cost the job: by this point the video is already live.
-    if crosspost_instagram and youtube_video_id:
+    # Not for a video held back for review: a public Reel would publish what
+    # the private upload is holding back.
+    if crosspost_instagram and youtube_video_id and not held:
         guard_cancelled()
         emit("[+] Cross-posting to Instagram...", "info")
         try:
@@ -728,6 +759,7 @@ def run_generation_pipeline(
         ai_model=ai_model,
         script_model=script_model,
         script_fell_back=script_fell_back,
+        script_local=script_local,
         sources=sources,
         search_terms=summarize_searches(searches, clip_origin, stock_clips),
         stock_clips=stock_clips,

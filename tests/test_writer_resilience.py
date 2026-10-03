@@ -1,4 +1,4 @@
-"""The writer through an overload and an empty account.
+"""The writer through an overload, an empty account, and a script it only half wrote.
 
 The client, the sleep, the clock and Telegram are all replaced: nothing here
 waits for real or reaches a network. The errors are the SDK's own classes, so
@@ -13,7 +13,20 @@ import httpx2
 import pytest
 
 import gpt
+import pipeline
+import worker
 import writer
+from autopilot import Autopilot
+from autopilot_config import AutopilotConfig
+from formats import LONG, SHORT
+from repository import (
+    add_artifact,
+    add_topic,
+    create_job,
+    list_artifacts,
+    mark_completed,
+    queue_topic_job,
+)
 
 PRIMARY = "claude-opus-5"
 FALLBACK = "claude-sonnet-5-5"
@@ -435,3 +448,144 @@ def test_a_long_script_part_sonnet_is_reported_as_sonnet(env, monkeypatch):
     )
 
     assert seen == [FALLBACK]
+
+
+# -- held for review ---------------------------------------------------------
+
+
+def test_a_long_video_the_local_model_helped_write_is_held_for_review():
+    # https://youtu.be/uynIVYwuEvw went out public with a fabricated claim
+    # about a real doctor after llama wrote five of its eight sections.
+    assert pipeline.held_for_review(LONG, script_local=True) is True
+    assert pipeline.held_for_review(LONG, script_local=False) is False
+
+
+def test_a_short_keeps_its_configured_privacy():
+    assert pipeline.held_for_review(SHORT, script_local=True) is False
+
+
+def test_the_worker_records_a_local_script_and_the_privacy_used(
+    monkeypatch, session_factory
+):
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "Hand washing"})
+    monkeypatch.setattr(worker, "SessionLocal", session_factory)
+    monkeypatch.setattr(worker, "clean_dir", lambda _: None)
+    monkeypatch.setattr(
+        worker, "run_generation_pipeline",
+        lambda data, is_cancelled, on_log: pipeline.PipelineResult(
+            video_path="output.mp4", archived_path=f"output/{data['jobId']}.mp4",
+            title="Hand washing", youtube_video_id="vid1", upload_error=None,
+            privacy_status="private", format_name="long",
+            subtitles_path="subtitles/x.srt", thumbnail_path=None,
+            narration_provider="elevenlabs", narration_fell_back=False,
+            script="A script.", ai_model="llama3.1:8b", script_model="llama3.1:8b",
+            script_fell_back=True, script_local=True, sources=[],
+        ),
+    )
+
+    assert worker.process_next_job() is True
+
+    with session_factory() as session:
+        artifacts = {a.artifact_type: a for a in list_artifacts(session, job.id)}
+    assert artifacts["video"].metadata_json["scriptLocal"] is True
+    assert artifacts["youtube_video"].metadata_json["privacyStatus"] == "private"
+
+
+def _pilot(session_factory, sent):
+    config = AutopilotConfig.from_env(
+        {
+            "AUTOPILOT_NICHE": "ocean facts",
+            "AUTOPILOT_CURIO_SHARE": "0",
+            "AUTOPILOT_ANNIVERSARY_SHARE": "0",
+        }
+    )
+    return Autopilot(
+        config=config,
+        session_factory=session_factory,
+        notify=lambda text: sent.append(text) or True,
+        generate=lambda prompt, model: "{}",
+        generate_post=lambda *args, **kwargs: None,
+        send_photo=lambda *args, **kwargs: True,
+    )
+
+
+def _finished(session_factory, video_metadata, privacy="public"):
+    with session_factory() as session:
+        topic = add_topic(session, "Hand washing", "niche", "ollama")
+        job = queue_topic_job(session, topic, {"videoSubject": "Hand washing"})
+        mark_completed(session, job.id, "output.mp4")
+        add_artifact(
+            session, job.id, "video", f"output/{job.id}.mp4",
+            {"title": "Hand washing", "uploadError": None, "narration": "elevenlabs",
+             "narrationFellBack": False, **video_metadata},
+        )
+        if privacy:
+            add_artifact(
+                session, job.id, "youtube_video", "https://youtu.be/abc",
+                {"videoId": "abc", "privacyStatus": privacy},
+            )
+
+
+def test_the_report_says_plainly_that_a_held_video_needs_publishing(session_factory):
+    sent = []
+    _finished(
+        session_factory,
+        {"format": "long", "scriptModel": "llama3.1:8b",
+         "scriptFellBack": True, "scriptLocal": True},
+        privacy="private",
+    )
+
+    _pilot(session_factory, sent).finish_completed_topics()
+
+    message = sent[0]
+    assert "PRIVATE for review" in message
+    assert "publish it by hand" in message
+    assert "llama3.1:8b" in message
+
+
+def test_a_short_by_the_local_model_keeps_the_warning_line(session_factory):
+    sent = []
+    _finished(
+        session_factory,
+        {"format": "short", "scriptModel": "llama3.1:8b",
+         "scriptFellBack": True, "scriptLocal": True},
+    )
+
+    _pilot(session_factory, sent).finish_completed_topics()
+
+    message = sent[0]
+    assert "⚠️ written by llama3.1:8b" in message
+    assert "PRIVATE" not in message
+
+
+def test_a_long_video_by_the_fallback_claude_is_only_a_warning(session_factory):
+    sent = []
+    _finished(
+        session_factory,
+        {"format": "long", "scriptModel": FALLBACK,
+         "scriptFellBack": True, "scriptLocal": False},
+    )
+
+    _pilot(session_factory, sent).finish_completed_topics()
+
+    message = sent[0]
+    assert f"⚠️ written by {FALLBACK}" in message
+    assert "PRIVATE" not in message
+
+
+def test_a_held_video_that_never_uploaded_keeps_the_warning_line(session_factory):
+    # Nothing went up private, so there is nothing to publish by hand.
+    sent = []
+    _finished(
+        session_factory,
+        {"format": "long", "scriptModel": "llama3.1:8b",
+         "scriptFellBack": True, "scriptLocal": True, "uploadError": "quota"},
+        privacy=None,
+    )
+
+    _pilot(session_factory, sent).finish_completed_topics()
+
+    message = sent[0]
+    assert "⚠️ written by llama3.1:8b" in message
+    assert "PRIVATE" not in message
