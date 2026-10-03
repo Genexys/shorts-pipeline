@@ -1475,8 +1475,8 @@ def test_the_cut_keeps_the_detail_that_makes_the_story(monkeypatch):
     # The pigeon curio lost "…called the idea eccentric and impractical, and
     # funded it anyway" — the one line that made it a curio.
     instructions = _cut_prompt(monkeypatch, PIGEON_DRAFT, 70)
-    assert "the detail that makes the story surprising or funny" in instructions
-    assert "cut the explanation around it instead" in instructions
+    assert "The detail that makes the story surprising or funny" in instructions
+    assert "Cut the explanation around it instead" in instructions
 
 
 def test_a_draft_within_the_limit_is_not_sent_back(monkeypatch):
