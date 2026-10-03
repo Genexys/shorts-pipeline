@@ -69,10 +69,13 @@ def test_nothing_usable_is_still_empty(response):
 
 
 def test_search_terms_survive_curly_quotes(monkeypatch):
-    import writer
-
     warnings = []
-    monkeypatch.setattr(writer, "write", lambda prompt: CONDENSATION_RESPONSE)
+    # write_creative rather than the writer underneath it, so the test does not
+    # depend on how the writer reports which model answered.
+    monkeypatch.setattr(
+        gpt, "write_creative",
+        lambda prompt, model, report_model=None: CONDENSATION_RESPONSE,
+    )
     monkeypatch.setattr(
         gpt, "log",
         lambda message, level="info": warnings.append(message) if level == "warning" else None,
