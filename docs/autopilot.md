@@ -52,6 +52,7 @@ Messages:
 
 - `Autopilot started. Niche: <niche>. <N>/day, window <window> <tz>.`
 - `✅ <title>` + YouTube link (or `upload skipped: <reason>`) + job id
+- `⚠️ The Anthropic credit balance has run out.` (or `Anthropic rejected the API key`) — sent by whichever process hit it, worker or autopilot, at most once every four hours each; scripts are written by the local model until it is fixed
 - `❌ <subject>` + error + job id and attempts
 - `⚠️ <subject> cancelled` + job id
 - `⚠️ <subject>` + `job <id> queued for <N>h, worker may be stuck` — once per topic after 3 hours without a result

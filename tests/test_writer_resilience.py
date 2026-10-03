@@ -1,6 +1,6 @@
-"""The writer through an overload.
+"""The writer through an overload and an empty account.
 
-The client, the sleep and the clock are all replaced: nothing here
+The client, the sleep, the clock and Telegram are all replaced: nothing here
 waits for real or reaches a network. The errors are the SDK's own classes, so
 the classification is tested against what the SDK actually raises.
 """
@@ -18,6 +18,10 @@ import writer
 PRIMARY = "claude-opus-5"
 FALLBACK = "claude-sonnet-5-5"
 URL = "https://api.anthropic.com/v1/messages"
+CREDIT_MESSAGE = (
+    "Your credit balance is too low to access the Anthropic API. "
+    "Please go to Plans & Billing to upgrade or purchase credits."
+)
 
 
 class _Block:
@@ -103,9 +107,11 @@ def env(monkeypatch):
     monkeypatch.delenv("SCRIPT_MODEL", raising=False)
     monkeypatch.delenv("SCRIPT_FALLBACK_MODEL", raising=False)
     monkeypatch.setattr(writer, "_down_until", {})
+    monkeypatch.setattr(writer, "_last_account_alert", None)
 
     clock = _Clock()
     sleeps = []
+    alerts = []
 
     def sleep(seconds):
         sleeps.append(seconds)
@@ -113,13 +119,14 @@ def env(monkeypatch):
 
     monkeypatch.setattr(writer, "_sleep", sleep)
     monkeypatch.setattr(writer, "_clock", clock)
+    monkeypatch.setattr(writer, "send_telegram", lambda text: alerts.append(text) or True)
 
     def calls(primary=(), fallback=()) -> _Calls:
         recorder = _Calls({PRIMARY: primary, FALLBACK: fallback})
         monkeypatch.setattr(writer, "_client", recorder.factory)
         return recorder
 
-    return SimpleNamespace(clock=clock, sleeps=sleeps, calls=calls)
+    return SimpleNamespace(clock=clock, sleeps=sleeps, alerts=alerts, calls=calls)
 
 
 # -- the ladder --------------------------------------------------------------
@@ -283,6 +290,89 @@ def test_a_request_error_is_neither_waited_out_nor_handed_over(env):
     assert writer.write("prompt") is None
     assert env.sleeps == []
     assert calls.models() == [PRIMARY]
+
+
+# -- the account -------------------------------------------------------------
+
+
+def test_an_empty_balance_alerts_the_owner_and_skips_the_fallback(env):
+    # 2026-09-27, 15:00: every call fell back to llama without a word, and
+    # nobody knew until a video was reviewed by hand.
+    calls = env.calls(primary=[_status_error(400, CREDIT_MESSAGE, "invalid_request_error")])
+
+    assert writer.write("prompt") is None
+    # The fallback model bills the same account, and waiting will not refill it.
+    assert calls.models() == [PRIMARY]
+    assert env.sleeps == []
+    assert len(env.alerts) == 1
+    assert "credit balance" in env.alerts[0]
+    assert "local model" in env.alerts[0]
+    assert "Top up" in env.alerts[0]
+
+
+def test_the_alert_is_sent_once_every_few_hours(env):
+    credit = _status_error(400, CREDIT_MESSAGE, "invalid_request_error")
+    env.calls(primary=[credit] * 3)
+
+    writer.write("one")
+    env.clock.now += 60
+    writer.write("two")
+    assert len(env.alerts) == 1
+
+    env.clock.now += writer.ACCOUNT_ALERT_INTERVAL_SECONDS
+    writer.write("three")
+    assert len(env.alerts) == 2
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        _status_error(401, "invalid x-api-key", "authentication_error"),
+        _status_error(403, "not allowed", "permission_error"),
+        _status_error(402, "billing problem", "billing_error"),
+    ],
+    ids=["401", "403", "402"],
+)
+def test_key_and_billing_errors_are_account_problems(env, error):
+    calls = env.calls(primary=[error])
+
+    assert writer.write("prompt") is None
+    assert calls.models() == [PRIMARY]
+    assert len(env.alerts) == 1
+
+
+def test_a_rejected_key_is_reported_as_the_key(env):
+    env.calls(primary=[_status_error(401, "invalid x-api-key", "authentication_error")])
+
+    writer.write("prompt")
+
+    assert "API key" in env.alerts[0]
+    assert "local model" in env.alerts[0]
+
+
+def test_an_ordinary_bad_request_is_not_an_account_problem(env):
+    env.calls(primary=[_status_error(400, "max_tokens: too large", "invalid_request_error")])
+
+    assert writer.write("prompt") is None
+    assert env.alerts == []
+
+
+def test_the_alert_never_carries_the_key(env):
+    env.calls(primary=[_status_error(401, "bad key sk-test-key", "authentication_error")])
+
+    writer.write("prompt")
+
+    assert "sk-test-key" not in env.alerts[0]
+
+
+def test_a_failing_alert_does_not_fail_the_call(env, monkeypatch):
+    def broken(text):
+        raise RuntimeError("telegram is down")
+
+    monkeypatch.setattr(writer, "send_telegram", broken)
+    env.calls(primary=[_status_error(400, CREDIT_MESSAGE, "invalid_request_error")])
+
+    assert writer.write("prompt") is None
 
 
 # -- who wrote it ------------------------------------------------------------

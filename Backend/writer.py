@@ -15,6 +15,7 @@ import time
 from typing import Dict, Iterable, NamedTuple, Optional, Tuple
 
 from logstream import log
+from notify import send_telegram
 
 # Roughly 240k input and 32k output tokens a month at three videos a day, which
 # is about two dollars on Opus. Cheaper models exist; humour is the one task
@@ -50,10 +51,23 @@ OUTAGE_MEMORY_SECONDS = 600
 # the queue just the same.
 FALLBACK_SDK_RETRIES = 2
 
+# On 2026-09-27 at 15:00 the credit balance ran out, and every call after it
+# answered 400 invalid_request_error "Your credit balance is too low to access
+# the Anthropic API". Each one fell back to llama3.1:8b without a word, that
+# video's search terms included, and nobody knew until a video was reviewed by
+# hand. Waiting does not fix an account and neither does the fallback model,
+# which bills the same one: the owner has to be told.
+ACCOUNT_STATUSES = frozenset({401, 402, 403})
+CREDIT_BALANCE_TEXT = "credit balance is too low"
+# Often enough to be a reminder, rarely enough that one long video is not
+# eight messages.
+ACCOUNT_ALERT_INTERVAL_SECONDS = 4 * 60 * 60
+
 # What a failed request means for the next one.
 WROTE = "wrote"
 REFUSED = "refused"
 OUTAGE = "outage"
+ACCOUNT = "account"
 FAILED = "failed"
 
 # Who wrote a script, weakest first. A long script is written a section at a
@@ -70,6 +84,7 @@ _clock = time.monotonic
 # Per process. The worker and the autopilot each find out for themselves, and a
 # restart forgets, which is the right default after a deploy.
 _down_until: Dict[str, float] = {}
+_last_account_alert: Optional[float] = None
 
 
 class Written(NamedTuple):
@@ -161,11 +176,51 @@ def _unreachable(err: Exception) -> bool:
 
 
 def _classify(err: Exception) -> str:
-    """OUTAGE or FAILED: whether waiting could help."""
+    """OUTAGE, ACCOUNT or FAILED: whether to wait, to tell the owner, or neither."""
     status = getattr(err, "status_code", None)
     if isinstance(status, int):
-        return OUTAGE if status in OUTAGE_STATUSES else FAILED
+        if status in ACCOUNT_STATUSES:
+            return ACCOUNT
+        if status == 400 and CREDIT_BALANCE_TEXT in str(err).lower():
+            return ACCOUNT
+        if status in OUTAGE_STATUSES:
+            return OUTAGE
+        return FAILED
     return OUTAGE if _unreachable(err) else FAILED
+
+
+def _alert_account_problem(err: Exception) -> None:
+    """Tells the owner over Telegram, at most once an interval. Never raises."""
+    global _last_account_alert
+    now = _clock()
+    if (
+        _last_account_alert is not None
+        and now - _last_account_alert < ACCOUNT_ALERT_INTERVAL_SECONDS
+    ):
+        return
+    # Throttled on the attempt, not on delivery: with Telegram unconfigured or
+    # down, every call would otherwise try again and could wait out notify's
+    # timeout each time.
+    _last_account_alert = now
+    try:
+        status = getattr(err, "status_code", None)
+        if status in (401, 403):
+            problem = f"Anthropic rejected the API key ({status})."
+            action = "Check ANTHROPIC_API_KEY and its workspace in the Anthropic console."
+        else:
+            problem = "The Anthropic credit balance has run out."
+            action = (
+                "Top up the balance in the Anthropic console (Plans & Billing); "
+                "Claude takes over again on the next call."
+            )
+        send_telegram(
+            f"⚠️ {problem}\n"
+            "Scripts are now being written by the local model.\n"
+            f"{action}\n\n"
+            f"{scrub(str(err))[:500]}"
+        )
+    except Exception as alert_err:
+        log(f"[-] Could not send the account alert: {scrub(str(alert_err))}", "warning")
 
 
 def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[str], str]:
@@ -174,7 +229,7 @@ def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[str], 
     The kinds are distinguished because each wants something different: a
     refusal is worth asking again with the brief stated, while a rate limit or
     a timeout will not care how the prompt is worded and is waited out
-    instead.
+    instead. An account problem is reported here, where the error is in hand.
     """
     try:
         response = _client(max_retries).messages.create(
@@ -184,7 +239,10 @@ def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[str], 
         )
     except Exception as err:
         log(f"[!] {model} unavailable ({scrub(str(err))}).", "warning")
-        return None, _classify(err)
+        kind = _classify(err)
+        if kind == ACCOUNT:
+            _alert_account_problem(err)
+        return None, kind
 
     if getattr(response, "stop_reason", None) == "refusal":
         return None, REFUSED
@@ -250,9 +308,10 @@ def write(prompt: str) -> Optional[Written]:
     """One completion from a Claude model, and which one; None if none can be had.
 
     Never raises. The primary is waited out through an overload, then the
-    fallback model is asked. A missing key, a refusal that survives the retry
-    or anything else returns None, and the caller falls back to the local
-    model — a video written by Ollama beats no video.
+    fallback model is asked; an account problem tells the owner and skips the
+    fallback, which bills the same account. A missing key, a refusal that
+    survives the retry or anything else returns None, and the caller falls back
+    to the local model — a video written by Ollama beats no video.
     """
     if not is_configured():
         return None

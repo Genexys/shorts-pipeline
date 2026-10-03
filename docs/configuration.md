@@ -323,6 +323,16 @@ without the ladder for those ten minutes.
 A refusal is not an outage: no waiting, no fallback model, and a second refusal
 goes to Ollama.
 
+**Account problem.** A 400 saying the credit balance is too low, a 402, or an
+authentication or permission error (401, 403) cannot be waited out, and the
+fallback model bills the same account, so the call goes straight to Ollama and
+the owner is told: one Telegram message (via `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID`) saying scripts are now written by the local model and the
+balance needs topping up — or, for 401/403, the key needs checking. It is sent
+at most once every four hours per process, so the worker and the autopilot may
+each send one. On 2026-09-27 the balance ran out at 15:00 and every call
+quietly fell back to llama until a video was reviewed by hand.
+
 Anything else — an unknown model, a malformed request, an empty answer — goes
 to Ollama at once, as before.
 
