@@ -11,9 +11,11 @@ one: no key, a timeout, a bad response and a rate limit all produce an empty
 brief and a script written the old way.
 """
 
+import json
 import os
+import re
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
@@ -76,21 +78,43 @@ DESCRIPTION_MAX_SOURCES = 5
 # the credibility the citation was there to buy, and as grounding these return
 # somebody's comment rather than a finding. Observed on the first live search,
 # which returned Reddit, Facebook and YouTube among its eight results.
+#
+# Extended on 2026-10-03 with what the week before had cited: a Threads post
+# whose title claimed a "leakage warning on the bag" that never existed (it
+# had moved to threads.com), a LinkedIn post the pipeline could not even read,
+# an Amazon listing that became the only source for "thirty seconds under cold
+# water is enough", and a paid Q&A answer about microwave cold spots. Shops and
+# answer sites belong with the social networks: as grounding they are a seller
+# or a stranger, and as a citation they cost what a citation is for.
 EXCLUDED_DOMAINS = frozenset(
     {
         "facebook.com",
         "instagram.com",
+        "linkedin.com",
         "pinterest.com",
         "quora.com",
         "reddit.com",
+        "threads.com",
         "threads.net",
         "tiktok.com",
         "twitter.com",
         "x.com",
         "youtube.com",
         "youtu.be",
+        # Shops.
+        "aliexpress.com",
+        "ebay.com",
+        "etsy.com",
+        "walmart.com",
+        # Answer sites, paid and otherwise.
+        "brainly.com",
+        "chegg.com",
+        "coursehero.com",
+        "justanswer.com",
     }
 )
+# Amazon under any of its country domains: amazon.com, amazon.co.uk, amazon.de.
+_AMAZON = re.compile(r"(?:^|\.)amazon\.(?:[a-z]{2,3})(?:\.[a-z]{2})?$")
 
 
 @dataclass(frozen=True)
@@ -154,7 +178,7 @@ def host_of(url: str) -> str:
 def is_allowed(url: str) -> bool:
     """Whether a result may be used as a source."""
     host = host_of(url)
-    if not host:
+    if not host or _AMAZON.search(host):
         return False
     return not any(
         host == domain or host.endswith(f".{domain}") for domain in EXCLUDED_DOMAINS
@@ -235,6 +259,77 @@ def gather(queries: Sequence[str], limit: int = DEFAULT_RESULT_COUNT) -> List[So
             if len(collected) >= BRIEF_MAX_SOURCES:
                 return collected
     return collected
+
+
+# Whether a source is about the video's subject is a judgement the search
+# engine cannot make: it matches words. In the week of 2026-09-27 that put a
+# case report on implantable loop recorders under a pacemaker Short (matched on
+# "heart recorder"), a study of how much dehydrated men sweat after drinking
+# under a Short about a glass of water sweating, and a school test item under
+# bees and electric fields. Worse than wasted: the knowledge step reads
+# reference hosts first, and both papers were on nih.gov, so they were the
+# pages read in full — thirteen of the pacemaker Short's fourteen stored facts
+# were about loop recorders, and both papers were cited in the description.
+RELEVANCE_PROMPT = """
+    A video is being written about this subject:
+    {subject}
+
+    Below are web search results. Keep only those that are about this subject
+    itself: the same event, phenomenon, experiment, object or person. Drop a
+    result that merely shares words with it, one about a different thing with a
+    similar name, and any that is a product listing, a shop, an advert, a
+    school test item or a forum answer, even when it is on topic.
+
+{listing}
+
+    Return ONLY a JSON array of the numbers to keep, for example [1, 3, 4].
+"""
+
+
+def keep_relevant(
+    sources: Sequence[Source],
+    subject: str,
+    judge: Callable[[str], Optional[str]],
+) -> List[Source]:
+    """The sources a judge says are about the subject, in their original order.
+
+    `judge` is given the prompt and returns the model's reply, or None when no
+    model is available. Injected rather than imported so this module stays free
+    of the model clients. Anything unreadable keeps every source: a filter that
+    fails must not cost the video its research.
+    """
+    if not sources:
+        return []
+    listing = "\n\n".join(
+        f"    [{index}] {source.title or source.url} ({host_of(source.url)})\n"
+        f"    {source.snippet[:300]}"
+        for index, source in enumerate(sources, 1)
+    )
+    try:
+        reply = judge(RELEVANCE_PROMPT.format(subject=subject.strip(), listing=listing))
+    except Exception as err:
+        log(f"[!] Could not judge the sources ({err}); keeping all of them.", "warning")
+        return list(sources)
+    if not reply:
+        return list(sources)
+    match = re.search(r"\[[\d,\s]*\]", reply)
+    try:
+        numbers = json.loads(match.group()) if match else None
+    except json.JSONDecodeError:
+        numbers = None
+    if not isinstance(numbers, list):
+        log("[!] The source judge's reply was unreadable; keeping all sources.", "warning")
+        return list(sources)
+    wanted = {number for number in numbers if isinstance(number, int)}
+    kept = [source for index, source in enumerate(sources, 1) if index in wanted]
+    dropped = [source for index, source in enumerate(sources, 1) if index not in wanted]
+    if dropped:
+        log(
+            f"[+] Kept {len(kept)} of {len(sources)} sources as on topic; dropped: "
+            + "; ".join((source.title or source.url)[:60] for source in dropped),
+            "info",
+        )
+    return kept
 
 
 def format_brief(sources: Sequence[Source]) -> str:

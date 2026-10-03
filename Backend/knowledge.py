@@ -108,6 +108,34 @@ _COMPARE = re.compile(
     r"at least|at most)\b",
     re.IGNORECASE,
 )
+# A sentence that limits a claim: what is unproven, disputed, a single case, or
+# not the cause. Scored as a fact because it is one, and the one the writer
+# most needs. On 2026-09-29 the stainless-steel Short stated as settled a
+# mechanism its own stored fact called unproven ("there is no conclusive,
+# rigorous evidence for it"), and the Comet line in the airplane-window Short
+# went out against a Wikipedia sentence that would have stopped it — "was not
+# viewed as a contributing factor" — which carries no figure, so it was never
+# stored at all.
+_HEDGE = re.compile(
+    r"\bhypothes[ie]s|\bhypothesi[sz]ed\b|"
+    r"\b(?:has|have)(?:n't| not| never) been (?:verified|proven|confirmed|tested|shown|demonstrated)\b|"
+    r"\bno (?:(?:conclusive|rigorous|direct|clear|strong|scientific|good|hard),? ){1,3}evidence\b|"
+    r"\b(?:little|no|limited) (?:hard |scientific |direct )?evidence\b|"
+    r"\bremains? (?:unclear|unknown|unproven|debated|disputed|controversial)\b|"
+    r"\bis (?:disputed|debated|contested|unproven)\b|"
+    r"\b(?:myth|misconception|apocryphal|urban legend)\b|"
+    r"\bcontrary to (?:popular|common) belief\b|"
+    r"\bnot (?:viewed|considered|regarded|thought) (?:as|to be)\b|"
+    r"\bcontributing factor\b|\bcase report\b|\banecdotal\b",
+    re.IGNORECASE,
+)
+# A finding's statistics, in brackets after it: "(p <0.05)". The methods filter
+# below rejects any p-value, which is right for "p = 0.0307, Supplementary
+# Table S5" and wrong for a result. On the zebra-cow paper that dropped "the
+# frequency of skin twitches of B&W was significantly higher than that of CONT
+# and B (p <0.05) cows", and the Short went out saying the striped cows
+# twitched less.
+_BRACKETED_P = re.compile(r"\(\s*p\s*[=<>≤]\s*0?\.\d+\s*\)", re.IGNORECASE)
 
 # A sentence containing any of these is page furniture or a citation, not a
 # fact about the subject.
@@ -375,7 +403,8 @@ def specificity(sentence: str) -> float:
     has_number = bool(quantities) or has_year
     has_extreme = bool(_EXTREME.search(sentence))
     has_compare = bool(_COMPARE.search(sentence))
-    if not (has_number or has_extreme or has_compare):
+    has_hedge = bool(_HEDGE.search(sentence))
+    if not (has_number or has_extreme or has_compare or has_hedge):
         return 0.0
     return (
         (2.0 if quantities else 1.0 if has_year else 0.0)
@@ -383,6 +412,9 @@ def specificity(sentence: str) -> float:
         + 1.0 * bool(quantities and _SCALE.search(sentence))
         + 1.0 * has_extreme
         + 1.0 * has_compare
+        # As much as a figure with its unit: a limit is worth as much as the
+        # number it limits.
+        + 3.0 * has_hedge
     )
 
 
@@ -398,7 +430,7 @@ def looks_like_prose(sentence: str) -> bool:
         _BOILERPLATE.search(sentence)
         or _ADDRESS.search(sentence)
         or _BYLINE.search(sentence)
-        or _METHODS.search(sentence)
+        or _METHODS.search(_BRACKETED_P.sub("", sentence))
     ):
         return False
     # A run of capitalised words is a title, a reference or a list of names.
@@ -455,13 +487,39 @@ def is_reference(url: str) -> bool:
     )
 
 
+def title_key(title: str) -> str:
+    """A page title without its site name, for telling two copies apart.
+
+    "Cows painted with zebra-like striping can avoid biting fly attack | PLOS
+    One" and "… - PMC - NIH" are one paper. On 2026-09-27 both were read in
+    full, so a video's two reads produced one source's facts twice.
+    """
+    parts = re.split(r"\s+[|·–—-]\s+", title or "")
+    longest = max(parts, key=len) if parts else ""
+    return re.sub(r"[^a-z0-9]+", " ", longest.lower()).strip()
+
+
 def choose_pages(sources: Sequence["research.Source"], count: int = PAGES_PER_VIDEO) -> list:
-    """The sources worth reading in full: reference pages first, then search order."""
+    """The sources worth reading in full: reference pages first, then search order.
+
+    One copy of each page: a paper on its journal's site and on PubMed Central
+    counts once.
+    """
     candidates = [source for source in sources if not is_pdf(source.url)]
     ranked = sorted(
         enumerate(candidates), key=lambda item: (not is_reference(item[1].url), item[0])
     )
-    return [source for _, source in ranked[:count]]
+    chosen: list = []
+    seen: set = set()
+    for _, source in ranked:
+        key = title_key(source.title)
+        if key and key in seen:
+            continue
+        seen.add(key)
+        chosen.append(source)
+        if len(chosen) >= count:
+            break
+    return chosen
 
 
 _WORD = re.compile(r"[a-z][a-z]{3,}")

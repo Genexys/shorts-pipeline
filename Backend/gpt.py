@@ -1109,6 +1109,19 @@ def drop_weak_ending(script: str, floor: int, cut_short: bool = False) -> str:
 # script worth trusting — a real figure a viewer can check beats "some research
 # suggests" — but an 8B model asked for one with no source invents it, and an
 # invented citation is worse than no citation: it looks verifiable and is not.
+#
+# "Claim exactly what the notes claim" was added on 2026-10-03. That week every
+# figure on air was sourced, and the strength of what was said about them was
+# still wrong, in a third of the Shorts:
+# - A stainless-steel Short stated as settled a mechanism its stored fact
+#   called unproven.
+# - A bee Short said flowers broadcast whether their nectar is gone, which its
+#   paper raises only as a question.
+# - A zebra-cow Short gave a stable-fly cost as the cost of all biting flies,
+#   and said the cows twitched less when twitching went up.
+# - A Soutra Short called an excavator's reading "proof".
+# - A pacemaker Short opened, and was titled, "invented the pacemaker" from a
+#   source that said "helped create".
 RESEARCH_RULES = """
     Use the numbered research notes below as your only source of specifics.
     Concrete detail is wanted: figures, dates, place names and named studies
@@ -1126,6 +1139,19 @@ RESEARCH_RULES = """
     plausible-sounding explanation.
     If the subject itself is not borne out by the notes, write about what the
     notes actually show rather than defending the premise.
+    Claim exactly what the notes claim, no more:
+    - Keep their hedges. Where a note says may, suggests, is thought to, a
+      hypothesis, a single case, or that evidence is lacking, the script says
+      so too. What a note calls unproven is never stated as settled, and what
+      an excavator or an author concludes is their reading, not proof.
+    - Keep a figure's scope. A number a note gives for stable flies is not a
+      number for biting flies, and a result for one behaviour is not a result
+      for a list of them: say only what the notes report for each.
+    - "First", "invented", "discovered" and "the world's" need a note that
+      says exactly that. A note that says "helped create" or "first
+      implantable" keeps its qualifier.
+    - This holds for the first sentence most of all. It is the hook, it often
+      becomes the title, and an overstated one is the claim every viewer hears.
     Pages mention more than one person. A note that says "he", "she" or "they"
     is about whoever that note, or the page title beside it, names — which may
     not be the person this video is about. If neither names anyone, leave the
@@ -1176,12 +1202,22 @@ LONG_ENDING_RULES = """        - This is the last section, so it has to close th
 """
 
 
+# The last two sentences, from 2026-10-03:
+# - The Champollion Short marked the 27 September 1822 anniversary with
+#   Xerxes, whose name he read in 1823. Its notes dated the publication to
+#   1824.
+# - The Appleton Short's event line read "Thomas Edison's first commercial
+#   hydroelectric power plant", for a plant Edison neither built nor ran.
 ANCHOR_RULES = """
     This video is about one specific event, given below. Write about that event
     and nothing else. If the research notes are mostly about something adjacent
     — a later development, a different team, a modern version — they are the
     wrong notes: say what you can about the event itself and stop. Do not
     transplant the story onto whoever the notes happen to describe.
+    The event line is a one-line summary from a calendar, and it can be wrong
+    about who did what. Where the notes disagree with it, the notes win.
+    Whatever the notes date after the event did not happen on its date. If you
+    include it, say when it did happen.
 """
 
 

@@ -208,6 +208,24 @@ institution. That is the safe fallback rather than the good one: the model
 given no sources fabricates plausible specifics, which is exactly the failure
 being avoided.
 
+Results from social networks, shops (Amazon under any country domain, eBay,
+Etsy), LinkedIn, Threads and answer sites (JustAnswer, Chegg) are dropped
+before they reach the brief or the description.
+
+With `ANTHROPIC_API_KEY` set, the writer then reads every result's title and
+snippet and keeps only the ones about the subject itself. A search matches
+words, not meaning: in one week it put a case report on loop recorders under a
+pacemaker video, a study of men sweating under a video about a glass of water
+"sweating", and a school test item under bees. Both papers were on nih.gov, so
+the knowledge base read them first. The judge costs about a cent a video, and
+one more per section of a long video. Without the key, or if its answer cannot
+be read, every result is kept as before.
+
+The prompt also requires the script to claim no more than the notes do. It
+keeps their hedges ("may", "a hypothesis", "a single case"), keeps the scope of
+each figure, and says "first" or "invented" only where a note does. That holds
+for the opening sentence most of all, since it often becomes the title.
+
 Search bills 2 credits per 10 results against a free 1000 a month, so three
 videos a day costs well under the free tier. A failed search, an exhausted
 balance or a missing key all produce the same thing: an empty brief and a
@@ -220,7 +238,11 @@ page's best. So the two best sources of each video — reference pages such as
 Wikipedia, `.gov` and `.edu` first, PDFs never — are read in full, and every
 sentence on them that carries something specific (a figure, a comparison, a
 first or a record) is stored in the `knowledge_pages` and `facts` tables and
-added to the brief under the snippets.
+added to the brief under the snippets. So is any sentence that limits a claim:
+something unproven, disputed, a myth or a case report, "not a contributing
+factor". A finding is kept with its p-value in brackets; the methods
+statistics around it are still dropped. One paper on two sites (the journal
+and PubMed Central) is read once.
 
 Facts are stored **verbatim**: each is a sentence that appears word for word on
 the page it cites, so nothing can be invented on the way in. Reference lists,

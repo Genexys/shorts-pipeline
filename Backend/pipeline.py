@@ -235,6 +235,16 @@ def run_generation_pipeline(
     # Verbatim facts from the best pages, filled in once the sources are known.
     # Read by section_research at call time, so long form gets them too.
     facts_block = ""
+    # What the source judge is told the video is about. The event as well as
+    # the topic line, because the search was for the event.
+    judged_subject = data["videoSubject"] + (
+        f"\n    The event it is about: {anchor}" if anchor else ""
+    )
+
+    def on_topic(found: list) -> list:
+        # The writer judges; with no writer every source is kept, as before.
+        return research.keep_relevant(found, judged_subject, writer.write)
+
     if research.is_configured():
         # Search the event, not the topic line. The topic deliberately omits
         # the date, so searching it alone returns whatever the words match —
@@ -249,8 +259,10 @@ def run_generation_pipeline(
             Collected into `sources` as well, so the description cites what the
             script was actually written from.
             """
-            found = research.gather(
-                [f'{data["videoSubject"]} {heading}'], limit=fmt.research_results
+            found = on_topic(
+                research.gather(
+                    [f'{data["videoSubject"]} {heading}'], limit=fmt.research_results
+                )
             )
             for source in found:
                 if all(source.url != existing.url for existing in sources):
@@ -273,6 +285,9 @@ def run_generation_pipeline(
                     if all(found.url != existing.url for existing in sources):
                         sources.append(found)
 
+        # Judged once the thin-results search has had its turn, so a topic that
+        # needed the second search is judged on everything it found.
+        sources = on_topic(sources)
         emit(f"[+] Research: {len(sources)} source(s) found.", "info")
 
     brief = research.format_brief(sources)
