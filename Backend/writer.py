@@ -18,11 +18,27 @@ from typing import Dict, Iterable, NamedTuple, Optional, Tuple
 from logstream import log
 from notify import send_telegram
 
-# Roughly 240k input and 32k output tokens a month at three videos a day, which
-# is about two dollars on Opus. Cheaper models exist; humour is the one task
-# where the strongest model earns its keep, and the absolute cost is noise next
-# to the narration bill.
-DEFAULT_MODEL = "claude-opus-5"
+# The current Opus, at $4 / $20 per million tokens against Claude Opus 5's $5 /
+# $25 (moved on 2026-10-03). The old estimate here, two dollars a month, counted
+# three videos a day and the topic and script alone; it is now four a day plus
+# search terms, metadata and the source judge, and the model's thinking is
+# billed as output too. Still small next to the narration bill, but unmeasured:
+# the console's usage page is the number to trust. Cheaper models exist; judging
+# what is absurd, and what a source actually supports, is where the strongest
+# model earns its keep.
+DEFAULT_MODEL = "claude-opus-5-5"
+# How hard the model thinks. Claude Opus 5.5 defaults to "medium", a level below
+# what Claude Opus 5 did with no setting at all, so moving model without this
+# would also have quietly cut the thinking behind every script. Every current
+# Claude model accepts it; Claude Haiku 4.5 does not, so a SCRIPT_MODEL set to
+# that would fail and go to the local model.
+EFFORT = "high"
+# When the model's safety classifiers decline a request, the API re-runs it on
+# the model Anthropic recommends for that kind of refusal, in the same call.
+# Claude Opus 5.5 added biology to the categories it declines, and this channel
+# is half biology — horned lizards, opossums, onion chemistry. Without it a false
+# positive costs the retry below and then goes to the local model.
+SERVER_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Asked only when the primary is overloaded or down. Sonnet is a step down from
 # Opus and a long way up from the 8B model. On 2026-09-28 the drop went from
 # Opus straight to llama3.1:8b for five of a long video's eight sections, and
@@ -128,12 +144,14 @@ def scrub(text: str) -> str:
 def rank(model: str) -> int:
     """How strong a writer `model` is: LOCAL < FALLBACK < PRIMARY.
 
-    Anything that is neither Claude model is the local one.
+    Any Claude model other than the primary counts as a fallback: besides
+    SCRIPT_FALLBACK_MODEL, the API's own refusal fallback can answer with a
+    model this module never named. Anything else is the local one.
     """
     name = (model or "").strip()
     if name and name == model_name():
         return PRIMARY
-    if name and name == fallback_model_name():
+    if name and (name == fallback_model_name() or name.startswith("claude-")):
         return FALLBACK
     return LOCAL
 
@@ -224,19 +242,25 @@ def _alert_account_problem(err: Exception) -> None:
         log(f"[-] Could not send the account alert: {scrub(str(alert_err))}", "warning")
 
 
-def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[str], str]:
-    """One request. Returns the text, or None and what went wrong.
+def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[Written], str]:
+    """One request. Returns the text and who wrote it, or None and what went wrong.
 
     The kinds are distinguished because each wants something different: a
     refusal is worth asking again with the brief stated, while a rate limit or
     a timeout will not care how the prompt is worded and is waited out
     instead. An account problem is reported here, where the error is in hand.
+
+    Who wrote it is the model the response names, which is not `model` when the
+    API's refusal fallback answered instead.
     """
     try:
-        response = _client(max_retries).messages.create(
+        response = _client(max_retries).beta.messages.create(
             model=model,
             max_tokens=MAX_TOKENS,
             messages=[{"role": "user", "content": prompt}],
+            output_config={"effort": EFFORT},
+            betas=[SERVER_FALLBACK_BETA],
+            fallbacks="default",
         )
     except Exception as err:
         log(f"[!] {model} unavailable ({scrub(str(err))}).", "warning")
@@ -254,16 +278,20 @@ def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[str], 
     if not text:
         log(f"[!] {model} returned nothing usable.", "warning")
         return None, FAILED
-    return text, WROTE
+    served = getattr(response, "model", None)
+    served = served if isinstance(served, str) and served else model
+    if served != model:
+        log(f"[!] {model} declined this one; {served} answered in its place.", "warning")
+    return Written(text, served), WROTE
 
 
-def _attempt_through_outage(model: str, prompt: str) -> Tuple[Optional[str], str]:
+def _attempt_through_outage(model: str, prompt: str) -> Tuple[Optional[Written], str]:
     """One request, asked again on each rung of the ladder while it is an outage.
 
     The SDK's own retries are off here: the ladder is the retry policy, and a
     timeout the SDK retried twice would triple every rung.
     """
-    text, kind = _attempt(model, prompt, max_retries=0)
+    written, kind = _attempt(model, prompt, max_retries=0)
     for delay in OUTAGE_BACKOFF_SECONDS:
         if kind != OUTAGE:
             break
@@ -272,37 +300,37 @@ def _attempt_through_outage(model: str, prompt: str) -> Tuple[Optional[str], str
             "warning",
         )
         _sleep(delay)
-        text, kind = _attempt(model, prompt, max_retries=0)
-    return text, kind
+        written, kind = _attempt(model, prompt, max_retries=0)
+    return written, kind
 
 
-def _ask(model: str, prompt: str, patient: bool) -> Tuple[Optional[str], str]:
+def _ask(model: str, prompt: str, patient: bool) -> Tuple[Optional[Written], str]:
     """One model's answer, asked a second time with the brief stated if it declines.
 
     `patient` waits out an outage on the ladder; otherwise the SDK's quick
     retries are all an outage gets.
     """
 
-    def once(request: str) -> Tuple[Optional[str], str]:
+    def once(request: str) -> Tuple[Optional[Written], str]:
         if patient:
             return _attempt_through_outage(model, request)
         return _attempt(model, request, max_retries=FALLBACK_SDK_RETRIES)
 
-    text, kind = once(prompt)
+    written, kind = once(prompt)
     if kind != REFUSED:
-        return text, kind
+        return written, kind
 
     log(
         f"[!] {model} declined this one; asking again with the brief stated.",
         "warning",
     )
-    text, kind = once(f"{RETRY_PREAMBLE}\n{prompt}")
+    written, kind = once(f"{RETRY_PREAMBLE}\n{prompt}")
     if kind == REFUSED:
         log(
             f"[!] {model} declined it twice; the local model writes this one.",
             "warning",
         )
-    return text, kind
+    return written, kind
 
 
 def write_with_model(prompt: str) -> Optional[Written]:
@@ -330,9 +358,9 @@ def write_with_model(prompt: str) -> Optional[Written]:
         )
         kind = OUTAGE
     else:
-        text, kind = _ask(primary, prompt, patient=True)
-        if text:
-            return Written(text, primary)
+        written, kind = _ask(primary, prompt, patient=True)
+        if written:
+            return written
         if kind == OUTAGE:
             _down_until[primary] = _clock() + OUTAGE_MEMORY_SECONDS
             log(
@@ -345,9 +373,9 @@ def write_with_model(prompt: str) -> Optional[Written]:
     if kind != OUTAGE or not fallback:
         return None
 
-    text, kind = _ask(fallback, prompt, patient=False)
-    if text:
-        return Written(text, fallback)
+    written, kind = _ask(fallback, prompt, patient=False)
+    if written:
+        return written
     if kind == OUTAGE:
         log(f"[!] {fallback} unavailable too; the local model writes this one.", "warning")
     return None
