@@ -216,8 +216,10 @@ def test_a_unit_without_a_number_is_not_a_measurement():
 # -- choosing pages ---------------------------------------------------------------
 
 
-def _source(url, title="t"):
-    return Source(title=title, url=url, snippet="s")
+def _source(url, title=None):
+    # A title of its own by default: two pages with one title are one page to
+    # choose_pages.
+    return Source(title=title if title is not None else url, url=url, snippet="s")
 
 
 def test_choose_pages_reads_reference_pages_first_and_skips_pdfs():
