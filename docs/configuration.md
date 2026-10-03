@@ -282,14 +282,24 @@ the script is written in another process.
 
 ## The writer
 
-With `ANTHROPIC_API_KEY` set, three calls leave Ollama: the **topic**, the
-**script**, and the **stock search terms**. YouTube metadata and the music mood stay behind: those are
-structured extraction, and the local model does them well and for free.
+With `ANTHROPIC_API_KEY` set, four calls leave Ollama: the **topic**, the
+**script**, the **stock search terms**, and the **YouTube title, description
+and tags**. The music mood stays behind: that is structured extraction, and the
+local model does it well and for free.
 
 Search terms were on that list until an onion video searched "tear gas
 escape" — a metaphor from its own script — and came back with birds
 scattering off a river. Deciding whether a phrase names something a camera
 can point at is judgement, not extraction.
+
+Metadata moved for the same reason. In the week of 2026-09-27 the local model
+put more false statements into titles and descriptions than the writer put into
+the narration — "Edison's Hydroelectric Rival" for a plant built on Edison's
+licence, "the first pacemaker" where the source said "helped create" — and on
+long videos it read only the first 200 words, so a video about the first CT
+scan was titled and tagged as one about Röntgen. The writer reads the whole
+script and may say only what the script says. If it is unavailable, the local
+model writes the metadata from the 200-word excerpt, as before.
 
 Those two are where judgement shows. A curio in particular lives or dies on
 whether the subject is genuinely absurd rather than merely phrased as though it

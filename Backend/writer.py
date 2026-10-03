@@ -1,10 +1,11 @@
 """The creative half of the pipeline, optionally written by a stronger model.
 
-Only two calls go here: the topic and the script. Those are where judgement
-shows — especially for a curio, where the difference between a subject that is
-genuinely absurd and one that merely sounds like it is exactly the
-discrimination a small model lacks. Search terms, metadata and music mood are
-structured extraction; the local model does them well and for free.
+The calls that go here are the ones where judgement shows: the topic, the
+script, the stock search terms, and the title and description — especially for
+a curio, where the difference between a subject that is genuinely absurd and
+one that merely sounds like it is exactly the discrimination a small model
+lacks. The music mood is structured extraction; the local model does it well
+and for free.
 
 Optional by construction. With no ANTHROPIC_API_KEY the pipeline runs entirely
 on Ollama, as it always has.
