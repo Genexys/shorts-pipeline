@@ -102,6 +102,7 @@ def process_next_job() -> bool:
                         "narrationFellBack": result.narration_fell_back,
                         "scriptModel": result.script_model,
                         "scriptFellBack": result.script_fell_back,
+                        "scriptLocal": result.script_local,
                     },
                     commit=False,
                 )

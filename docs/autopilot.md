@@ -52,6 +52,9 @@ Messages:
 
 - `Autopilot started. Niche: <niche>. <N>/day, window <window> <tz>.`
 - `✅ <title>` + YouTube link (or `upload skipped: <reason>`) + job id
+  - with `⚠️ written by <model>` when the primary Claude model did not write the script
+  - with `🔒 uploaded as PRIVATE for review` instead, for a long video the local model helped write: it went up private whatever `YOUTUBE_PRIVACY_STATUS` says, and stays that way until published by hand (see "The writer" in `docs/configuration.md`)
+- `⚠️ The Anthropic credit balance has run out.` (or `Anthropic rejected the API key`) — sent by whichever process hit it, worker or autopilot, at most once every four hours each; scripts are written by the local model until it is fixed
 - `❌ <subject>` + error + job id and attempts
 - `⚠️ <subject> cancelled` + job id
 - `⚠️ <subject>` + `job <id> queued for <N>h, worker may be stuck` — once per topic after 3 hours without a result

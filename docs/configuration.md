@@ -13,6 +13,7 @@ Use `.env.example` as your template.
 | `PIXABAY_API_KEY` | *Optional.* A second stock library, merged with Pexels. Empty uses Pexels alone. Long videos need it — see [Stock footage](#stock-footage). |
 | `ANTHROPIC_API_KEY` | *Optional.* Writes the topic and the script with a stronger model — see [The writer](#the-writer). Empty keeps everything on Ollama. |
 | `SCRIPT_MODEL` | *Optional.* Model for those two calls. | `claude-opus-5` |
+| `SCRIPT_FALLBACK_MODEL` | *Optional.* Second Claude model, used only while `SCRIPT_MODEL` is overloaded or down — see [The writer](#the-writer). Unset uses the default; set to an empty value to go straight to Ollama instead. | `claude-sonnet-5-5` |
 | `FIRECRAWL_API_KEY` | *Optional.* Grounds scripts in real search results and lists the sources in the description — see [Research](#research). Empty writes scripts with no specifics at all. |
 
 ## Optional
@@ -40,7 +41,7 @@ Use `.env.example` as your template.
 
 | Variable | Description | Default |
 |---|---|---|
-| `YOUTUBE_PRIVACY_STATUS` | Privacy of uploaded videos: `private`, `unlisted` or `public`. Invalid values fall back to `private` with a warning. | `private` |
+| `YOUTUBE_PRIVACY_STATUS` | Privacy of uploaded videos: `private`, `unlisted` or `public`. Invalid values fall back to `private` with a warning. A long video the local model helped write goes up `private` regardless — see [The writer](#the-writer). | `private` |
 | `YOUTUBE_CATEGORY_ID` | YouTube category id for uploads (`28` = Science & Technology). | `28` |
 | `YOUTUBE_CLIENT_SECRETS_FILE` | Path to the OAuth client JSON. | `Backend/client_secret.json` |
 | `YOUTUBE_TOKEN_FILE` | Path to the saved OAuth token. | `Backend/youtube_token.json` |
@@ -344,8 +345,61 @@ were, and telling those apart is exactly the discrimination a small model
 lacks. It can write joke-shaped text; it cannot reliably tell whether the joke
 landed.
 
-Failure is never fatal. A missing key, a rate limit, an outage or a refusal all
-fall back to Ollama for that call — a video written locally beats no video.
+Failure is never fatal: whatever happens, the call ends with some model's text
+— a video written locally beats no video. But the local model is the last
+resort, not the first, and what happens before it depends on what went wrong.
+
+**Overload or outage.** A 529, 500, 502, 503 or 504, a rate limit (429), a
+dropped connection or a timeout is waited out: the primary model is asked again
+after 30 s, 60 s and 120 s (`OUTAGE_BACKOFF_SECONDS` in `Backend/writer.py`),
+three and a half minutes in all. The SDK's own retries are off for these
+requests; they are a fraction of a second apart, and on 2026-09-28 they gave up
+on an overloaded Opus at once, so llama3.1:8b wrote five of a long video's
+eight sections and its search terms.
+
+If the ladder runs out, `SCRIPT_FALLBACK_MODEL` (Sonnet by default) writes the
+call, with only the SDK's quick retries. The process then remembers the outage
+for ten minutes: every call in that time goes straight to the fallback model
+without climbing the ladder again, since a long video makes eight section calls
+and the search terms, and three and a half minutes each would hold the queue
+for half an hour. Only if the fallback model fails too does Ollama write. With
+`SCRIPT_FALLBACK_MODEL` set to an empty value, Ollama writes instead, and still
+without the ladder for those ten minutes.
+
+**Refusal.** Asked once more with the purpose of the request stated, as before.
+A refusal is not an outage: no waiting, no fallback model, and a second refusal
+goes to Ollama.
+
+**Account problem.** A 400 saying the credit balance is too low, a 402, or an
+authentication or permission error (401, 403) cannot be waited out, and the
+fallback model bills the same account, so the call goes straight to Ollama and
+the owner is told: one Telegram message (via `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID`) saying scripts are now written by the local model and the
+balance needs topping up — or, for 401/403, the key needs checking. It is sent
+at most once every four hours per process, so the worker and the autopilot may
+each send one. On 2026-09-27 the balance ran out at 15:00 and every call
+quietly fell back to llama until a video was reviewed by hand.
+
+Anything else — an unknown model, a malformed request, an empty answer — goes
+to Ollama at once, as before.
+
+**Who wrote it.** The script records the model that actually wrote it
+(`scriptModel` on the video artifact). A long script is written a section at a
+time and can change hands part way, so it is filed under its weakest writer,
+ranked local < fallback Claude < primary: Opus and Sonnet make a Sonnet script,
+and any section by Ollama makes an Ollama script. The video artifact carries
+`scriptFellBack` (not written by the primary) and `scriptLocal` (written, at
+least in part, by the local model instead of Claude); both stay false when no
+key is configured, since Ollama writing is then the design and not a fallback.
+
+**A long video the local model helped write goes up private**, whatever
+`YOUTUBE_PRIVACY_STATUS` says, and is not cross-posted to Instagram. The
+autopilot's Telegram report says so plainly, so it can be watched and
+published by hand in YouTube Studio. On 2026-09-28 such a video went out public
+with a fabricated claim about a real doctor (https://youtu.be/uynIVYwuEvw).
+A Short keeps the configured status, and its report carries the usual
+`⚠️ written by …` line. The privacy actually used is recorded on the
+`youtube_video` artifact as `privacyStatus`.
 
 At three videos a day this is roughly 240k input and 32k output tokens a month:
 about two dollars on the default model, and noise beside the narration bill.

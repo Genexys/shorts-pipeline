@@ -105,12 +105,14 @@ def write_creative(
     can only record what it asked for, which is how every script in the
     database came to be filed under llama3.1:8b regardless of who wrote it —
     and that is exactly the field we need when comparing retention by author.
+    The writer says which Claude model answered, since the fallback model
+    stands in for the primary when that one is overloaded.
     """
-    written = writer.write(prompt)
+    written = writer.write_with_model(prompt)
     if written:
         if report_model:
-            report_model(writer.model_name())
-        return written
+            report_model(written.model)
+        return written.text
     if report_model:
         report_model((ai_model or "").strip() or OLLAMA_MODEL)
     return generate_response(prompt, ai_model)
@@ -1981,7 +1983,8 @@ def generate_long_script(
     plan = "\n".join(f"{index}. {heading}" for index, heading in enumerate(outline, 1))
     sections: List[str] = []
     # Which model wrote each section. A script that is part Opus and part Ollama
-    # is not an Opus script, so any fallback anywhere is reported as a fallback.
+    # is not an Opus script, so the weakest writer of any section is the one
+    # reported — see the end of this function.
     written_by: List[str] = []
 
     def note_section_model(name: str) -> None:
@@ -2076,9 +2079,11 @@ def generate_long_script(
             sections[-1] = landed
 
     if report_model and written_by:
-        strong = writer.model_name()
-        weaker = [name for name in written_by if name != strong]
-        report_model(weaker[0] if weaker else strong)
+        # The weakest, not the first that was not the primary. With a fallback
+        # model a section can be written by Sonnet and a later one by llama,
+        # and reporting Sonnet would file that script with the ones the local
+        # model never touched.
+        report_model(writer.weakest(written_by))
 
     if not sections:
         log("[-] Every section came back empty.", "error")
