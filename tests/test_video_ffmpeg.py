@@ -185,8 +185,9 @@ def test_patch_ass_script_replaces_the_style():
 
 
 def test_patch_ass_script_keeps_the_dialogue():
+    # Upper-cased, which the bundled font draws the same (test_caption_capitals).
     patched = video.patch_ass_script(ASS_FROM_FFMPEG, "center,center", "#FFFF00")
-    assert "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,hello" in patched
+    assert "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,HELLO" in patched
 
 
 def test_patch_ass_script_inserts_resolution_when_absent():
