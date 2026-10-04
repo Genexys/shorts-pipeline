@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from moviepy import AudioFileClip, concatenate_audioclips
 
+import footage_judge
 import knowledge
 import research
 from formats import LONG, VideoFormat, resolve_format
@@ -34,6 +35,7 @@ from utils import (
     choose_random_song,
 )
 from video import (
+    OPENING_SAMPLE_SECONDS,
     combine_videos,
     find_usable_footage,
     make_silence,
@@ -43,6 +45,7 @@ from video import (
     generate_video,
     mix_background_music,
     normalize_audio,
+    sample_frame,
     save_video,
 )
 from instagram import upload_reel
@@ -422,12 +425,13 @@ def run_generation_pipeline(
     # leaves the video short of footage and it starts repeating itself.
     wanted = fmt.stock_video_count
 
-    def collect(per_term: list) -> None:
+    def collect(per_term: list, target: Optional[int] = None) -> None:
+        target = wanted if target is None else target
         for depth in range(it):
-            if len(video_urls) >= wanted:
+            if len(video_urls) >= target:
                 return
             for entry in per_term:
-                if len(video_urls) >= wanted:
+                if len(video_urls) >= target:
                     return
                 found_urls = entry["urls"]
                 if depth < len(found_urls) and found_urls[depth] not in video_urls:
@@ -461,18 +465,64 @@ def run_generation_pipeline(
 
     video_paths = []
     url_for_path: dict = {}
+
+    def download(urls: list) -> list:
+        saved = []
+        for video_url in urls:
+            guard_cancelled()
+            try:
+                saved_video_path = save_video(video_url)
+                saved.append(saved_video_path)
+                url_for_path[saved_video_path] = video_url
+            except Exception:
+                emit(f"[-] Could not download video: {video_url}", "error")
+        video_paths.extend(saved)
+        return saved
+
     emit(f"[+] Downloading {len(video_urls)} videos...", "info")
-
-    for video_url in video_urls:
-        guard_cancelled()
-        try:
-            saved_video_path = save_video(video_url)
-            video_paths.append(saved_video_path)
-            url_for_path[saved_video_path] = video_url
-        except Exception:
-            emit(f"[-] Could not download video: {video_url}", "error")
-
+    download(video_urls)
     emit("[+] Videos downloaded!", "success")
+
+    ffmpeg_binary = os.getenv("FFMPEG_BINARY", "").strip() or "ffmpeg"
+    # Measured before anything is chosen, so the footage check and the opening
+    # both judge the frames each shot will actually show.
+    footage = find_usable_footage(video_paths, fmt)
+    openers = None
+    if footage_judge.is_enabled():
+        windows = dict(footage)
+
+        def term_of(path: str) -> str:
+            return clip_origin.get(url_for_path.get(path), {}).get("term", "")
+
+        def check(paths: list) -> dict:
+            guard_cancelled()
+            frames = []
+            for path in paths:
+                jpeg = sample_frame(
+                    path, windows[path][0] + OPENING_SAMPLE_SECONDS, fmt, ffmpeg_binary
+                )
+                if jpeg:
+                    frames.append(footage_judge.Frame(path, jpeg, term_of(path)))
+            return footage_judge.judge(frames, data["videoSubject"], script)
+
+        def replace(count: int) -> dict:
+            # From every search run so far, in the same round-robin, taking
+            # results no clip has used yet.
+            before = len(video_urls)
+            collect(searches, len(video_urls) + count)
+            found = find_usable_footage(
+                download(video_urls[before:]), fmt, keep_all_if_none=False
+            )
+            windows.update(found)
+            return found
+
+        footage, openers = footage_judge.vet_footage(
+            footage,
+            check,
+            replace,
+            describe=lambda path: f'{os.path.basename(path)} ("{term_of(path)}")',
+        )
+
     emit("[+] Script generated!", "success")
 
     guard_cancelled()
@@ -554,9 +604,6 @@ def run_generation_pipeline(
 
     temp_audio = AudioFileClip(tts_path)
     try:
-        # Measured once, before the opening is chosen, so the opening is
-        # judged on the frames its shot will actually show.
-        footage = find_usable_footage(video_paths, fmt)
         usable_paths = [path for path in video_paths if path in footage]
         # One shot per clip only holds while each shot can be long enough.
         # Below this many clips the run needs more shots than it has footage,
@@ -571,8 +618,9 @@ def run_generation_pipeline(
         ordered_paths = promote_strongest_opening(
             usable_paths,
             TEMP_DIR / f"{job_id}-openings",
-            os.getenv("FFMPEG_BINARY", "").strip() or "ffmpeg",
+            ffmpeg_binary,
             starts={path: start for path, (start, _) in footage.items()},
+            eligible=openers,
         )
         combined_video_path = combine_videos(
             ordered_paths, temp_audio.duration, n_threads or 2, fmt,

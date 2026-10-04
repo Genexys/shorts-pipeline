@@ -14,6 +14,7 @@ Use `.env.example` as your template.
 | `ANTHROPIC_API_KEY` | *Optional.* Writes the topic and the script with a stronger model — see [The writer](#the-writer). Empty keeps everything on Ollama. |
 | `SCRIPT_MODEL` | *Optional.* Model for the writer's calls — see [The writer](#the-writer). | `claude-opus-5-5` |
 | `SCRIPT_FALLBACK_MODEL` | *Optional.* Second Claude model, used only while `SCRIPT_MODEL` is overloaded or down — see [The writer](#the-writer). Unset uses the default; set to an empty value to go straight to Ollama instead. | `claude-sonnet-5-5` |
+| `FOOTAGE_MODEL` | *Optional.* Model that looks at a frame of every stock clip before it is used — see [Stock footage](#stock-footage). Needs `ANTHROPIC_API_KEY`; `off` turns the check off. | `claude-sonnet-5-5` |
 | `FIRECRAWL_API_KEY` | *Optional.* Grounds scripts in real search results and lists the sources in the description — see [Research](#research). Empty writes scripts with no specifics at all. |
 
 ## Optional
@@ -190,6 +191,32 @@ the way the format frames them:
 If that would leave no clips, all of them are used as before. The combined
 video is then checked again, and any black of half a second or more is logged
 as `Black in the combined video at ...`.
+
+**Every clip is looked at.** Stock search matches words, not pictures: on
+2026-10-03 the tomato Short opened on an AI-drawn pelican selling fish
+("vegetable market stall"), the Neanderthal one on a cartoon dog with a bone,
+and a tennis court stood in for the Supreme Court. So after the black check,
+the frame each shot opens on, cropped as it will be shown, goes to
+`FOOTAGE_MODEL` (Sonnet by default) with the subject, the narration and the
+term that found it. The model sorts it into real footage, a realistic render or
+a cartoon, and says whether a viewer would accept it as illustrating the video.
+Generic footage that suits the topic passes. These are rejected:
+
+- cartoons, drawings, mascots and AI-generated characters;
+- something else that only shares a word with the term;
+- a picture that contradicts the story, such as another country's flag or a
+  modern rocket for a 1957 launch;
+- horror imagery in a story that isn't horror.
+
+A rejected clip is logged as `Not using <file> ("<term>"): <kind>, <problem>`
+and replaced by the next unused search result. The replacements are checked
+too, for two rounds at most. Only real footage may open the video, since the
+opening is otherwise picked for contrast and cartoons have the most. One
+request covers a Short's ten frames and costs about a cent.
+
+The check never fails a job. With no `ANTHROPIC_API_KEY`, with
+`FOOTAGE_MODEL=off`, or when a request fails, clips are used unchecked. If
+every clip is rejected and nothing replaces them, they are all used anyway.
 
 ## Notes
 

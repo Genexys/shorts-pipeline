@@ -11,7 +11,7 @@ import requests
 import srt_equalizer
 import assemblyai as aai
 
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 from pathlib import Path
 # Only the audio clip type survives here: the video path is ffmpeg now, and
 # AudioFileClip is still what the pipeline hands to generate_subtitles.
@@ -835,13 +835,15 @@ def usable_footage(
 
 
 def find_usable_footage(
-    video_paths: List[str], fmt: VideoFormat = SHORT
+    video_paths: List[str], fmt: VideoFormat = SHORT, keep_all_if_none: bool = True
 ) -> Dict[str, Tuple[float, float]]:
     """Each usable clip's (start offset, usable seconds), keyed by path.
 
     Clips that are black where it matters are left out. If that would leave
     nothing, every clip is used from its first frame as before: a shot that
-    opens on black beats a failed render.
+    opens on black beats a failed render. Not so for `keep_all_if_none=False`,
+    which is for replacement clips: the video already has footage, and a
+    replacement that opens on black is no replacement.
     """
     durations = {path: probe_duration(path) for path in video_paths}
     footage: Dict[str, Tuple[float, float]] = {}
@@ -865,7 +867,7 @@ def find_usable_footage(
             )
         footage[path] = window
 
-    if not footage and video_paths:
+    if not footage and video_paths and keep_all_if_none:
         log(
             "[!] Every clip is black where it would play; using them as they are.",
             "warning",
@@ -1489,12 +1491,47 @@ def make_silence(seconds: float, output_path: str) -> str:
 # the viewer actually sees first.
 OPENING_SAMPLE_SECONDS = 0.5
 
+# The frame the footage check (footage_judge.py) sees, at a size a model reads
+# comfortably and cheaply: about 200 image tokens for a Short.
+CHECK_FRAME_LONG_SIDE = 512
+
+
+def sample_frame(
+    path: str, at: float, fmt: VideoFormat = SHORT, ffmpeg: str = "ffmpeg"
+) -> Optional[bytes]:
+    """One JPEG frame `at` seconds into a clip, centre-cropped to the format.
+
+    Cropped the way the clip will be shown, so it is judged on what the viewer
+    sees rather than on what is cut away. None if the frame cannot be read.
+    """
+    ratio = f"{fmt.aspect_ratio:.6f}"
+    side = CHECK_FRAME_LONG_SIDE
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg, "-v", "error",
+                "-ss", f"{at:.3f}",
+                "-i", path,
+                "-frames:v", "1",
+                "-vf",
+                f"crop='min(iw,ih*{ratio})':'min(ih,iw/{ratio})',"
+                f"scale={side}:{side}:force_original_aspect_ratio=decrease",
+                "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "4",
+                "pipe:1",
+            ],
+            check=True, capture_output=True, timeout=60,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return None
+    return result.stdout or None
+
 
 def promote_strongest_opening(
     video_paths: List[str],
     work_dir: Path,
     ffmpeg: str = "ffmpeg",
     starts: Optional[Dict[str, float]] = None,
+    eligible: Optional[Set[str]] = None,
 ) -> List[str]:
     """Moves the most striking clip to the front, leaving the rest in order.
 
@@ -1509,6 +1546,10 @@ def promote_strongest_opening(
     clip that fades up over four seconds is scored on a black frame, and one
     whose shot starts later is scored on a frame nobody sees.
 
+    `eligible` limits the choice to those clips: the footage check's real
+    footage, since contrast alone opened two videos on cartoons. None, or none
+    of them in the list, means any clip.
+
     Returns the list unchanged if fewer than two clips, or if no frame can be
     read — a worse opening beats a failed render.
     """
@@ -1516,9 +1557,14 @@ def promote_strongest_opening(
         return list(video_paths)
 
     starts = starts or {}
+    candidates = set(video_paths)
+    if eligible and candidates & set(eligible):
+        candidates &= set(eligible)
     work_dir.mkdir(parents=True, exist_ok=True)
     best_index, best_score = 0, None
     for index, path in enumerate(video_paths):
+        if path not in candidates:
+            continue
         frame = work_dir / f"opening_{index}.png"
         sample = starts.get(path, 0.0) + OPENING_SAMPLE_SECONDS
         try:
