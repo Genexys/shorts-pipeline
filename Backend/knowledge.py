@@ -51,6 +51,20 @@ PAGES_PER_VIDEO = 2
 FACTS_PER_PAGE = 25
 FACTS_IN_BRIEF = 12
 
+# Extra places per page for the sentences that deliver what the subject line
+# promises, whatever their specificity. "Sputnik: how a beeping sphere revealed
+# Earth's upper atmosphere" was read from a Wikipedia page that says so in one
+# sentence: "The density of the upper atmosphere could be deduced from its drag
+# on the orbit". It has no figure in it, so it was never stored, and the script
+# became a list of Sputnik's measurements with no atmosphere in it.
+PROMISE_FACTS_PER_PAGE = 5
+# What such a sentence is stored with when nothing in it scores: as much as a
+# dated claim. The brief adds PROMISE_WEIGHT per promised word it uses, up to
+# PROMISE_CAP, so it competes with the measured facts instead of trailing them.
+PROMISE_FACT_SCORE = 1.0
+PROMISE_WEIGHT = 1.5
+PROMISE_CAP = 3.0
+
 # A sentence shorter than this is a heading or a fragment; longer is usually two
 # sentences the splitter could not separate, or a reference-list entry.
 FACT_MIN_WORDS = 8
@@ -443,10 +457,18 @@ def digest(sentence: str) -> str:
     return hashlib.sha1(normalised.encode("utf-8")).hexdigest()
 
 
-def extract_facts(markdown: str, limit: int = FACTS_PER_PAGE) -> List[tuple]:
-    """The page's most specific sentences as (text, score, digest), in page order."""
+def extract_facts(
+    markdown: str, limit: int = FACTS_PER_PAGE, promise: Sequence[str] = ()
+) -> List[tuple]:
+    """The page's most specific sentences as (text, score, digest), in page order.
+
+    Plus up to PROMISE_FACTS_PER_PAGE more that use the most of the `promise`
+    words (see promise_words), however unspecific: a sentence can be the whole
+    point of the video without a figure in it.
+    """
     seen = set()
     scored = []
+    promising = []
     position = -1
     for paragraph in paragraph_sentences(clean_markdown(markdown)):
         for index, sentence in enumerate(paragraph):
@@ -456,7 +478,8 @@ def extract_facts(markdown: str, limit: int = FACTS_PER_PAGE) -> List[tuple]:
             # Scored on the sentence alone: the one naming its subject is there
             # to say who, and its own figures should not lift the ranking.
             score = specificity(sentence)
-            if score <= 0:
+            hits = promised(sentence, promise)
+            if score <= 0 and not hits:
                 continue
             text = with_antecedent(paragraph, index)
             key = digest(text)
@@ -464,8 +487,23 @@ def extract_facts(markdown: str, limit: int = FACTS_PER_PAGE) -> List[tuple]:
                 continue
             seen.add(key)
             scored.append((position, text, score, key))
-    best = sorted(scored, key=lambda item: (-item[2], item[0]))[:limit]
-    return [(text, score, key) for _, text, score, key in sorted(best)]
+            if hits:
+                promising.append((hits, position))
+    best = sorted(
+        (item for item in scored if item[2] > 0), key=lambda item: (-item[2], item[0])
+    )[:limit]
+    kept = {item[0] for item in best}
+    extra = [
+        position
+        for _, position in sorted(promising, key=lambda item: (-item[0], item[1]))
+        if position not in kept
+    ][:PROMISE_FACTS_PER_PAGE]
+    chosen = best + [
+        (position, text, max(score, PROMISE_FACT_SCORE), key)
+        for position, text, score, key in scored
+        if position in extra
+    ]
+    return [(text, score, key) for _, text, score, key in sorted(chosen)]
 
 
 # -- choosing and remembering pages -----------------------------------------------
@@ -557,6 +595,11 @@ def topic_vocabulary(sources: Sequence["research.Source"], keywords: Sequence[st
     heading, and that page's category blurbs are exactly what has to go.
     """
     vocabulary = {_stem(keyword) for keyword in keywords if keyword and len(keyword) >= 3}
+    return vocabulary | shared_words(sources)
+
+
+def shared_words(sources: Sequence["research.Source"]) -> set:
+    """The words, stemmed, that two or more of the search snippets use."""
     shared: Counter = Counter()
     for source in sources:
         words = {
@@ -565,8 +608,37 @@ def topic_vocabulary(sources: Sequence["research.Source"], keywords: Sequence[st
             if word not in _GENERIC
         }
         shared.update(words)
-    vocabulary |= {word for word, count in shared.items() if count >= 2}
-    return vocabulary
+    return {word for word, count in shared.items() if count >= 2}
+
+
+# Words a topic line uses to sell the story rather than to say what it is about.
+_PITCH = frozenset(
+    "reveal revealed reveals turned turns became becomes actually really secret "
+    "surprising strange weird accidentally".split()
+)
+
+
+def promise_words(subject: str, sources: Sequence["research.Source"]) -> set:
+    """The words of the subject line that say what this video in particular is about.
+
+    Its content words, less those the search snippets share: those are what
+    every page on the topic is about. For "Sputnik: how a beeping sphere
+    revealed Earth's upper atmosphere" that leaves "beeping", "sphere", "upper"
+    and "atmosphere" — "Sputnik" and "Earth" are in every snippet. The
+    keywords the brief is otherwise filtered by come from the anniversary's
+    event line when there is one, which never mentioned the atmosphere.
+    """
+    words = {
+        _stem(word)
+        for word in _WORD.findall((subject or "").lower())
+        if word not in _GENERIC and word not in _PITCH
+    }
+    return words - shared_words(sources)
+
+
+def promised(text: str, promise: Sequence[str]) -> int:
+    """How many of the promised words a sentence uses, as whole words."""
+    return word_hits(text, promise)
 
 
 def relevance(text: str, vocabulary: Sequence[str]) -> float:
@@ -576,13 +648,17 @@ def relevance(text: str, vocabulary: Sequence[str]) -> float:
     in "warm blooded" and kept a sentence about metabolism in a video about a
     lizard's eyes.
     """
+    return min(float(word_hits(text, vocabulary)), RELEVANCE_CAP)
+
+
+def word_hits(text: str, words: Sequence[str]) -> int:
+    """How many of `words` the text uses as whole words, allowing a plural."""
     lowered = text.lower()
-    hits = sum(
-        1.0
-        for word in vocabulary
+    return sum(
+        1
+        for word in words
         if word and re.search(rf"\b{re.escape(word.lower())}(?:s|es)?\b", lowered)
     )
-    return min(hits, RELEVANCE_CAP)
 
 
 def facts_for(
@@ -592,15 +668,19 @@ def facts_for(
     fetch: Callable[[str], Optional[str]] = fetch_markdown,
     pages: int = PAGES_PER_VIDEO,
     limit: int = FACTS_IN_BRIEF,
+    subject: str = "",
 ) -> List[Passage]:
     """Facts from the best of `sources`, reading each page at most once, ever.
 
     Filtered and ranked for this video — a stored page's facts were scored
     before any subject was known — by whether a fact mentions the subject, then
-    by specificity. Returns [] rather than raising on any failure.
+    by specificity, with a lift for the words only `subject`, the topic line,
+    has (promise_words). A page read now also keeps the sentences that use them.
+    Returns [] rather than raising on any failure.
     """
     if not sources:
         return []
+    promise = promise_words(subject, sources)
     try:
         from repository import add_knowledge_page, get_knowledge_page, get_page_facts
 
@@ -618,7 +698,10 @@ def facts_for(
                         # next video to cite this page should try again.
                         continue
                     page = add_knowledge_page(
-                        session, source.url, source.title, extract_facts(markdown)
+                        session,
+                        source.url,
+                        source.title,
+                        extract_facts(markdown, promise=sorted(promise)),
                     )
                     log(f"[+] Read {source.url[:80]} in full.", "info")
                 for fact in get_page_facts(session, page.id):
@@ -634,7 +717,7 @@ def facts_for(
         log(f"[!] Knowledge base unavailable ({err}). Using snippets only.", "warning")
         return []
 
-    vocabulary = topic_vocabulary(sources, keywords)
+    vocabulary = topic_vocabulary(sources, keywords) | promise
     if vocabulary:
         # A fact that shares no word with the subject is about something else
         # on the page. On the first live run that was four of six: an author
@@ -643,7 +726,12 @@ def facts_for(
         # anyway, since the page may serve a different subject later.
         collected = [p for p in collected if relevance(p.text, vocabulary) > 0]
     ranked = sorted(
-        collected, key=lambda passage: -(passage.score + relevance(passage.text, vocabulary))
+        collected,
+        key=lambda passage: -(
+            passage.score
+            + relevance(passage.text, vocabulary)
+            + min(PROMISE_WEIGHT * promised(passage.text, promise), PROMISE_CAP)
+        ),
     )
     return ranked[:limit]
 

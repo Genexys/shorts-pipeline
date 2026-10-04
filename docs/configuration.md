@@ -260,6 +260,15 @@ factor". A finding is kept with its p-value in brackets; the methods
 statistics around it are still dropped. One paper on two sites (the journal
 and PubMed Central) is read once.
 
+The topic line's own words count too. Words in the subject that the search
+snippets don't share say what this video in particular promises: "upper" and
+"atmosphere" in "Sputnik: how a beeping sphere revealed Earth's upper
+atmosphere", where "Sputnik" is on every page. Up to five sentences that use
+them are stored even without a figure in them. In the brief, each such word a
+fact uses also lifts its rank, so the sentence that delivers the promise is
+among the first the writer reads. Pages stored before this keep the facts they
+had; the lift still applies to those.
+
 Facts are stored **verbatim**: each is a sentence that appears word for word on
 the page it cites, so nothing can be invented on the way in. Reference lists,
 navigation, maintenance tags and sentences addressed to the reader are dropped.

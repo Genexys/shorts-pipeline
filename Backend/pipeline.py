@@ -324,7 +324,9 @@ def run_generation_pipeline(
         # The snippets are a sentence or two per page; the page's best fact is
         # usually elsewhere on it. Read the best pages in full, once ever.
         passages = knowledge.facts_for(
-            sources, keywords_from_subject(anchor or data["videoSubject"])
+            sources,
+            keywords_from_subject(anchor or data["videoSubject"]),
+            subject=data["videoSubject"],
         )
         facts_block = knowledge.format_facts(passages)
         if facts_block:
