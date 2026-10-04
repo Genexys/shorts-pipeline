@@ -498,6 +498,12 @@ SUBTITLE_TOP_MARGIN_PX = 80
 SUBTITLE_SIDE_MARGIN_PX = 60
 SUBTITLE_FONT_NAME = "The Bold Font"
 SUBTITLE_OUTLINE = 5
+# The bundled font draws its lowercase letters as capitals, so captions read as
+# all caps. It has no Ä, Ö, Ü, Ñ or Ç, though, and libass borrows those from a
+# fallback font exactly as typed: "Pääbo" came out as "PääBO". Upper-casing the
+# text changes nothing for the font's own letters and makes the borrowed ones
+# capitals too. Override tags and the \N, \n and \h escapes are left alone.
+ASS_UNTOUCHED = re.compile(r"(\{[^}]*\}|\\[Nnh])")
 
 
 def effective_clip_cap(
@@ -1019,6 +1025,23 @@ def build_style_line(
     return "Style: " + ",".join(fields)
 
 
+def uppercase_caption(text: str) -> str:
+    """A dialogue line's text in capitals, its override tags and escapes intact."""
+    return "".join(
+        part if ASS_UNTOUCHED.fullmatch(part) else part.upper()
+        for part in ASS_UNTOUCHED.split(text)
+    )
+
+
+def uppercase_dialogue(line: str) -> str:
+    """A `Dialogue:` line with its text, the field after the ninth comma, in capitals."""
+    fields = line.split(",", 9)
+    if len(fields) < 10:
+        return line
+    fields[9] = uppercase_caption(fields[9])
+    return ",".join(fields)
+
+
 def patch_ass_script(
     script: str, subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT
 ) -> str:
@@ -1028,6 +1051,8 @@ def patch_ass_script(
     relative to that, so a size meant for a 1920-tall frame is scaled up by
     almost seven and the text runs off the screen. Declaring the real frame
     size makes the size mean pixels.
+
+    The dialogue is upper-cased on the way through (see ASS_UNTOUCHED).
     """
     lines = []
     seen_play_res_x = seen_play_res_y = False
@@ -1041,6 +1066,8 @@ def patch_ass_script(
             seen_play_res_y = True
         elif stripped.startswith("Style:"):
             lines.append(build_style_line(subtitles_position, text_colour, fmt))
+        elif stripped.startswith("Dialogue:"):
+            lines.append(uppercase_dialogue(line))
         else:
             lines.append(line)
             if stripped.startswith("[Script Info]") and not (
