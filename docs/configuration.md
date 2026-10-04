@@ -12,7 +12,7 @@ Use `.env.example` as your template.
 | `PEXELS_API_KEY` | API key used to fetch stock video clips. |
 | `PIXABAY_API_KEY` | *Optional.* A second stock library, merged with Pexels. Empty uses Pexels alone. Long videos need it — see [Stock footage](#stock-footage). |
 | `ANTHROPIC_API_KEY` | *Optional.* Writes the topic and the script with a stronger model — see [The writer](#the-writer). Empty keeps everything on Ollama. |
-| `SCRIPT_MODEL` | *Optional.* Model for those two calls. | `claude-opus-5` |
+| `SCRIPT_MODEL` | *Optional.* Model for the writer's calls — see [The writer](#the-writer). | `claude-opus-5-5` |
 | `SCRIPT_FALLBACK_MODEL` | *Optional.* Second Claude model, used only while `SCRIPT_MODEL` is overloaded or down — see [The writer](#the-writer). Unset uses the default; set to an empty value to go straight to Ollama instead. | `claude-sonnet-5-5` |
 | `FIRECRAWL_API_KEY` | *Optional.* Grounds scripts in real search results and lists the sources in the description — see [Research](#research). Empty writes scripts with no specifics at all. |
 
@@ -416,5 +416,17 @@ A Short keeps the configured status, and its report carries the usual
 `⚠️ written by …` line. The privacy actually used is recorded on the
 `youtube_video` artifact as `privacyStatus`.
 
-At three videos a day this is roughly 240k input and 32k output tokens a month:
-about two dollars on the default model, and noise beside the narration bill.
+**Model and effort.** The default is Claude Opus 5.5 ($4 / $20 per million
+input / output tokens; Claude Opus 5, used until 2026-10-03, was $5 / $25).
+Every request sets `effort: high`. Opus 5.5 would otherwise think at `medium`,
+which is less than Opus 5 did with no setting at all. The model's thinking is
+billed as output. At four videos a day, with the topic, script, search terms,
+metadata and source judge, this is a few dollars a month, small next to the
+narration bill. The console's usage page has the real figure.
+
+**Refusal fallback.** Each request also asks for the API's server-side refusal
+fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). If
+the model's safety classifiers decline a request, the same call is re-run on
+the model Anthropic recommends for that kind of refusal. Opus 5.5 added biology
+to the categories it can decline, which matters on a channel that is half
+biology. The script is filed under whichever model actually answered.
