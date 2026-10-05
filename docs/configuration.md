@@ -298,6 +298,15 @@ fact uses also lifts its rank, so the sentence that delivers the promise is
 among the first the writer reads. Pages stored before this keep the facts they
 had; the lift still applies to those.
 
+So do explanations. A sentence that says what causes what ("because",
+"causes", "results in", "drives", "sucks"…) and uses the subject's words is
+stored without a figure too, up to eight a page, and may speak to the reader
+("vibrations inside your skull"): the answer to a "why" rarely has a number in
+it. When the topic line asks why or how (not "how many"), these rank higher in
+the brief. "Why does a shower curtain billow inward?" now gets Wikipedia's
+"the spray from the shower-head drives a horizontal vortex… which sucks the
+curtain", and a hedge such as "this is not the sole mechanism" is kept as one.
+
 Facts are stored **verbatim**: each is a sentence that appears word for word on
 the page it cites, so nothing can be invented on the way in. Reference lists,
 navigation, maintenance tags and sentences addressed to the reader are dropped.
