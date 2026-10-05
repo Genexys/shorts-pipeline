@@ -65,6 +65,22 @@ PROMISE_FACT_SCORE = 1.0
 PROMISE_WEIGHT = 1.5
 PROMISE_CAP = 3.0
 
+# Extra places per page for the sentences that say what causes what, figure or
+# no figure. A video asking why something happens is answered by a mechanism,
+# and a mechanism rarely comes with a number. "Why does a shower curtain billow
+# inward toward you?" was read from the Wikipedia page whose answer is "the
+# spray from the shower-head drives a horizontal vortex. This vortex has a
+# low-pressure zone in the centre, which sucks the curtain" — and since neither
+# sentence has a figure in it, the Short of 2026-10-05 said only that David
+# Schmidt won an Ig Nobel "for a partial solution", never what it was. The BBC
+# page read for the voice Short gave no facts at all: its explanation is all
+# "your skull" and "your ear drum", and sentences addressed to the reader were
+# dropped. Stored with what a dated claim is worth; for a subject that asks why
+# or how, the brief lifts each by EXPLANATION_WEIGHT.
+EXPLANATION_FACTS_PER_PAGE = 8
+EXPLANATION_FACT_SCORE = 1.0
+EXPLANATION_WEIGHT = 2.0
+
 # A sentence shorter than this is a heading or a fragment; longer is usually two
 # sentences the splitter could not separate, or a reference-list entry.
 FACT_MIN_WORDS = 8
@@ -117,6 +133,26 @@ _METHODS = re.compile(
 )
 # A sentence talking to the reader is the page's voice, not a fact.
 _ADDRESS = re.compile(r"\b(?:you|your|you'll|you're|let's|we'll|we're)\b", re.IGNORECASE)
+# Except when it explains something: "Those vibrations travel up through your
+# bony skull" uses "your" for anyone's. The page talking about itself is still
+# its voice.
+_PAGE_VOICE = re.compile(r"\b(?:let's|we'll|we're)\b", re.IGNORECASE)
+# A sentence saying what causes what. Broad on purpose: a sentence is only kept
+# for it when it also uses the subject's words, and eight a page at most.
+_CAUSE = re.compile(
+    r"\b(?:because|caus(?:e|es|ed|ing)|due to|result(?:s|ed|ing)? in|"
+    r"lead(?:s|ing)? to|led to|drives?|driven by|triggers?|so that|which means|"
+    r"(?:that|this) is why|explains? (?:why|how)|responsible for|"
+    r"pulls?|pushes|sucks?)\b",
+    re.IGNORECASE,
+)
+# A subject that asks for a mechanism. Not "how many" or "how long": those ask
+# for a figure, which the facts already favour.
+_ASKS_WHY = re.compile(
+    r"\bwhy\b|\bhow\b(?!\s+(?:many|much|long|old|big|far|often|fast)\b)|"
+    r"\bwhat (?:makes|causes)\b",
+    re.IGNORECASE,
+)
 _COMPARE = re.compile(
     r"\b(?:than|as (?:low|high|much|many|little|few|small|large) as|up to|"
     r"at least|at most)\b",
@@ -140,6 +176,10 @@ _HEDGE = re.compile(
     r"\b(?:myth|misconception|apocryphal|urban legend)\b|"
     r"\bcontrary to (?:popular|common) belief\b|"
     r"\bnot (?:viewed|considered|regarded|thought) (?:as|to be)\b|"
+    # "However, the shower-curtain effect persists when cold water is used,
+    # implying that this is not the sole mechanism" — the line that stops the
+    # hot-air explanation being told as the answer.
+    r"\bnot the (?:sole|only|main|whole) (?:mechanism|cause|explanation|reason|story)\b|"
     r"\bcontributing factor\b|\bcase report\b|\banecdotal\b",
     re.IGNORECASE,
 )
@@ -432,7 +472,22 @@ def specificity(sentence: str) -> float:
     )
 
 
-def looks_like_prose(sentence: str) -> bool:
+def states_cause(sentence: str) -> bool:
+    """Whether a sentence says what causes what (see _CAUSE)."""
+    return bool(_CAUSE.search(sentence))
+
+
+def asks_why(subject: str) -> bool:
+    """Whether a topic line asks for a mechanism: why, how, what makes."""
+    return bool(_ASKS_WHY.search(subject or ""))
+
+
+def looks_like_prose(sentence: str, explains: bool = False) -> bool:
+    """Whether a sentence reads as a statement worth storing.
+
+    `explains` allows "you" and "your" in it, as an explanation uses them for
+    anyone (see _PAGE_VOICE).
+    """
     words = sentence.split()
     if not FACT_MIN_WORDS <= len(words) <= FACT_MAX_WORDS:
         return False
@@ -442,7 +497,7 @@ def looks_like_prose(sentence: str) -> bool:
         return False
     if (
         _BOILERPLATE.search(sentence)
-        or _ADDRESS.search(sentence)
+        or (_PAGE_VOICE if explains else _ADDRESS).search(sentence)
         or _BYLINE.search(sentence)
         or _METHODS.search(_BRACKETED_P.sub("", sentence))
     ):
@@ -458,28 +513,38 @@ def digest(sentence: str) -> str:
 
 
 def extract_facts(
-    markdown: str, limit: int = FACTS_PER_PAGE, promise: Sequence[str] = ()
+    markdown: str,
+    limit: int = FACTS_PER_PAGE,
+    promise: Sequence[str] = (),
+    topic: Sequence[str] = (),
 ) -> List[tuple]:
     """The page's most specific sentences as (text, score, digest), in page order.
 
     Plus up to PROMISE_FACTS_PER_PAGE more that use the most of the `promise`
     words (see promise_words), however unspecific: a sentence can be the whole
-    point of the video without a figure in it.
+    point of the video without a figure in it. And up to
+    EXPLANATION_FACTS_PER_PAGE that say what causes what and use the `topic`
+    words, most of them first: the answer to a "why" rarely has a figure in it
+    either.
     """
     seen = set()
     scored = []
     promising = []
+    explaining = []
     position = -1
     for paragraph in paragraph_sentences(clean_markdown(markdown)):
         for index, sentence in enumerate(paragraph):
             position += 1
-            if not looks_like_prose(sentence):
+            prose = looks_like_prose(sentence)
+            topical = word_hits(sentence, topic) if states_cause(sentence) else 0
+            explains = topical > 0 and looks_like_prose(sentence, explains=True)
+            if not prose and not explains:
                 continue
             # Scored on the sentence alone: the one naming its subject is there
             # to say who, and its own figures should not lift the ranking.
-            score = specificity(sentence)
-            hits = promised(sentence, promise)
-            if score <= 0 and not hits:
+            score = specificity(sentence) if prose else 0.0
+            hits = promised(sentence, promise) if prose else 0
+            if score <= 0 and not hits and not explains:
                 continue
             text = with_antecedent(paragraph, index)
             key = digest(text)
@@ -489,6 +554,8 @@ def extract_facts(
             scored.append((position, text, score, key))
             if hits:
                 promising.append((hits, position))
+            if explains:
+                explaining.append((topical, position))
     best = sorted(
         (item for item in scored if item[2] > 0), key=lambda item: (-item[2], item[0])
     )[:limit]
@@ -498,10 +565,18 @@ def extract_facts(
         for _, position in sorted(promising, key=lambda item: (-item[0], item[1]))
         if position not in kept
     ][:PROMISE_FACTS_PER_PAGE]
+    kept.update(extra)
+    because = [
+        position
+        for _, position in sorted(explaining, key=lambda item: (-item[0], item[1]))
+        if position not in kept
+    ][:EXPLANATION_FACTS_PER_PAGE]
+    floor = {position: PROMISE_FACT_SCORE for position in extra}
+    floor.update({position: EXPLANATION_FACT_SCORE for position in because})
     chosen = best + [
-        (position, text, max(score, PROMISE_FACT_SCORE), key)
+        (position, text, max(score, floor[position]), key)
         for position, text, score, key in scored
-        if position in extra
+        if position in floor
     ]
     return [(text, score, key) for _, text, score, key in sorted(chosen)]
 
@@ -675,12 +750,16 @@ def facts_for(
     Filtered and ranked for this video — a stored page's facts were scored
     before any subject was known — by whether a fact mentions the subject, then
     by specificity, with a lift for the words only `subject`, the topic line,
-    has (promise_words). A page read now also keeps the sentences that use them.
+    has (promise_words), and, when it asks why or how, for the facts that say
+    what causes what (see EXPLANATION_FACTS_PER_PAGE). A page read now also
+    keeps the sentences of both kinds.
     Returns [] rather than raising on any failure.
     """
     if not sources:
         return []
     promise = promise_words(subject, sources)
+    vocabulary = topic_vocabulary(sources, keywords) | promise
+    explain = asks_why(subject)
     try:
         from repository import add_knowledge_page, get_knowledge_page, get_page_facts
 
@@ -701,7 +780,9 @@ def facts_for(
                         session,
                         source.url,
                         source.title,
-                        extract_facts(markdown, promise=sorted(promise)),
+                        extract_facts(
+                            markdown, promise=sorted(promise), topic=sorted(vocabulary)
+                        ),
                     )
                     log(f"[+] Read {source.url[:80]} in full.", "info")
                 for fact in get_page_facts(session, page.id):
@@ -717,7 +798,6 @@ def facts_for(
         log(f"[!] Knowledge base unavailable ({err}). Using snippets only.", "warning")
         return []
 
-    vocabulary = topic_vocabulary(sources, keywords) | promise
     if vocabulary:
         # A fact that shares no word with the subject is about something else
         # on the page. On the first live run that was four of six: an author
@@ -731,6 +811,7 @@ def facts_for(
             passage.score
             + relevance(passage.text, vocabulary)
             + min(PROMISE_WEIGHT * promised(passage.text, promise), PROMISE_CAP)
+            + (EXPLANATION_WEIGHT if explain and states_cause(passage.text) else 0.0)
         ),
     )
     return ranked[:limit]
