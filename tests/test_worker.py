@@ -95,6 +95,8 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             "scriptModel": "claude-opus-5",
             "scriptFellBack": False,
             "scriptLocal": False,
+            "music": None,
+            "musicTheme": None,
         }
         assert artifacts["youtube_video"].path == "https://youtu.be/vid123"
         assert artifacts["youtube_video"].metadata_json == {

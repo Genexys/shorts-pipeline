@@ -10,7 +10,7 @@ from logstream import log
 from speech import split_sentences
 import writer
 from typing import Callable, List, Optional, Sequence, Tuple
-from utils import ENV_FILE, MUSIC_MOODS
+from utils import ENV_FILE, MUSIC_THEMES
 
 # Load environment variables
 load_dotenv(ENV_FILE)
@@ -96,7 +96,7 @@ def write_creative(
     ai_model: str,
     report_model: Optional[Callable[[str], None]] = None,
 ) -> str:
-    """A completion for the two calls where judgement shows: topic and script.
+    """A completion for the calls where judgement shows: topic, script, music theme.
 
     Prefers the stronger model when one is configured and falls back to Ollama
     on any failure. Everything else in the pipeline is structured extraction
@@ -1907,16 +1907,22 @@ def generate_metadata(
     return title, description, tags
 
 
-def select_music_mood(
+def select_music_theme(
     video_subject: str, script: str, ai_model: str
 ) -> Optional[str]:
     """
-    Picks a background-music mood for a script.
+    Picks a background-music theme for a script, by what it is about.
 
-    Best effort by design: the mood only decides which Songs/ subfolder is
-    preferred, so an Ollama outage or a malformed answer must not fail a job
-    that is otherwise finished. Returns None and lets the caller fall back to
-    the flat Songs/ folder.
+    Asked of the stronger model, with Ollama as the fallback. On twenty recent
+    Shorts on 2026-10-05, llama3.1:8b gave two different themes for the same
+    script in seven of them, and twice filed a shower-curtain explainer under
+    the odd-research theme; Opus placed all twenty sensibly. Four bare moods
+    were within the local model's reach, seven subjects are not.
+
+    Best effort by design: the theme only decides which Songs/ subfolder is
+    preferred, so an outage or a malformed answer must not fail a job that is
+    otherwise finished. Returns None and lets the caller fall back to the flat
+    Songs/ folder.
 
     Args:
         video_subject (str): The subject of the video.
@@ -1924,35 +1930,40 @@ def select_music_mood(
         ai_model (str): The AI model to use for generation.
 
     Returns:
-        Optional[str]: One of MUSIC_MOODS, or None if no usable answer.
+        Optional[str]: One of MUSIC_THEMES, or None if no usable answer.
     """
+    themes = "\n".join(f"- {name}: {about}" for name, about in MUSIC_THEMES.items())
     prompt = f"""
-    Pick the background music mood for a short vertical video.
+    Pick the background music for a short popular-science video, by what the
+    video is about.
 
     Subject: {video_subject}
 
     Script:
     {script}
 
-    Choose exactly one of: {", ".join(MUSIC_MOODS)}.
+    Themes:
+    {themes}
 
-    Return ONLY a JSON object: {{"mood": "..."}}
+    Choose exactly one theme name from the list.
+
+    Return ONLY a JSON object: {{"theme": "..."}}
     """
 
     try:
-        response = generate_response(prompt, ai_model)
+        response = write_creative(prompt, ai_model)
     except Exception as err:
-        log(f"[!] Could not pick a music mood: {err}", "warning")
+        log(f"[!] Could not pick a music theme: {err}", "warning")
         return None
 
     parsed = extract_json_object(response)
-    mood = parsed.get("mood") if isinstance(parsed, dict) else None
-    if isinstance(mood, str) and mood.strip().lower() in MUSIC_MOODS:
-        selected = mood.strip().lower()
-        log(f"[+] Music mood: {selected}", "info")
+    theme = parsed.get("theme") if isinstance(parsed, dict) else None
+    if isinstance(theme, str) and theme.strip().lower() in MUSIC_THEMES:
+        selected = theme.strip().lower()
+        log(f"[+] Music theme: {selected}", "info")
         return selected
 
-    log(f"[!] Model did not return a known music mood: {response[:120]}", "warning")
+    log(f"[!] Model did not return a known music theme: {response[:120]}", "warning")
     return None
 
 

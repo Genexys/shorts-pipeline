@@ -100,19 +100,48 @@ Two layouts are supported:
 
 ```
 Songs/track.mp3            # flat: any track may be picked
-Songs/calm/track.mp3       # mood folders, preferred when they hold tracks
-Songs/curious/track.mp3
-Songs/tense/track.mp3
-Songs/upbeat/track.mp3
+Songs/everyday/track.mp3   # theme folders, preferred when they hold tracks
+Songs/body/track.mp3
+Songs/space/track.mp3
+Songs/invention/track.mp3
+Songs/history/track.mp3
+Songs/quirky/track.mp3
+Songs/dark/track.mp3
 ```
 
-With mood folders present, Ollama picks one of `calm`, `curious`, `tense` or
-`upbeat` for each script and a random track is taken from that folder. The
-choice is best effort: if Ollama is unreachable or answers with something
-unknown, the pipeline falls back to the flat `Songs/` folder. A flat library
+Themes follow what a video is about, not a mood. The writer model reads the
+script and a one-line description of each theme (`MUSIC_THEMES` in
+`Backend/utils.py`), picks one, and a random track is taken from that folder.
+That is Opus, falling back to Ollama like the script does. On twenty recent
+Shorts, llama3.1:8b gave inconsistent answers for seven, and Opus placed all
+twenty sensibly.
+
+| Theme | For |
+|---|---|
+| `everyday` | why ordinary things at home or outdoors behave as they do |
+| `body` | the human body, animals and plants |
+| `space` | planets, stars, rockets, satellites |
+| `invention` | inventions and engineering since the 1800s |
+| `history` | older history, or history told calmly |
+| `quirky` | odd or funny research, absurd true stories |
+| `dark` | poisons, disease, gruesome experiments, harm done |
+
+A track that played under one of the last five videos is skipped while its
+folder has anything else. The track and theme are stored on the video
+artifact (`music`, `musicTheme`), which is where that history comes from.
+
+The choice is best effort: if no model answers with a known theme, the
+pipeline falls back to the flat `Songs/` folder. A flat library
 keeps working unchanged.
 
-Licensing is your responsibility. Prefer the **YouTube Audio Library** — it is
+The library holds 21 tracks made with Eleven Music on 2026-10-05 (three per
+theme, instrumental, 90 seconds) plus the earlier YouTube Audio Library
+tracks, sorted into the themes. A Short uses only the first ~40 seconds of a
+track. A long video loops it, so a 90-second track repeats three times under
+five minutes of narration.
+
+Licensing is your responsibility. Eleven Music output is cleared for online
+commercial use on any paid ElevenLabs plan. The **YouTube Audio Library** is
 free, mostly attribution-free, and being YouTube's own library it does not
 trigger Content ID claims on YouTube.
 

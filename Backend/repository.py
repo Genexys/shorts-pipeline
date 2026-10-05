@@ -293,6 +293,27 @@ def list_artifacts(session: Session, job_id: str) -> list[Artifact]:
     return list(session.scalars(stmt).all())
 
 
+def recent_music_tracks(session: Session, limit: int = 5) -> list[str]:
+    """File names of the music under the last `limit` videos, newest first.
+
+    Read from the video artifact's metadata in Python rather than with a JSON
+    query, which SQLite and Postgres spell differently. Videos made before the
+    track was recorded, or without music, are skipped, not counted.
+    """
+    stmt = (
+        select(Artifact.metadata_json)
+        .where(Artifact.artifact_type == "video")
+        .order_by(Artifact.id.desc())
+        .limit(limit)
+    )
+    tracks = []
+    for metadata in session.scalars(stmt).all():
+        track = (metadata or {}).get("music")
+        if isinstance(track, str) and track:
+            tracks.append(track)
+    return tracks
+
+
 # ---------------------------------------------------------------------------
 # Topics (autopilot)
 # ---------------------------------------------------------------------------

@@ -7,38 +7,38 @@ import utils
 import video
 
 
-# -- choose_random_song: mood folders -------------------------------------
+# -- choose_random_song: theme folders ------------------------------------
 
 
-def test_choose_random_song_prefers_mood_folder(monkeypatch, tmp_path: Path):
+def test_choose_random_song_prefers_theme_folder(monkeypatch, tmp_path: Path):
     songs_dir = tmp_path / "Songs"
-    (songs_dir / "calm").mkdir(parents=True)
+    (songs_dir / "history").mkdir(parents=True)
     flat = songs_dir / "flat.mp3"
-    mood_track = songs_dir / "calm" / "quiet.mp3"
+    theme_track = songs_dir / "history" / "quiet.mp3"
     flat.write_text("flat")
-    mood_track.write_text("calm")
+    theme_track.write_text("history")
 
     monkeypatch.setattr(utils, "SONGS_DIR", songs_dir)
     monkeypatch.setattr(utils.random, "choice", lambda songs: songs[0])
 
-    assert utils.choose_random_song("calm") == str(mood_track)
+    assert utils.choose_random_song("history") == str(theme_track)
 
 
-def test_choose_random_song_falls_back_when_mood_folder_is_empty(
+def test_choose_random_song_falls_back_when_theme_folder_is_empty(
     monkeypatch, tmp_path: Path
 ):
     songs_dir = tmp_path / "Songs"
-    (songs_dir / "tense").mkdir(parents=True)
+    (songs_dir / "dark").mkdir(parents=True)
     flat = songs_dir / "flat.mp3"
     flat.write_text("flat")
 
     monkeypatch.setattr(utils, "SONGS_DIR", songs_dir)
     monkeypatch.setattr(utils.random, "choice", lambda songs: songs[0])
 
-    assert utils.choose_random_song("tense") == str(flat)
+    assert utils.choose_random_song("dark") == str(flat)
 
 
-def test_choose_random_song_falls_back_when_mood_folder_is_missing(
+def test_choose_random_song_falls_back_when_theme_folder_is_missing(
     monkeypatch, tmp_path: Path
 ):
     songs_dir = tmp_path / "Songs"
@@ -49,55 +49,147 @@ def test_choose_random_song_falls_back_when_mood_folder_is_missing(
     monkeypatch.setattr(utils, "SONGS_DIR", songs_dir)
     monkeypatch.setattr(utils.random, "choice", lambda songs: songs[0])
 
-    assert utils.choose_random_song("nosuchmood") == str(flat)
+    assert utils.choose_random_song("nosuchtheme") == str(flat)
 
 
-def test_choose_random_song_ignores_non_mp3_in_mood_folder(
+def test_choose_random_song_ignores_non_mp3_in_theme_folder(
     monkeypatch, tmp_path: Path
 ):
     songs_dir = tmp_path / "Songs"
-    (songs_dir / "calm").mkdir(parents=True)
-    (songs_dir / "calm" / "notes.txt").write_text("ignore")
+    (songs_dir / "history").mkdir(parents=True)
+    (songs_dir / "history" / "notes.txt").write_text("ignore")
     flat = songs_dir / "flat.mp3"
     flat.write_text("flat")
 
     monkeypatch.setattr(utils, "SONGS_DIR", songs_dir)
     monkeypatch.setattr(utils.random, "choice", lambda songs: songs[0])
 
-    assert utils.choose_random_song("calm") == str(flat)
+    assert utils.choose_random_song("history") == str(flat)
 
 
-# -- select_music_mood ------------------------------------------------------
+# -- choose_random_song: recent tracks --------------------------------------
 
 
-def test_select_music_mood_returns_known_mood(monkeypatch):
-    monkeypatch.setattr(gpt, "generate_response", lambda p, m: '{"mood": "Calm"}')
-    assert gpt.select_music_mood("subject", "script", "model") == "calm"
+def _theme_folder(tmp_path: Path, names: list) -> Path:
+    songs_dir = tmp_path / "Songs"
+    (songs_dir / "space").mkdir(parents=True)
+    for name in names:
+        (songs_dir / "space" / name).write_text(name)
+    return songs_dir
 
 
-def test_select_music_mood_reads_mood_out_of_surrounding_text(monkeypatch):
+def test_choose_random_song_skips_recently_played_tracks(monkeypatch, tmp_path: Path):
+    songs_dir = _theme_folder(tmp_path, ["a.mp3", "b.mp3", "c.mp3"])
+    monkeypatch.setattr(utils, "SONGS_DIR", songs_dir)
+    for _ in range(20):
+        chosen = utils.choose_random_song("space", avoid=["a.mp3", "b.mp3"])
+        assert chosen == str(songs_dir / "space" / "c.mp3")
+
+
+def test_choose_random_song_repeats_rather_than_going_silent(monkeypatch, tmp_path: Path):
+    # A theme whose every track played recently still gets music.
+    songs_dir = _theme_folder(tmp_path, ["a.mp3", "b.mp3"])
+    monkeypatch.setattr(utils, "SONGS_DIR", songs_dir)
+    chosen = utils.choose_random_song("space", avoid=["a.mp3", "b.mp3"])
+    assert chosen in {str(songs_dir / "space" / "a.mp3"), str(songs_dir / "space" / "b.mp3")}
+
+
+# -- select_music_theme ------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_claude(monkeypatch):
+    # The picker asks the stronger model first; these tests drive the local
+    # fallback unless they say otherwise.
+    monkeypatch.setattr(gpt.writer, "write_with_model", lambda prompt: None)
+
+
+def test_select_music_theme_prefers_the_stronger_model(monkeypatch):
     monkeypatch.setattr(
-        gpt, "generate_response", lambda p, m: 'Sure! {"mood": "tense"} hope that helps'
+        gpt.writer, "write_with_model",
+        lambda prompt: gpt.writer.Written('{"theme": "space"}', "claude-opus-5-5"),
     )
-    assert gpt.select_music_mood("subject", "script", "model") == "tense"
+
+    def local(prompt, model):
+        raise AssertionError("the local model must not be asked")
+
+    monkeypatch.setattr(gpt, "generate_response", local)
+    assert gpt.select_music_theme("Sputnik", "A beeping sphere.", "llama3.1:8b") == "space"
 
 
-def test_select_music_mood_rejects_unknown_mood(monkeypatch):
-    monkeypatch.setattr(gpt, "generate_response", lambda p, m: '{"mood": "spooky"}')
-    assert gpt.select_music_mood("subject", "script", "model") is None
+def test_every_theme_is_described_by_subject():
+    # The picker reads the descriptions, and the library folders are named after
+    # the keys; a theme without a description could never be chosen well.
+    assert set(utils.MUSIC_THEMES) == {
+        "everyday", "body", "space", "invention", "history", "quirky", "dark",
+    }
+    assert all(len(about.split()) >= 5 for about in utils.MUSIC_THEMES.values())
 
 
-def test_select_music_mood_returns_none_on_ollama_failure(monkeypatch):
+def test_select_music_theme_shows_the_model_every_theme(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        gpt, "generate_response", lambda p, m: prompts.append(p) or '{"theme": "space"}'
+    )
+    gpt.select_music_theme("Sputnik", "A beeping sphere.", "model")
+    for name, about in utils.MUSIC_THEMES.items():
+        assert f"- {name}: {about}" in prompts[0]
+
+
+def test_select_music_theme_returns_known_theme(monkeypatch):
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: '{"theme": "Space"}')
+    assert gpt.select_music_theme("subject", "script", "model") == "space"
+
+
+def test_select_music_theme_reads_theme_out_of_surrounding_text(monkeypatch):
+    monkeypatch.setattr(
+        gpt, "generate_response", lambda p, m: 'Sure! {"theme": "dark"} hope that helps'
+    )
+    assert gpt.select_music_theme("subject", "script", "model") == "dark"
+
+
+def test_select_music_theme_rejects_an_old_mood(monkeypatch):
+    # The four moods are gone; a model that still answers with one gets the
+    # flat-folder fallback, not a folder that no longer exists.
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: '{"theme": "curious"}')
+    assert gpt.select_music_theme("subject", "script", "model") is None
+
+
+def test_select_music_theme_returns_none_on_ollama_failure(monkeypatch):
     def boom(prompt, model):
         raise RuntimeError("ollama down")
 
     monkeypatch.setattr(gpt, "generate_response", boom)
-    assert gpt.select_music_mood("subject", "script", "model") is None
+    assert gpt.select_music_theme("subject", "script", "model") is None
 
 
-def test_select_music_mood_returns_none_for_garbage(monkeypatch):
+def test_select_music_theme_returns_none_for_garbage(monkeypatch):
     monkeypatch.setattr(gpt, "generate_response", lambda p, m: "no json here")
-    assert gpt.select_music_mood("subject", "script", "model") is None
+    assert gpt.select_music_theme("subject", "script", "model") is None
+
+
+# -- recent_music_tracks -----------------------------------------------------
+
+
+def test_recent_music_tracks_reads_the_newest_videos_first(session_factory):
+    from repository import add_artifact, create_job, recent_music_tracks
+
+    with session_factory() as session:
+        for music in ("old.mp3", None, "mid.mp3", "new.mp3"):
+            job = create_job(session, payload={"videoSubject": "x"})
+            add_artifact(session, job.id, "video", f"output/{job.id}.mp4", {"music": music})
+            add_artifact(session, job.id, "thumbnail", f"output/{job.id}.jpg", {"music": "not.mp3"})
+        assert recent_music_tracks(session, limit=3) == ["new.mp3", "mid.mp3"]
+        assert recent_music_tracks(session, limit=10) == ["new.mp3", "mid.mp3", "old.mp3"]
+
+
+def test_recent_music_tracks_tolerates_videos_without_metadata(session_factory):
+    from repository import add_artifact, create_job, recent_music_tracks
+
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "x"})
+        add_artifact(session, job.id, "video", f"output/{job.id}.mp4", None)
+        assert recent_music_tracks(session) == []
 
 
 # -- build_music_filter -----------------------------------------------------
