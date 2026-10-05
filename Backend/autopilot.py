@@ -95,6 +95,13 @@ DIGEST_HOUR = 10
 # Nothing younger than this has settled data to rank on. See §7.5 of the plan:
 # the threshold is arithmetic, not caution.
 DIGEST_MIN_AGE_DAYS = 7
+# What each format is ranked on, in words. Shorts rank on the share of viewers
+# who did not swipe away at once (formats.ENGAGED_SHARE), long form on seconds
+# watched.
+DIGEST_LABELS = {
+    "short": ("fewest swiped away", "most swiped away"),
+    "long": ("held attention longest", "lost them earliest"),
+}
 
 
 def build_payload(
@@ -650,10 +657,11 @@ class Autopilot:
                         f"{DIGEST_MIN_AGE_DAYS} days has settled data yet."
                     )
                     continue
-                lines.append(f"\n{format_name} — held attention:")
+                kept, lost = DIGEST_LABELS[format_name]
+                lines.append(f"\n{format_name} — {kept}:")
                 lines += [f"  + {subject}" for subject in best]
                 if worst:
-                    lines.append(f"{format_name} — lost them early:")
+                    lines.append(f"{format_name} — {lost}:")
                     lines += [f"  - {subject}" for subject in worst]
         self.notify("\n".join(lines))
         return True

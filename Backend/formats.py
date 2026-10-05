@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+# Ranks by engaged views over views: the share of feed viewers who did not
+# swipe away at once. Not a column; repository computes it.
+ENGAGED_SHARE = "engaged_share"
+
 @dataclass(frozen=True)
 class VideoFormat:
     """Everything the pipeline needs to know about an output shape."""
@@ -37,8 +41,9 @@ class VideoFormat:
     always_hashtags: tuple
     # How to describe this format to the model writing YouTube metadata.
     metadata_label: str
-    # Which VideoMetric column ranks this format. Percentage flatters short
-    # videos and punishes long ones, so the two cannot share a metric.
+    # Which VideoMetric column ranks this format, or ENGAGED_SHARE. Percentage
+    # flatters short videos and punishes long ones, so the two cannot share a
+    # metric.
     ranking_metric: str
     # How many search results to ground the script in. Billed at 2 credits per
     # 10 results against a 1000-a-month free tier, so this is cheap either way.
@@ -143,7 +148,11 @@ SHORT = VideoFormat(
     metadata_label="short vertical YouTube video (YouTube Shorts)",
     # The Shorts feed is a swipe test: a viewer either stays past the first
     # seconds or does not, and nothing else about the video matters if they go.
-    ranking_metric="average_view_percentage",
+    # Measured on the first month, not assumed: every Short got a test batch
+    # of about a thousand views on day one and almost nothing after, and among
+    # the ones tested, the share of viewers who did not swipe away tracked views
+    # at Spearman 0.37 against 0.2 for the view percentage.
+    ranking_metric=ENGAGED_SHARE,
     # Under a hundred words has room for one or two real specifics, not eight.
     research_results=5,
     # Forty-five seconds has no room for a slow build.

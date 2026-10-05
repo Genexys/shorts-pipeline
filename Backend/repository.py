@@ -3,11 +3,11 @@ from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import TYPE_CHECKING, Optional, Sequence
 from uuid import uuid4
 
-from sqlalchemy import and_, select, text
+from sqlalchemy import Float, and_, cast, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from formats import resolve_format
+from formats import ENGAGED_SHARE, resolve_format
 from models import (
     Artifact,
     GenerationEvent,
@@ -536,10 +536,18 @@ def upsert_metrics(
     record.views = metrics.views
     record.average_view_percentage = metrics.average_view_percentage
     record.average_view_duration = metrics.average_view_duration
+    record.engaged_views = metrics.engaged_views
     record.measured_at = metrics.measured_at
     if commit:
         session.commit()
     return record
+
+
+# A Short the feed never tested says nothing about its script. Its share is
+# taken over a handful of views, and 13 of the first 80 public Shorts got
+# under 300 with no pattern in subject, register or hour. The feed's test
+# batch is about a thousand views, so 300 means it happened.
+ENGAGED_SHARE_MIN_VIEWS = 300
 
 
 def _ranked_subjects(
@@ -552,7 +560,7 @@ def _ranked_subjects(
 ) -> list[str]:
     """Subjects of the best or worst videos of one format.
 
-    Ranked on the column the format nominates: percentage for Shorts, seconds
+    Ranked on what the format nominates: the engaged share for Shorts, seconds
     for long form. Comparing the two would be meaningless.
 
     `min_age_days` is not optional and not caution. A video younger than that
@@ -560,17 +568,20 @@ def _ranked_subjects(
     rather than as unknown — and the recommender has not finished placing it.
     """
     fmt = resolve_format(format_name)
-    column = getattr(VideoMetric, fmt.ranking_metric)
     cutoff = (now or utcnow()) - timedelta(days=min_age_days)
+    conditions = [VideoMetric.format_name == fmt.name, VideoMetric.published_at <= cutoff]
+    if fmt.ranking_metric == ENGAGED_SHARE:
+        column = cast(VideoMetric.engaged_views, Float) / VideoMetric.views
+        conditions += [
+            VideoMetric.engaged_views.is_not(None),
+            VideoMetric.views >= ENGAGED_SHARE_MIN_VIEWS,
+        ]
+    else:
+        column = getattr(VideoMetric, fmt.ranking_metric)
     stmt = (
         select(Topic.subject)
         .join(VideoMetric, VideoMetric.job_id == Topic.job_id)
-        .where(
-            and_(
-                VideoMetric.format_name == fmt.name,
-                VideoMetric.published_at <= cutoff,
-            )
-        )
+        .where(and_(*conditions))
         .order_by(column.desc() if best else column.asc())
         .limit(limit)
     )

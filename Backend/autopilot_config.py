@@ -143,13 +143,18 @@ class AutopilotConfig:
             longform_per_week=_parse_int(
                 "AUTOPILOT_LONGFORM_PER_WEEK", get("AUTOPILOT_LONGFORM_PER_WEEK"), 0, 0, 7
             ),
+            # 40 / 10 / 50 since 2026-10-05, from 33 / 20 / 47. Over the first
+            # month's settled Shorts, anniversaries had the lowest median views
+            # (927 against 1,095 for explainers and 1,172 for curios) and half
+            # the subscriptions per view; curios had the best view percentage
+            # and the most subscriptions.
             curio_share=_parse_int(
-                "AUTOPILOT_CURIO_SHARE", get("AUTOPILOT_CURIO_SHARE"), 33, 0, 100
+                "AUTOPILOT_CURIO_SHARE", get("AUTOPILOT_CURIO_SHARE"), 40, 0, 100
             ),
             anniversary_share=_parse_int(
                 "AUTOPILOT_ANNIVERSARY_SHARE",
                 get("AUTOPILOT_ANNIVERSARY_SHARE"),
-                20,
+                10,
                 0,
                 100,
             ),

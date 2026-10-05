@@ -184,6 +184,9 @@ class VideoMetric(Base):
     average_view_duration: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Added 2026-10-05; rows measured before then hold None until the next
+    # refresh, which re-reads every published video.
+    engaged_views: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class ResearchSource(Base):

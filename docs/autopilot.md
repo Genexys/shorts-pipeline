@@ -116,3 +116,11 @@ a curve: how fast a video picked up and whether it kept going.
 to 72 hours behind.** A daily digest of it would mostly repeat itself, so the
 digest is weekly, and it only ranks videos older than seven days — anything
 younger has no settled data at all and reads as zero rather than as unknown.
+
+Shorts are ranked on the **engaged share**: `engagedViews / views`, the share
+of feed viewers who did not swipe away almost at once. Only Shorts with at least
+300 views count, so the feed must actually have tested them. Long form is
+ranked on average seconds watched. The first month is the reason for the
+Shorts metric. Each Short got a test batch of about a thousand views on day
+one and almost nothing after. Among the Shorts that got one, the engaged share
+tracked views at Spearman 0.37, against 0.2 for the view percentage.

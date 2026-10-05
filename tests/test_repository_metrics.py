@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from analytics import VideoMetrics
 from models import VideoMetric
@@ -15,13 +16,17 @@ from repository import (
 NOW = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
 
 
-def _metrics(video_id: str, percentage: float, duration: float, views: int = 100):
+def _metrics(
+    video_id: str, percentage: float, duration: float, views: int = 100,
+    engaged: Optional[int] = None,
+):
     return VideoMetrics(
         video_id=video_id,
         views=views,
         average_view_percentage=percentage,
         average_view_duration=duration,
         measured_at=NOW,
+        engaged_views=engaged,
     )
 
 
@@ -118,8 +123,10 @@ def _seed_ranked(session, format_name, values, age_days=30):
     for index, (subject, value) in enumerate(values):
         video_id = f"v{index}{format_name}"
         job_id = _published(session, subject, format_name, video_id)
+        # Shorts rank on the engaged share, so `value` is that share in percent
+        # over a thousand views; long form ranks on seconds.
         metrics = (
-            _metrics(video_id, value, 0.0)
+            _metrics(video_id, 0.0, 0.0, views=1000, engaged=int(value * 10))
             if format_name == "short"
             else _metrics(video_id, 0.0, value)
         )
@@ -127,7 +134,7 @@ def _seed_ranked(session, format_name, values, age_days=30):
     session.commit()
 
 
-def test_top_performing_subjects_ranks_shorts_by_percentage(session_factory):
+def test_top_performing_subjects_ranks_shorts_by_engaged_share(session_factory):
     with session_factory() as session:
         _seed_ranked(session, "short", [("weak", 20.0), ("strong", 80.0), ("middling", 50.0)])
 
@@ -151,6 +158,64 @@ def test_long_form_ranks_by_duration_not_percentage(session_factory):
         _seed_ranked(session, "long", [("brief", 40.0), ("held them", 210.0)])
 
         assert top_performing_subjects(session, "long", 1, min_age_days=7, now=NOW) == ["held them"]
+
+
+def test_shorts_ranking_ignores_view_percentage(session_factory):
+    # The view percentage tracked views at 0.2 in the first month; the engaged
+    # share at 0.37. A Short with a high percentage but most viewers swiping
+    # away must not rank first.
+    with session_factory() as session:
+        for index, (subject, percentage, engaged) in enumerate(
+            [("watched long by few", 90.0, 250), ("kept most", 40.0, 600)]
+        ):
+            job_id = _published(session, subject, "short", f"p{index}")
+            upsert_metrics(
+                session,
+                _metrics(f"p{index}", percentage, 0.0, views=1000, engaged=engaged),
+                job_id, "short", NOW - timedelta(days=30), commit=False,
+            )
+        session.commit()
+
+        assert top_performing_subjects(session, "short", 1, min_age_days=7, now=NOW) == ["kept most"]
+
+
+def test_shorts_ranking_skips_videos_the_feed_never_tested(session_factory):
+    # Under 300 views the share is noise, and the first month showed no pattern
+    # in which Shorts were left untested.
+    with session_factory() as session:
+        for index, (subject, views, engaged) in enumerate(
+            [("barely shown", 16, 15), ("tested", 1000, 450)]
+        ):
+            job_id = _published(session, subject, "short", f"t{index}")
+            upsert_metrics(
+                session,
+                _metrics(f"t{index}", 50.0, 0.0, views=views, engaged=engaged),
+                job_id, "short", NOW - timedelta(days=30), commit=False,
+            )
+        session.commit()
+
+        assert top_performing_subjects(session, "short", 5, min_age_days=7, now=NOW) == ["tested"]
+        assert worst_performing_subjects(session, "short", 5, min_age_days=7, now=NOW) == ["tested"]
+
+
+def test_shorts_ranking_skips_rows_measured_before_engaged_views_existed(session_factory):
+    with session_factory() as session:
+        job_id = _published(session, "old reading", "short", "o1")
+        upsert_metrics(session, _metrics("o1", 80.0, 0.0, views=1000), job_id, "short",
+                       NOW - timedelta(days=30))
+
+        assert top_performing_subjects(session, "short", 5, min_age_days=7, now=NOW) == []
+
+
+def test_upsert_metrics_stores_engaged_views(session_factory):
+    with session_factory() as session:
+        job_id = _published(session, "Salt", "short", "vid1")
+
+        record = upsert_metrics(
+            session, _metrics("vid1", 62.5, 31.0, views=900, engaged=410), job_id, "short", NOW
+        )
+
+        assert record.engaged_views == 410
 
 
 def test_ranking_excludes_videos_younger_than_the_threshold(session_factory):

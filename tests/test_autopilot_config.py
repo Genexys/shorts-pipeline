@@ -288,11 +288,13 @@ def test_week_start_is_returned_as_utc():
 # -- registers ---------------------------------------------------------------
 
 
-def test_curio_share_defaults_to_a_third():
+def test_curio_share_defaults_to_forty_percent():
+    # Curios had the best view percentage and the most subscriptions per view
+    # in the first month.
     from autopilot_config import AutopilotConfig
 
     config = AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n"})
-    assert config.curio_share == 33
+    assert config.curio_share == 40
 
 
 def test_curio_share_is_bounded():
@@ -337,7 +339,9 @@ def test_zero_shares_leave_only_explainers():
     assert choose_register(config, roll=100) == EXPLAINER
 
 
-def test_anniversary_share_defaults_to_a_fifth():
+def test_anniversary_share_defaults_to_a_tenth():
+    # Anniversaries had the lowest median views and half the subscriptions per
+    # view in the first month.
     from autopilot_config import AutopilotConfig
 
-    assert AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n"}).anniversary_share == 20
+    assert AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n"}).anniversary_share == 10
