@@ -147,16 +147,19 @@ def test_tts_refuses_without_a_key(monkeypatch):
 # -- model choice -----------------------------------------------------------
 
 
-def test_shorts_use_the_cheaper_model():
-    # Flash bills half a credit per character. Over three Shorts a day that is
-    # the difference between fitting a 60k plan and overrunning it.
-    assert SHORT.elevenlabs_model == "eleven_flash_v2_5"
+def test_both_formats_narrate_with_v4():
+    # Chosen by ear on 2026-10-05 over Flash v2.5, v4 Turbo and v3.
+    assert SHORT.elevenlabs_model == "eleven_v4"
+    assert LONG.elevenlabs_model == "eleven_v4"
 
 
-def test_long_form_uses_the_better_model():
-    # Same price as v2 multilingual and newer; minutes of narration are where
-    # it earns its keep.
-    assert LONG.elevenlabs_model == "eleven_v3"
+def test_a_short_is_narrated_in_one_request():
+    # The chosen take was the whole script in one request; the pipeline still
+    # drops to a sentence per request when AssemblyAI is not configured.
+    assert SHORT.narrate_by_section
+    assert speech.narration_plan(
+        "First sentence. Second sentence. Third.", by_section=SHORT.narrate_by_section
+    ) == [["First sentence. Second sentence. Third."]]
 
 
 def test_the_model_reaches_the_api(monkeypatch, paths):
@@ -197,6 +200,45 @@ def test_tts_sends_the_model_it_was_given(monkeypatch):
     )
     elevenlabs_voice.tts("hi", "voice", "/tmp/x.mp3", "eleven_v3")
     assert captured["json"]["model_id"] == "eleven_v3"
+
+
+# -- request body ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("model", ["eleven_v4", "eleven_v4_turbo"])
+def test_v4_gets_the_chosen_settings_and_full_normalization(model):
+    body = elevenlabs_voice._body("Text.", model, None, None)
+    assert body["voice_settings"] == {
+        "stability": 0.5, "similarity_boost": 0.8, "use_speaker_boost": True,
+    }
+    assert body["apply_text_normalization"] == "on"
+
+
+def test_v4_keeps_request_stitching():
+    # v3 has none; v4 accepted whole neighbouring sections on 2026-10-05.
+    body = elevenlabs_voice._body("Two.", "eleven_v4", "One.", "Three.")
+    assert body["previous_text"] == "One."
+    assert body["next_text"] == "Three."
+
+
+@pytest.mark.parametrize("model", ["eleven_flash_v2_5", "eleven_v3", "eleven_multilingual_v2"])
+def test_other_models_keep_their_stored_settings(model):
+    # Forced normalization on Flash is an Enterprise feature, and nothing here
+    # was chosen for the older models.
+    body = elevenlabs_voice._body("Text.", model, None, None)
+    assert "voice_settings" not in body
+    assert "apply_text_normalization" not in body
+
+
+def test_v3_still_gets_no_stitching():
+    body = elevenlabs_voice._body("Two.", "eleven_v3", "One.", "Three.")
+    assert "previous_text" not in body and "next_text" not in body
+
+
+def test_v4_settings_are_not_shared_between_requests():
+    first = elevenlabs_voice._body("A.", "eleven_v4", None, None)
+    first["voice_settings"]["stability"] = 0.0
+    assert elevenlabs_voice._body("B.", "eleven_v4", None, None)["voice_settings"]["stability"] == 0.5
 
 
 # -- narration planning ------------------------------------------------------

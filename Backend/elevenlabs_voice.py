@@ -39,8 +39,22 @@ def scrub(text: str, key: Optional[str] = None) -> str:
 # Request stitching gives each chunk the neighbouring text so prosody carries
 # across a join instead of restarting. ElevenLabs does not offer it on v3, and
 # sending the fields anyway is a request the API may reject, so it is asked for
-# only where it exists.
+# only where it exists. v4 has it back: both v4 variants accepted whole
+# neighbouring sections as context on 2026-10-05.
 STITCHING_UNSUPPORTED_PREFIXES = ("eleven_v3",)
+
+# Eleven v4 and v4 Turbo.
+V4_PREFIX = "eleven_v4"
+
+# v4 has two voice settings, Stability and Similarity; Style and Speed do not
+# exist on it. These are the settings of the take chosen by ear on 2026-10-05,
+# out of ten narrations of the same Short. A take directed with audio tags and
+# stability 0.35 was rejected as too expressive for popular science: "[with
+# renewed energy]" read as a presenter, and "[quiet, ominous]" in a long
+# section turned the narration into a whisper. So no tags, and the default
+# stability; the voice is held a little closer to its reference than the 0.75
+# default.
+V4_VOICE_SETTINGS = {"stability": 0.5, "similarity_boost": 0.8, "use_speaker_boost": True}
 
 
 def _body(
@@ -52,12 +66,23 @@ def _body(
             body["previous_text"] = previous_text
         if next_text:
             body["next_text"] = next_text
+    if is_v4(model):
+        body["voice_settings"] = dict(V4_VOICE_SETTINGS)
+        # "auto" leaves it to the model whether "$25,000" or "4.23 grams per
+        # gallon" are expanded into words. "on" always does. Only on v4: Flash
+        # forces it on the Enterprise plan alone.
+        body["apply_text_normalization"] = "on"
     return body
 
 
 def supports_stitching(model: str) -> bool:
     """Whether this model accepts previous_text / next_text."""
     return not (model or "").startswith(STITCHING_UNSUPPORTED_PREFIXES)
+
+
+def is_v4(model: str) -> bool:
+    """Whether this is one of the Eleven v4 models, which take their own settings."""
+    return (model or "").startswith(V4_PREFIX)
 
 
 def tts(

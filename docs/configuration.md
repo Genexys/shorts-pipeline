@@ -134,16 +134,27 @@ voice-only video is kept and the job still completes.
 
 ## Narration
 
-Two voice services, chosen per format rather than per request.
+Both formats narrate with ElevenLabs, each with its own voice; TikTok TTS is
+the fallback.
 
-| Format | Service | Voice |
-|---|---|---|
-| `short` | TikTok TTS | `en_us_001` |
-| `long` | ElevenLabs | George, British, `narrative_story` |
+| Format | Model | Voice | Requests | TikTok fallback |
+|---|---|---|---|---|
+| `short` | `eleven_v4` | Max, Elearning and Documentary | the whole script in one | `en_male_narration` |
+| `long` | `eleven_v4` | George, British, `narrative_story` | one per section | `en_au_002` |
 
-Shorts stay on the free service deliberately. Thirty seconds of synthetic
-narration is tolerable; four minutes of it is where retention goes. Paid
-credits are worth more on the longer format.
+The model and the request shape were chosen by ear on 2026-10-05. Ten
+narrations of the same Short were compared: Flash v2.5, v4 Turbo, v4 sent a
+sentence at a time, and v4 sent whole with different settings. On v4 every
+request carries stability 0.5, similarity 0.8, speaker boost, and
+`apply_text_normalization: "on"`, so numbers and amounts are always read as
+words. Other models get none of this and use the voice's stored settings.
+
+No audio tags. A take directed with `[with renewed energy]` and `[tense]` was
+too expressive for popular science, and `[quiet, ominous]` in a long section
+turned the narration into a whisper.
+
+Without `ASSEMBLY_AI_API_KEY`, both formats narrate a sentence per request
+instead, because the local subtitle timing is built from the individual clips.
 
 `ELEVENLABS_API_KEY` empty switches the integration off entirely and every
 format narrates with TikTok, so a deployment without a key still works.
@@ -154,10 +165,18 @@ remaining ones. Retrying only the failed sentence would splice two narrators
 into one video, which is worse than the cheaper voice throughout. The job logs
 which service was used and never fails because of narration.
 
-Cost, on pay-as-you-go at $0.10 per 1000 characters: about $0.33 for a
-long-form video of ~550 words, and about $0.055 for a Short if you ever switch
-one over. Restrict the API key to Text to Speech and give it a credit cap — the
-autopilot uses it unattended.
+Cost, measured in plan credits on 2026-10-05:
+
+| Model | Credits per character |
+|---|---|
+| `eleven_flash_v2_5` | 0.20 |
+| `eleven_v3` | 0.40 |
+| `eleven_v4` | 0.11 until 12 October 2026 (launch discount), then v3's price |
+
+That makes a Short of ~540 characters about 215 credits and a long video of
+~5,000 characters about 2,000. Each response's `character-cost` header is the
+exact charge. Restrict the API key to Text to Speech and give it a credit cap:
+the autopilot uses it unattended.
 
 ## Stock footage
 
