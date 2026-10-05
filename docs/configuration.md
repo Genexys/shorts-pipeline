@@ -78,6 +78,7 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_LONGFORM_PER_WEEK` | Long videos per week, 0..7. `0` keeps the autopilot on Shorts. The budget is paced across the week rather than spent at the start of it: two a week land on Monday and Thursday, three on Monday, Wednesday and Friday. Falling behind (an outage, a day the machine was off) lets the next slots catch up. | `0` |
 | `AUTOPILOT_CURIO_SHARE` | Percent of videos that report something absurd but true instead of explaining how something works, 0..100. See [Registers](#registers). | `40` |
 | `AUTOPILOT_ANNIVERSARY_SHARE` | Percent of videos built from an event that happened on today's date, 0..100. See [Registers](#registers). | `10` |
+| `AUTOPILOT_OPENING_EXPERIMENT_SHARE` | Percent of explainer and curio Shorts written with the experimental opening rule, 0..100. `0` ends the experiment, `100` adopts the rule. See [Opening-line experiment](#opening-line-experiment). | `50` |
 | `OUTPUT_RETENTION_DAYS` | Days to keep `output/` videos and thumbnails, 1..365. | `7` |
 | `REQUIRE_MOUNTS` | `true` makes `worker` and `autopilot` refuse to start when they cannot see the YouTube token (and, with `AUTOPILOT_USE_MUSIC` on, any `.mp3` under `Songs/`). For hosts where those are known to exist; catches the empty bind mounts Docker Desktop creates when WSL integration is late. See `docs/docker.md`. | `false` |
 | `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
@@ -370,6 +371,54 @@ facts from the database. A read costs 1 credit, so two pages a video adds at
 most about 250 credits a month, less as pages repeat. A failed read is not
 remembered and is retried by the next video; any failure in the knowledge base
 leaves the brief as snippets only.
+
+## Opening-line experiment
+
+Started 2026-10-05. Every Short gets a test batch of about a thousand feed
+views on its first day, and how far it travels after that follows the share of
+viewers who do not swipe away at once. In the first month, openings set in the
+viewer's own day kept 59–69% of viewers:
+
+- "The metal spoon burning your fingers is actively cooling your soup down"
+- "Thirty seconds of hot tap water opens a jar lid nothing else could budge"
+
+Openings that began on a name, a place or a species kept 25–27%:
+
+- "Drake came home to Plymouth…"
+- "A threatened Texas horned lizard shoots blood…"
+
+That was 67 videos and an observation, so it is being tested rather than
+adopted.
+
+The autopilot draws an arm for each explainer and curio Short and stores it in
+the job payload as `openingArm`:
+
+- `everyday` adds `EVERYDAY_OPENING_RULES` (in `Backend/gpt.py`) to the
+  prompt. The first sentence is set in the viewer's own life, and it does not
+  open on a name, a place or a species.
+- `control` keeps the prompt unchanged.
+
+Anniversaries, long form and manual jobs always get `control`. The engaged
+share varies by about ten points from one Short to the next. So 25–30 Shorts
+per arm are enough to see a five-point difference, which takes about two
+weeks at four Shorts a day.
+
+Read the result once the newest Shorts in it are a week old, with
+`engaged_views` stored:
+
+```sql
+SELECT j.payload->>'openingArm' AS arm, j.payload->>'register' AS register,
+       count(*) AS shorts,
+       round(avg(m.engaged_views::numeric / m.views), 3) AS engaged_share,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY m.views) AS median_views
+FROM video_metrics m JOIN generation_jobs j ON j.id = m.job_id
+WHERE m.format_name = 'short' AND m.views >= 300
+  AND m.engaged_views IS NOT NULL AND j.payload->>'openingArm' IS NOT NULL
+GROUP BY 1, 2 ORDER BY 2, 1;
+```
+
+Then set `AUTOPILOT_OPENING_EXPERIMENT_SHARE` to `100` to keep the rule, or
+`0` to drop it.
 
 ## Registers
 

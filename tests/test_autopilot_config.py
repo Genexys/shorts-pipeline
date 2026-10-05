@@ -345,3 +345,65 @@ def test_anniversary_share_defaults_to_a_tenth():
     from autopilot_config import AutopilotConfig
 
     assert AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n"}).anniversary_share == 10
+
+
+# -- opening-line experiment --------------------------------------------------
+
+
+def _experiment(share: str):
+    from autopilot_config import AutopilotConfig
+
+    return AutopilotConfig.from_env(
+        {"AUTOPILOT_NICHE": "n", "AUTOPILOT_OPENING_EXPERIMENT_SHARE": share}
+    )
+
+
+def test_the_opening_experiment_splits_shorts_in_half_by_default():
+    from autopilot_config import AutopilotConfig
+
+    assert AutopilotConfig.from_env({"AUTOPILOT_NICHE": "n"}).opening_experiment_share == 50
+
+
+def test_choose_opening_arm_follows_the_roll():
+    from autopilot_config import choose_opening_arm
+    from gpt import EXPLAINER, OPENING_CONTROL, OPENING_EVERYDAY
+
+    config = _experiment("50")
+    assert choose_opening_arm(config, "short", EXPLAINER, roll=1) == OPENING_EVERYDAY
+    assert choose_opening_arm(config, "short", EXPLAINER, roll=50) == OPENING_EVERYDAY
+    assert choose_opening_arm(config, "short", EXPLAINER, roll=51) == OPENING_CONTROL
+    assert choose_opening_arm(config, "short", EXPLAINER, roll=100) == OPENING_CONTROL
+
+
+def test_curios_take_part_too():
+    from autopilot_config import choose_opening_arm
+    from gpt import CURIO, OPENING_EVERYDAY
+
+    assert choose_opening_arm(_experiment("100"), "short", CURIO) == OPENING_EVERYDAY
+
+
+def test_anniversaries_and_long_form_stay_in_control():
+    # An anniversary opens on its date by design; long form has no
+    # one-sentence hook.
+    from autopilot_config import choose_opening_arm
+    from gpt import ANNIVERSARY, EXPLAINER, OPENING_CONTROL
+
+    config = _experiment("100")
+    assert choose_opening_arm(config, "short", ANNIVERSARY) == OPENING_CONTROL
+    assert choose_opening_arm(config, "long", EXPLAINER) == OPENING_CONTROL
+
+
+def test_zero_ends_the_experiment():
+    from autopilot_config import choose_opening_arm
+    from gpt import EXPLAINER, OPENING_CONTROL
+
+    assert choose_opening_arm(_experiment("0"), "short", EXPLAINER, roll=1) == OPENING_CONTROL
+
+
+def test_the_experiment_share_is_bounded():
+    import pytest
+    from autopilot_config import ConfigError
+
+    with pytest.raises(ConfigError):
+        _experiment("101")
+

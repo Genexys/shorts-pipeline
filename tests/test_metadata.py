@@ -786,6 +786,52 @@ def test_shorts_are_told_to_lead_with_the_payoff(monkeypatch):
     assert "FIRST sentence must contain the surprising thing" in prompts[0]
 
 
+def test_the_everyday_arm_adds_its_opening_rule(monkeypatch):
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or ("A lizard squirts blood. " + "word " * 130),
+    )
+    gpt.generate_script(
+        "s", 1, "m", "en_us_001", "", target_words=120, lead_with_payoff=True,
+        opening_arm=gpt.OPENING_EVERYDAY,
+    )
+    assert "Set the first sentence in the viewer's own life" in prompts[0]
+    # On top of the standing rule, not instead of it.
+    assert "FIRST sentence must contain the surprising thing" in prompts[0]
+
+
+def test_the_control_arm_keeps_the_prompt_unchanged(monkeypatch):
+    prompts: list = []
+    monkeypatch.setattr(
+        gpt, "generate_response",
+        lambda p, m: prompts.append(p) or ("A lizard squirts blood. " + "word " * 130),
+    )
+    for arm in (gpt.OPENING_CONTROL, None):
+        gpt.generate_script(
+            "s", 1, "m", "en_us_001", "", target_words=120, lead_with_payoff=True,
+            opening_arm=arm,
+        )
+    assert all("viewer's own life" not in prompt for prompt in prompts)
+
+
+def test_the_retry_after_a_weak_opening_keeps_the_arm(monkeypatch):
+    prompts: list = []
+    drafts = [
+        "Sleep is a vital part of our lives. " + "word " * 130,
+        "A lizard squirts blood from its eyes. " + "word " * 130,
+    ]
+    monkeypatch.setattr(gpt, "generate_response", lambda p, m: prompts.append(p) or drafts.pop(0))
+
+    gpt.generate_script(
+        "s", 1, "m", "en_us_001", "", target_words=120, lead_with_payoff=True,
+        opening_arm=gpt.OPENING_EVERYDAY,
+    )
+
+    assert len(prompts) == 2
+    assert all("viewer's own life" in prompt for prompt in prompts)
+
+
 def test_long_form_is_not(monkeypatch):
     prompts: list = []
     monkeypatch.setattr(

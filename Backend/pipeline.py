@@ -244,6 +244,11 @@ def run_generation_pipeline(
     subtitles_position = data.get("subtitlesPosition")
     text_color = data.get("color")
     register = data.get("register")
+    # Which arm of the opening-line experiment this job is in, chosen by the
+    # autopilot. Absent for manual jobs, which get the unchanged prompt.
+    opening_arm = data.get("openingArm")
+    if opening_arm:
+        emit(f"[+] Opening-line experiment: {opening_arm} arm.", "info")
     anchor = (data.get("anchor") or "").strip()
     use_music = data.get("useMusic", False)
     automate_youtube_upload = data.get("automateYoutubeUpload", False)
@@ -399,6 +404,7 @@ def run_generation_pipeline(
             anchor=anchor,
             max_words=words_for_seconds(fmt.max_seconds),
             report_model=note_model,
+            opening_arm=opening_arm,
         )
 
     script_fell_back = writer.is_configured() and script_model != writer.model_name()

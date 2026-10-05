@@ -74,6 +74,8 @@ def test_build_payload_matches_frontend_shape():
         "register": "explainer",
         # The event an anniversary topic came from; empty for every other kind.
         "anchor": "",
+        # The opening-line experiment's arm; control unless drawn otherwise.
+        "openingArm": "control",
         "aiModel": "llama3.1:8b",
         "voice": "en_us_001",
         "paragraphNumber": 1,

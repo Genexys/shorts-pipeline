@@ -229,6 +229,11 @@ SCRIPT_ANGLES = (
 EXPLAINER = "explainer"
 CURIO = "curio"
 ANNIVERSARY = "anniversary"
+
+# Arms of the opening-line experiment started 2026-10-05. See
+# EVERYDAY_OPENING_RULES.
+OPENING_CONTROL = "control"
+OPENING_EVERYDAY = "everyday"
 REGISTERS = (EXPLAINER, CURIO, ANNIVERSARY)
 
 # How many words each kind of video is asked for. Letting the writer choose
@@ -688,6 +693,7 @@ def generate_script(
     anchor: str = "",
     max_words: Optional[int] = None,
     report_model: Optional[Callable[[str], None]] = None,
+    opening_arm: Optional[str] = None,
     _retry: bool = True,
 ) -> Optional[str]:
     """
@@ -764,7 +770,7 @@ def generate_script(
     
     Subject: {video_subject}
 {length}    Language: {voice}
-{OPENING_RULES if lead_with_payoff else ""}{ENDING_RULES}{anchor_rules(anchor)}{register_rules(register)}{research_rules(research)}
+{OPENING_RULES if lead_with_payoff else ""}{opening_rules_for(opening_arm) if lead_with_payoff else ""}{ENDING_RULES}{anchor_rules(anchor)}{register_rules(register)}{research_rules(research)}
     """
 
     # Generate script
@@ -905,6 +911,7 @@ def generate_script(
                     anchor=anchor,
                     max_words=max_words,
                     report_model=report_model,
+                    opening_arm=opening_arm,
                     _retry=False,
                 ) or final_script
 
@@ -1047,6 +1054,33 @@ OPENING_RULES = """
     the second sentence. Under sixteen words.
 """
 
+# The experimental arm of the opening test, added on top of OPENING_RULES.
+# Measured on the first month's Shorts: the share of viewers who did not swipe
+# away at once ran 59-69% for openings set in the viewer's own day ("The metal
+# spoon burning your fingers is actively cooling your soup down", "Thirty
+# seconds of hot tap water opens a jar lid nothing else could budge"). It ran
+# 25-27% for openings that began on a name, a place or a species ("Drake came
+# home to Plymouth...", "A threatened Texas horned lizard shoots blood..."). That
+# is 67 videos and an observation, not an established rule, so it is tested
+# against the unchanged prompt rather than adopted outright. The examples are
+# lines the channel published and checked; the prompt gives no new facts to
+# copy.
+EVERYDAY_OPENING_RULES = """
+    Set the first sentence in the viewer's own life: something they have seen,
+    touched, heard, tasted or done, such as an object at home, a feeling in
+    their body or a moment from an ordinary day. Make the surprising claim about
+    that thing in the same sentence. "The metal spoon burning your fingers is
+    actively cooling your soup down" works because the viewer has held that
+    spoon.
+
+    Do not open on a person's name, a place name or an animal's species, even
+    when the story is about them. "Drake came home to Plymouth with one ship of
+    the five that had set out" asks the viewer to care before giving them a
+    reason to. Find the part of the subject the viewer already knows from their
+    own life and open with that. The name, the place and the date come in the
+    second sentence.
+"""
+
 # Openings that say nothing, each taken from a published video's first
 # sentence. A blocklist is a heuristic and will not catch every evasion — the
 # instruction above does the work; this catches the ones it misses.
@@ -1104,6 +1138,11 @@ _DATELINE_OPENING_RE = re.compile("|".join(DATELINE_OPENING_PATTERNS), re.IGNORE
 # and a south piece, you get two complete magnets" (28). Nothing fell at 17, so
 # the line goes in the gap rather than through either group.
 OPENING_MAX_WORDS = 16
+
+
+def opening_rules_for(opening_arm: Optional[str]) -> str:
+    """The extra opening instruction for an experiment arm, or "" for control."""
+    return EVERYDAY_OPENING_RULES if opening_arm == OPENING_EVERYDAY else ""
 
 
 def opening_runs_long(script: str) -> bool:
