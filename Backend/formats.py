@@ -130,10 +130,12 @@ SHORT = VideoFormat(
     voice="en_male_narration",
     # Max — Elearning and Documentary.
     elevenlabs_voice_id="Gfpl8Yo74Is0W6cPUWWT",
-    # Flash bills half a credit per character. Across three Shorts a day that
-    # is the difference between fitting a 60k plan and overrunning it, and at
-    # this length the cheaper model is hard to tell apart.
-    elevenlabs_model="eleven_flash_v2_5",
+    # Chosen by ear on 2026-10-05 over Flash v2.5 and v4 Turbo, narrating the
+    # same Short. Twice Flash's price once the launch discount ends on 12
+    # October: measured on this account, Flash bills 0.20 credits a character
+    # and v3 0.40, and v4 lists at v3's price. A 540-character Short is then
+    # about 215 credits instead of 107.
+    elevenlabs_model="eleven_v4",
     # Shorts are chosen from a vertical feed, not from a thumbnail grid, and a
     # 16:9 still does not represent them anyway.
     build_thumbnail=False,
@@ -146,9 +148,12 @@ SHORT = VideoFormat(
     research_results=5,
     # Forty-five seconds has no room for a slow build.
     lead_with_payoff=True,
-    # One sentence per request, so the subtitle fallback can time each clip.
-    # A Short is a single section anyway, so nothing is lost.
-    narrate_by_section=False,
+    # The whole script in one request, as long form sends a section. The take
+    # chosen on 2026-10-05 was narrated this way; the same model sent a
+    # sentence at a time lost to it. Without AssemblyAI the pipeline still
+    # falls back to a sentence per request, which the local subtitle timing
+    # needs.
+    narrate_by_section=True,
     # Shorts live on pace; a pause is dead air in a swipe feed.
     section_pause_seconds=0.0,
     # Just enough that the last word is not clipped by the file ending, but
@@ -191,9 +196,10 @@ LONG = VideoFormat(
     # George: British, labelled narrative_story. Four minutes of obviously
     # synthetic narration is where retention goes to die.
     elevenlabs_voice_id="JBFqnCBsd6RMkjVDRZzb",
-    # Same price as v2 multilingual and newer. Minutes of narration are where
-    # the better model earns its keep, and long form is few enough to afford it.
-    elevenlabs_model="eleven_v3",
+    # v3's successor at the same list price. Unlike v3 it accepts request
+    # stitching, so each section is generated knowing the ones either side of
+    # it instead of starting cold after the pause.
+    elevenlabs_model="eleven_v4",
     # For a long video the thumbnail decides whether anyone opens it at all.
     build_thumbnail=True,
     # #Shorts on a three-minute landscape video misleads both the viewer and

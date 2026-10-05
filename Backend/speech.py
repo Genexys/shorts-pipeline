@@ -63,9 +63,9 @@ def narration_plan(script: str, by_section: bool) -> List[List[str]]:
     One chunk per section reads far better than one per sentence: sent a whole
     paragraph, the voice shapes the rhythm inside it, where sentence-by-sentence
     synthesis gives every sentence the falling intonation of a final one and
-    the result sounds clipped. Sentence chunks stay the default for Shorts,
-    whose subtitles are timed from the individual clips when AssemblyAI is not
-    configured.
+    the result sounds clipped. Sentence chunks remain for when AssemblyAI is
+    not configured, because the local subtitles are timed from the individual
+    clips.
 
     Semicolons are turned into full stops on the way through — see
     `for_narration` for why.
