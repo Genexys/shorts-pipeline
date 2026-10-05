@@ -1044,6 +1044,52 @@ def uppercase_dialogue(line: str) -> str:
     return ",".join(fields)
 
 
+def _ass_centiseconds(timestamp: str) -> int:
+    """An ASS time, H:MM:SS.cc, in centiseconds."""
+    hours, minutes, seconds = timestamp.strip().split(":")
+    whole, _, fraction = seconds.partition(".")
+    return (int(hours) * 3600 + int(minutes) * 60 + int(whole)) * 100 + int(
+        (fraction + "00")[:2]
+    )
+
+
+def end_dialogue_before_next(lines: List[str]) -> List[str]:
+    """The script's lines, with any `Dialogue:` that runs into the next one cut short.
+
+    ffmpeg writes an SRT cue into ASS in centiseconds, rounding its start and
+    its duration separately, so a cue can end 0.01 s after the next one
+    begins: 00:00:26,007 --> 00:00:26,994 becomes 26.01 to 27.00, while the
+    next cue starts at 26.99. A frame inside that hundredth of a second shows
+    both, libass moves the newer one out of the older one's way, and the newer
+    one keeps that lower place until it ends. In the four Shorts of 2026-10-04
+    and 2026-10-05, seven captions jumped 120 px down like this, "EXPONENTIAL"
+    and "MOVES IN," among them.
+
+    Captions never overlap on purpose, so each line now ends no later than the
+    next one starts. A line that starts at the same time as the next, or a time
+    that does not parse, is left as it is.
+    """
+    ended = list(lines)
+    dialogue = [i for i, line in enumerate(lines) if line.lstrip().startswith("Dialogue:")]
+    for current, following in zip(dialogue, dialogue[1:]):
+        fields = ended[current].split(",", 9)
+        next_fields = lines[following].split(",", 9)
+        if len(fields) < 10 or len(next_fields) < 10:
+            continue
+        try:
+            start, end, next_start = (
+                _ass_centiseconds(fields[1]),
+                _ass_centiseconds(fields[2]),
+                _ass_centiseconds(next_fields[1]),
+            )
+        except ValueError:
+            continue
+        if start < next_start < end:
+            fields[2] = next_fields[1]
+            ended[current] = ",".join(fields)
+    return ended
+
+
 def patch_ass_script(
     script: str, subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT
 ) -> str:
@@ -1054,7 +1100,8 @@ def patch_ass_script(
     almost seven and the text runs off the screen. Declaring the real frame
     size makes the size mean pixels.
 
-    The dialogue is upper-cased on the way through (see ASS_UNTOUCHED).
+    The dialogue is upper-cased on the way through (see ASS_UNTOUCHED), and
+    each line ends where the next begins (see end_dialogue_before_next).
     """
     lines = []
     seen_play_res_x = seen_play_res_y = False
@@ -1078,7 +1125,7 @@ def patch_ass_script(
                 lines.append(f"PlayResX: {fmt.width}")
                 lines.append(f"PlayResY: {fmt.height}")
                 seen_play_res_x = seen_play_res_y = True
-    return "\n".join(lines) + "\n"
+    return "\n".join(end_dialogue_before_next(lines)) + "\n"
 
 
 def prepare_ass_subtitles(
