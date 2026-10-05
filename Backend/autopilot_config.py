@@ -73,6 +73,7 @@ class AutopilotConfig:
     longform_per_week: int
     curio_share: int
     anniversary_share: int
+    opening_experiment_share: int
     output_retention_days: int
     telegram_bot_token: str
     telegram_chat_id: str
@@ -155,6 +156,16 @@ class AutopilotConfig:
                 "AUTOPILOT_ANNIVERSARY_SHARE",
                 get("AUTOPILOT_ANNIVERSARY_SHARE"),
                 10,
+                0,
+                100,
+            ),
+            # Percent of eligible Shorts written with EVERYDAY_OPENING_RULES.
+            # 50 runs the experiment; 0 ends it with the old prompt, 100 adopts
+            # the new one.
+            opening_experiment_share=_parse_int(
+                "AUTOPILOT_OPENING_EXPERIMENT_SHARE",
+                get("AUTOPILOT_OPENING_EXPERIMENT_SHARE"),
+                50,
                 0,
                 100,
             ),
@@ -267,3 +278,21 @@ def choose_register(config: AutopilotConfig, roll: Optional[int] = None) -> str:
     if drawn <= config.curio_share + config.anniversary_share:
         return ANNIVERSARY
     return EXPLAINER
+
+
+def choose_opening_arm(
+    config: AutopilotConfig, format_name: str, register: str, roll: Optional[int] = None
+) -> str:
+    """Which arm of the opening-line experiment the next video joins.
+
+    Drawn per video, so the arms are spread across hours and days instead of
+    following the slot order. Only explainer and curio Shorts take part:
+    long form has no one-sentence hook, and an anniversary opens on its date by
+    design (opens_weakly exempts it), which the experimental rule contradicts.
+    """
+    from gpt import CURIO, EXPLAINER, OPENING_CONTROL, OPENING_EVERYDAY
+
+    if format_name != "short" or register not in (EXPLAINER, CURIO):
+        return OPENING_CONTROL
+    drawn = random.randint(1, 100) if roll is None else roll
+    return OPENING_EVERYDAY if drawn <= config.opening_experiment_share else OPENING_CONTROL

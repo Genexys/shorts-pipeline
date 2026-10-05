@@ -19,13 +19,22 @@ from analytics import fetch_metrics
 from autopilot_config import (
     AutopilotConfig,
     ConfigError,
+    choose_opening_arm,
     choose_register,
     next_format,
     slot_available,
     week_start,
 )
 from db import SessionLocal, init_db
-from gpt import ANNIVERSARY, CURIO, EXPLAINER, TOPIC_BRIEFS, extract_json_object, write_creative
+from gpt import (
+    ANNIVERSARY,
+    CURIO,
+    EXPLAINER,
+    OPENING_CONTROL,
+    TOPIC_BRIEFS,
+    extract_json_object,
+    write_creative,
+)
 from logstream import log
 from models import Topic
 from notify import TELEGRAM_MAX_CAPTION, send_telegram, send_telegram_photo
@@ -110,6 +119,7 @@ def build_payload(
     format_name: str = "short",
     register: str = EXPLAINER,
     anchor: str = "",
+    opening_arm: str = OPENING_CONTROL,
 ) -> dict:
     """Same shape as Frontend/app.js sends, plus upload flag and thread count."""
     return {
@@ -122,6 +132,9 @@ def build_payload(
         # words happen to match — a Kilby anniversary became a 2023 Stanford
         # press release that way.
         "anchor": anchor,
+        # The opening-line experiment's arm. Stored with the job so the results
+        # can be read back from generation_jobs.payload against video_metrics.
+        "openingArm": opening_arm,
         "aiModel": config.model,
         "voice": config.voice,
         "paragraphNumber": config.paragraphs,
@@ -443,17 +456,19 @@ class Autopilot:
                 now.astimezone(self.config.tz).weekday(),
             )
 
+            opening_arm = choose_opening_arm(self.config, format_name, register)
             job = queue_topic_job(
                 session,
                 topic,
                 build_payload(
-                    self.config, topic.subject, format_name, register, anchor
+                    self.config, topic.subject, format_name, register, anchor,
+                    opening_arm,
                 ),
                 now=now,
             )
             log(
                 f"[+] Autopilot queued {format_name} {register} job {job.id} "
-                f"for topic '{topic.subject}'",
+                f"for topic '{topic.subject}' (opening: {opening_arm})",
                 "success",
             )
             return job.id
