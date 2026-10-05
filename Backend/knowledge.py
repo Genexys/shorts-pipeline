@@ -217,10 +217,25 @@ _END_OF_CONTENT = re.compile(
 # A link target, allowing one level of parentheses inside it:
 # (https://en.wikipedia.org/wiki/Doi_(identifier) "Doi (identifier)")
 _TARGET = r"\((?:[^()]|\([^()]*\))*\)"
+# A blockquote's markers, nested or not: "> ", "> > ".
+#
+# Quotes used to be dropped with the tables. On 2026-10-04 that cost the beer
+# froth Short its point: Improbable Research's page on the Ig Nobel result says
+# "A team from the Institut für Angewandte und Physikalische Chemie…, Universität
+# Bremen, Germany, “call in question the results presented by Leike”, saying
+# that :" and quotes the finding below it — "the foam volume does not shrink
+# simple exponentially". Without it the script could only say that "one
+# experimental research project has challenged the idea".
+_QUOTE_MARKS = re.compile(r"^(?:>\s*)+")
 
 
 def clean_markdown(markdown: str) -> List[str]:
-    """The page as plain-text paragraphs: no links, images, citations or tables."""
+    """The page as plain-text paragraphs: no links, images, citations or tables.
+
+    A quote stays, as a paragraph of its own, or joined to the one before it
+    when that one ends in a colon: that is the sentence saying whose words they
+    are, and it cannot be stored alone, since it does not end a sentence.
+    """
     text = markdown or ""
     end = _END_OF_CONTENT.search(text)
     if end:
@@ -244,16 +259,24 @@ def clean_markdown(markdown: str) -> List[str]:
     paragraphs = []
     for block in re.split(r"\n\s*\n", text):
         lines = []
+        quoted = False
         for line in block.splitlines():
             stripped = line.strip()
-            if not stripped or stripped.startswith(("#", "|", ">")):
+            if stripped.startswith(">"):
+                stripped = _QUOTE_MARKS.sub("", stripped)
+                quoted = True
+            if not stripped or stripped.startswith(("#", "|")):
                 continue
             stripped = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", stripped)
             lines.append(stripped)
         paragraph = " ".join(lines)
         paragraph = re.sub(r"(?<!\w)[*_]{1,3}|[*_]{1,3}(?!\w)", "", paragraph)
         paragraph = " ".join(paragraph.split())
-        if paragraph:
+        if not paragraph:
+            continue
+        if quoted and paragraphs and paragraphs[-1].endswith(":"):
+            paragraphs[-1] = f"{paragraphs[-1]} {paragraph}"
+        else:
             paragraphs.append(paragraph)
     return paragraphs
 
