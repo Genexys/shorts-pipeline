@@ -285,7 +285,9 @@ added to the brief under the snippets. So is any sentence that limits a claim:
 something unproven, disputed, a myth or a case report, "not a contributing
 factor". A finding is kept with its p-value in brackets; the methods
 statistics around it are still dropped. One paper on two sites (the journal
-and PubMed Central) is read once.
+and PubMed Central) is read once. Quoted passages are read like the rest of the
+page, and one introduced by a sentence ending in a colon ("…, saying that:") is
+stored together with that sentence, so the fact says whose words they are.
 
 The topic line's own words count too. Words in the subject that the search
 snippets don't share say what this video in particular promises: "upper" and
