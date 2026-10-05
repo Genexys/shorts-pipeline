@@ -103,6 +103,8 @@ def process_next_job() -> bool:
                         "scriptModel": result.script_model,
                         "scriptFellBack": result.script_fell_back,
                         "scriptLocal": result.script_local,
+                        "music": result.music_track,
+                        "musicTheme": result.music_theme,
                     },
                     commit=False,
                 )

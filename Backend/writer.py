@@ -4,8 +4,8 @@ The calls that go here are the ones where judgement shows: the topic, the
 script, the stock search terms, and the title and description — especially for
 a curio, where the difference between a subject that is genuinely absurd and
 one that merely sounds like it is exactly the discrimination a small model
-lacks. The music mood is structured extraction; the local model does it well
-and for free.
+lacks. The music theme belongs here too: seven subjects to choose between,
+on which the local model was inconsistent.
 
 Optional by construction. With no ANTHROPIC_API_KEY the pipeline runs entirely
 on Ollama, as it always has.

@@ -18,7 +18,7 @@ from gpt import (
     generate_metadata,
     generate_script,
     get_search_terms,
-    select_music_mood,
+    select_music_theme,
     target_words_for,
     words_for_seconds,
 )
@@ -195,6 +195,30 @@ class PipelineResult:
     # The Instagram Reel, when the video was cross-posted. A default, because
     # cross-posting is off by default and every result predating it has none.
     instagram_media_id: Optional[str] = None
+    # The music bed under the video, by file name, and the theme it was picked
+    # for. None when the video went out without music. Stored with the video so
+    # the next one can avoid repeating it, and so a review can see what played.
+    music_track: Optional[str] = None
+    music_theme: Optional[str] = None
+
+
+# How many recent videos' music a new video avoids, while its theme has
+# anything else. Three tracks a theme, so this mostly means "not the last one
+# in this theme".
+MUSIC_REPEAT_WINDOW = 5
+
+
+def recently_played_music() -> list:
+    """Music file names under the last few videos; [] if the database is unreachable."""
+    try:
+        from db import SessionLocal
+        from repository import recent_music_tracks
+
+        with SessionLocal() as session:
+            return recent_music_tracks(session, MUSIC_REPEAT_WINDOW)
+    except Exception as err:
+        log(f"[!] Could not read recent music ({err}). Picking without it.", "warning")
+        return []
 
 
 def run_generation_pipeline(
@@ -676,9 +700,11 @@ def run_generation_pipeline(
 
     guard_cancelled()
 
+    music_track: Optional[str] = None
+    music_theme: Optional[str] = None
     if use_music:
-        mood = select_music_mood(data["videoSubject"], script, ai_model)
-        song_path = choose_random_song(mood)
+        music_theme = select_music_theme(data["videoSubject"], script, ai_model)
+        song_path = choose_random_song(music_theme, avoid=recently_played_music())
 
         if not song_path:
             emit(
@@ -689,13 +715,14 @@ def run_generation_pipeline(
         else:
             emit(
                 f"[+] Music: {os.path.basename(song_path)} "
-                f"(mood: {mood or 'not determined, using Songs/ fallback'})",
+                f"(theme: {music_theme or 'not determined, using Songs/ fallback'})",
                 "info",
             )
 
     if use_music:
         try:
             mix_background_music(rendered_video_path, song_path, final_output_path)
+            music_track = os.path.basename(song_path)
             emit("[+] Music mixed, ducked under the voice, normalized.", "success")
         except Exception as err:
             # The render is already finished and usable. A failed music pass must
@@ -847,4 +874,6 @@ def run_generation_pipeline(
         thumbnail_path=thumbnail_path,
         narration_provider=provider,
         narration_fell_back=narration_fell_back,
+        music_track=music_track,
+        music_theme=music_theme if music_track else None,
     )

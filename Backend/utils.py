@@ -5,7 +5,7 @@ import logging
 import shutil
 
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 from termcolor import colored
 
 
@@ -18,9 +18,28 @@ SONGS_DIR = PROJECT_ROOT / "Songs"
 FONTS_DIR = PROJECT_ROOT / "fonts"
 ENV_FILE = PROJECT_ROOT / ".env"
 
-# Background-music moods. Each is an optional subdirectory of Songs/; a flat
-# Songs/ folder still works and is used whenever the mood folder is empty.
-MUSIC_MOODS: tuple[str, ...] = ("calm", "curious", "tense", "upbeat")
+# Background-music themes, by what a video is about rather than how it should
+# feel. Four bare moods (calm, curious, tense, upbeat) put five of the last
+# seven videos before 2026-10-05 into "curious", and one track played under
+# three of them. The descriptions are what the picker reads, so they name
+# subjects, never instruments; the tracks in each folder were written for these
+# subjects. Each is an optional subdirectory of Songs/; a flat Songs/ folder
+# still works and is used whenever the theme's folder is empty.
+MUSIC_THEMES: dict[str, str] = {
+    "everyday": "everyday physics and chemistry: why ordinary things at home, "
+    "in the kitchen or outdoors behave as they do",
+    "body": "the human body, animals and plants: how living things work",
+    "space": "space and astronomy: planets, stars, rockets, satellites and "
+    "space missions",
+    "invention": "inventions, engineering and technology since the 1800s, and "
+    "the people who built them",
+    "history": "older history before the 1800s, or history told calmly: "
+    "ancient scripts, kings, early science, old customs",
+    "quirky": "odd or funny research and absurd true stories: Ig Nobel "
+    "studies, strange experiments, legal oddities",
+    "dark": "grim or unsettling subjects: poisons, disease, gruesome "
+    "experiments, harm done, creatures that use blood or decay",
+}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -66,15 +85,20 @@ def _mp3s_in(directory: Path) -> list[Path]:
     ]
 
 
-def choose_random_song(mood: Optional[str] = None) -> Optional[str]:
+def choose_random_song(
+    theme: Optional[str] = None, avoid: Iterable[str] = ()
+) -> Optional[str]:
     """
     Chooses a random MP3 for the background bed.
 
-    Prefers `Songs/<mood>/` when that folder holds tracks and falls back to the
-    flat `Songs/` layout, so a library that predates mood folders keeps working.
+    Prefers `Songs/<theme>/` when that folder holds tracks and falls back to the
+    flat `Songs/` layout, so a library without theme folders keeps working.
 
     Args:
-        mood (Optional[str]): Subdirectory to prefer, e.g. "calm".
+        theme (Optional[str]): Subdirectory to prefer, e.g. "space".
+        avoid (Iterable[str]): File names played recently. They are skipped
+            while the folder has anything else, so a theme with three tracks
+            does not play the same one twice running.
 
     Returns:
         str: The path to the chosen song, or None if no MP3 files found.
@@ -84,11 +108,11 @@ def choose_random_song(mood: Optional[str] = None) -> Optional[str]:
             return None
 
         songs: list[Path] = []
-        if mood:
-            songs = _mp3s_in(SONGS_DIR / mood)
+        if theme:
+            songs = _mp3s_in(SONGS_DIR / theme)
             if not songs:
                 logger.info(
-                    f"No tracks in Songs/{mood}; falling back to the flat Songs/ folder."
+                    f"No tracks in Songs/{theme}; falling back to the flat Songs/ folder."
                 )
 
         if not songs:
@@ -97,6 +121,8 @@ def choose_random_song(mood: Optional[str] = None) -> Optional[str]:
         if not songs:
             return None
 
+        played = set(avoid)
+        songs = [song for song in songs if song.name not in played] or songs
         song = random.choice(songs)
         logger.info(colored(f"Chose song: {song}", "green"))
         return str(song)
