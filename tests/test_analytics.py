@@ -131,6 +131,32 @@ def test_fetch_metrics_parses_retention():
     assert metrics["def456"].views == 12
 
 
+ENGAGED_RESPONSE = {
+    "columnHeaders": RETENTION_RESPONSE["columnHeaders"]
+    + [{"name": "engagedViews", "columnType": "METRIC", "dataType": "INTEGER"}],
+    "rows": [["abc123", 835, 62.5, 31, 402], ["def456", 12, 41.0, 19, 0]],
+}
+
+
+def test_fetch_metrics_reads_engaged_views():
+    service = _FakeService([ENGAGED_RESPONSE], [])
+
+    metrics = fetch_metrics(["abc123", "def456"], SINCE, UNTIL, service=service)
+
+    assert metrics["abc123"].engaged_views == 402
+    # Zero is a reading; nobody stayed.
+    assert metrics["def456"].engaged_views == 0
+
+
+def test_fetch_metrics_leaves_engaged_views_unknown_when_not_reported():
+    # "Not reported" must not read as "nobody stayed".
+    service = _FakeService([RETENTION_RESPONSE], [])
+
+    metrics = fetch_metrics(["abc123"], SINCE, UNTIL, service=service)
+
+    assert metrics["abc123"].engaged_views is None
+
+
 def test_fetch_metrics_omits_videos_with_no_processed_data():
     # The whole point: a video the API has not processed must be absent, not
     # present with zeroes, or a fresh upload reads as a failure.
@@ -160,7 +186,7 @@ def test_fetch_metrics_queries_the_owner_channel_and_the_window():
     assert recorder[0]["endDate"] == "2026-09-08"
     assert recorder[0]["dimensions"] == "video"
     assert recorder[0]["filters"] == "video==abc123"
-    assert recorder[0]["metrics"] == "views,averageViewPercentage,averageViewDuration"
+    assert recorder[0]["metrics"] == "views,averageViewPercentage,averageViewDuration,engagedViews"
 
 
 def test_fetch_metrics_sends_the_sort_and_limit_the_api_requires():

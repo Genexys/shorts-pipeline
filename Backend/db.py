@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from dotenv import load_dotenv
@@ -50,3 +50,25 @@ def init_db() -> None:
     )
 
     Base.metadata.create_all(bind=engine)
+    add_missing_columns()
+
+
+# Columns added to tables that already exist in a deployed database.
+# create_all only creates missing tables, never missing columns, and the
+# project has no migration tool; each entry here is plain, nullable DDL that
+# both SQLite and Postgres accept.
+ADDED_COLUMNS = (("video_metrics", "engaged_views", "INTEGER"),)
+
+
+def add_missing_columns(bind=None) -> None:
+    """Adds any ADDED_COLUMNS entry the live table lacks. Safe to run every start."""
+    bind = bind or engine
+    inspector = inspect(bind)
+    tables = set(inspector.get_table_names())
+    with bind.begin() as connection:
+        for table, column, ddl_type in ADDED_COLUMNS:
+            if table not in tables:
+                continue
+            present = {c["name"] for c in inspector.get_columns(table)}
+            if column not in present:
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))

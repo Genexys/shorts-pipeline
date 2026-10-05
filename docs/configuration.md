@@ -76,8 +76,8 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_USE_MUSIC` | Mix a background music bed from `Songs/`. See [Background music](#background-music). | `false` |
 | `AUTOPILOT_CUSTOM_PROMPT` | Custom script prompt. | empty |
 | `AUTOPILOT_LONGFORM_PER_WEEK` | Long videos per week, 0..7. `0` keeps the autopilot on Shorts. The budget is paced across the week rather than spent at the start of it: two a week land on Monday and Thursday, three on Monday, Wednesday and Friday. Falling behind (an outage, a day the machine was off) lets the next slots catch up. | `0` |
-| `AUTOPILOT_CURIO_SHARE` | Percent of videos that report something absurd but true instead of explaining how something works, 0..100. See [Registers](#registers). | `33` |
-| `AUTOPILOT_ANNIVERSARY_SHARE` | Percent of videos built from an event that happened on today's date, 0..100. See [Registers](#registers). | `20` |
+| `AUTOPILOT_CURIO_SHARE` | Percent of videos that report something absurd but true instead of explaining how something works, 0..100. See [Registers](#registers). | `40` |
+| `AUTOPILOT_ANNIVERSARY_SHARE` | Percent of videos built from an event that happened on today's date, 0..100. See [Registers](#registers). | `10` |
 | `OUTPUT_RETENTION_DAYS` | Days to keep `output/` videos and thumbnails, 1..365. | `7` |
 | `REQUIRE_MOUNTS` | `true` makes `worker` and `autopilot` refuse to start when they cannot see the YouTube token (and, with `AUTOPILOT_USE_MUSIC` on, any `.mp3` under `Songs/`). For hosts where those are known to exist; catches the empty bind mounts Docker Desktop creates when WSL integration is late. See `docs/docker.md`. | `false` |
 | `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
@@ -375,9 +375,20 @@ leaves the brief as snippets only.
 
 Every video is an **explainer** — how something works — a **curio** (a real
 phenomenon that sounds invented), or an **anniversary**: something that
-happened on today's date. `AUTOPILOT_CURIO_SHARE` sets how often
-the second is drawn, per video rather than in rotation. A channel that reliably
-alternates is as templated as one that never varies.
+happened on today's date. `AUTOPILOT_CURIO_SHARE` and
+`AUTOPILOT_ANNIVERSARY_SHARE` set how often the second and third are drawn,
+per video rather than in rotation. A channel that reliably alternates is as
+templated as one that never varies.
+
+The defaults have been 40% curios, 10% anniversaries and 50% explainers since
+2026-10-05; before that they were 33 / 20 / 47. The change comes from the first
+month's settled Shorts:
+
+| Register | Median views | View percentage | Subscriptions per 1,000 views |
+|---|---|---|---|
+| curio | 1,172 | 51% | 1.6 |
+| explainer | 1,095 | 46% | 1.2 |
+| anniversary | 927 | 50% | 0.75 |
 
 A register also sets the length, in `REGISTER_TARGET_WORDS`: a curio is asked
 for 70 words, an explainer 80, an anniversary 85. A curio is one absurd fact and

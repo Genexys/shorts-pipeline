@@ -930,6 +930,23 @@ def test_the_digest_says_so_when_nothing_has_settled(pilot):
     assert "nothing older than 7 days has settled data yet" in sent[0]
 
 
+def test_the_digest_names_what_each_format_is_ranked_on(pilot, monkeypatch):
+    # Shorts rank on the share who did not swipe away; calling that "held
+    # attention" would describe the old metric.
+    import autopilot
+
+    monkeypatch.setattr(autopilot, "top_performing_subjects", lambda *a, **k: ["A good one"])
+    monkeypatch.setattr(autopilot, "worst_performing_subjects", lambda *a, **k: ["A weak one"])
+    sent: list = []
+    pilot.notify = lambda text: sent.append(text) or True
+
+    pilot.weekly_digest(MONDAY)
+
+    assert "short — fewest swiped away:" in sent[0]
+    assert "short — most swiped away:" in sent[0]
+    assert "long — held attention longest:" in sent[0]
+
+
 def test_an_anniversary_topic_must_return_its_event(pilot, monkeypatch):
     # Without the anchor the script has no way back to the event, and writes
     # about whatever the topic's words happen to match.
