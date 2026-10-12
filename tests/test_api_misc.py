@@ -6,6 +6,7 @@ import pytest
 
 os.environ.setdefault("PEXELS_API_KEY", "test-key")
 os.environ.setdefault("TIKTOK_SESSION_ID", "test-session")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 os.environ.setdefault("IMAGEMAGICK_BINARY", "/bin/echo")
 os.environ.setdefault("DATABASE_URL", "sqlite:///moneyprinter_api_misc_bootstrap.db")
 
@@ -17,37 +18,25 @@ def client():
     return main.app.test_client()
 
 
-def test_models_endpoint_success_response(client, monkeypatch):
-    def fake_list_models():
-        return ["llama3.1:8b", "qwen3:8b"], "qwen3:8b"
-
-    monkeypatch.setattr(main, "list_ollama_models", fake_list_models)
+def test_models_endpoint_lists_the_claude_models(client, monkeypatch):
+    # Claude writes every step; the list is SCRIPT_MODEL and its fallback.
+    monkeypatch.setenv("SCRIPT_MODEL", "claude-opus-5-5")
+    monkeypatch.setenv("SCRIPT_FALLBACK_MODEL", "claude-sonnet-5-5")
 
     response = client.get("/api/models")
 
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["status"] == "success"
-    assert payload["models"] == ["llama3.1:8b", "qwen3:8b"]
-    assert payload["default"] == "qwen3:8b"
+    assert payload["models"] == ["claude-opus-5-5", "claude-sonnet-5-5"]
+    assert payload["default"] == "claude-opus-5-5"
 
 
-def test_models_endpoint_fallback_on_error(client, monkeypatch):
-    monkeypatch.setenv("OLLAMA_MODEL", "custom:model")
+def test_models_endpoint_without_a_fallback_lists_one(client, monkeypatch):
+    monkeypatch.setenv("SCRIPT_MODEL", "claude-opus-5-5")
+    monkeypatch.setenv("SCRIPT_FALLBACK_MODEL", "")
 
-    def fake_list_models():
-        raise RuntimeError("ollama unavailable")
-
-    monkeypatch.setattr(main, "list_ollama_models", fake_list_models)
-
-    response = client.get("/api/models")
-
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["status"] == "error"
-    assert payload["message"] == "Could not fetch Ollama models. Is Ollama running?"
-    assert payload["models"] == ["custom:model"]
-    assert payload["default"] == "custom:model"
+    assert client.get("/api/models").get_json()["models"] == ["claude-opus-5-5"]
 
 
 def test_upload_songs_requires_files(client):

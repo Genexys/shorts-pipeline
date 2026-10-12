@@ -135,7 +135,7 @@ class Topic(Base):
         String(255), nullable=False, unique=True, index=True
     )
     niche: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    source: Mapped[str] = mapped_column(String(20), nullable=False, default="ollama")
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="claude")
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="planned", index=True
     )

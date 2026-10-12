@@ -535,20 +535,22 @@ def test_long_script_reports_the_model_that_wrote(monkeypatch):
 
 
 def test_long_script_reports_a_fallback_in_any_section(monkeypatch):
-    # Part Opus and part Ollama is not an Opus script.
+    # Part Opus and part Sonnet is not an Opus script.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
-    drafts = iter([gpt.writer.Written("A section of prose.", "claude-opus-5-5"), None])
+    drafts = iter([
+        gpt.writer.Written("A section of prose.", "claude-opus-5-5"),
+        gpt.writer.Written("Another section of prose.", "claude-sonnet-5-5"),
+    ])
     monkeypatch.setattr(gpt.writer, "write_with_model", lambda prompt: next(drafts))
-    monkeypatch.setattr(gpt, "generate_response", lambda p, m: "A local section.")
     monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two"])
 
     seen = []
     gpt.generate_long_script(
-        "s", 100, "llama3.1:8b", "en_us_001", "", section_count=2,
+        "s", 100, "claude-opus-5-5", "en_us_001", "", section_count=2,
         report_model=seen.append,
     )
 
-    assert seen == ["llama3.1:8b"]
+    assert seen == ["claude-sonnet-5-5"]
 
 
 def test_last_section_is_told_to_close(monkeypatch):

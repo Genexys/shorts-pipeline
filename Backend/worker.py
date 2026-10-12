@@ -105,6 +105,7 @@ def process_next_job() -> bool:
                         "scriptLocal": result.script_local,
                         "music": result.music_track,
                         "musicTheme": result.music_theme,
+                        "claudeUsd": result.claude_usd,
                     },
                     commit=False,
                 )

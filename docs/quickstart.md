@@ -1,6 +1,6 @@
 # Quickstart
 
-Run MoneyPrinter locally with an Ollama model.
+Run MoneyPrinter locally. Every model call goes to the Claude API, so you need an Anthropic API key.
 
 ## 1) Clone repository
 
@@ -17,7 +17,7 @@ Run the interactive setup script:
 ./setup.sh
 ```
 
-This script checks dependencies, sets up `.env`, installs Python packages with `uv`, and can optionally pull an Ollama model.
+This script checks dependencies, sets up `.env`, installs Python packages with `uv`, and checks that `ANTHROPIC_API_KEY` is set.
 
 ## 3) Manual setup
 
@@ -29,7 +29,7 @@ Use this path if you prefer to run each step yourself.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - FFmpeg
 - ImageMagick
-- Ollama
+- An Anthropic API key
 
 ### Install and create env file
 
@@ -48,6 +48,7 @@ Copy-Item .env.example .env
 
 Set required values in `.env`:
 
+- `ANTHROPIC_API_KEY`
 - `TIKTOK_SESSION_ID`
 - `PEXELS_API_KEY`
 
@@ -60,22 +61,13 @@ uv sync --group dev
 uv run pytest
 ```
 
-## 5) Start Ollama and pull a model
-
-```bash
-ollama serve
-ollama pull llama3.1:8b
-```
-
-If Ollama runs on another machine/port, set `OLLAMA_BASE_URL` in `.env`.
-
-## 6) Run backend
+## 5) Run backend
 
 ```bash
 uv run python Backend/main.py
 ```
 
-## 7) Run worker
+## 6) Run worker
 
 In a new terminal:
 
@@ -83,7 +75,7 @@ In a new terminal:
 uv run python Backend/worker.py
 ```
 
-## 8) Run frontend
+## 7) Run frontend
 
 In a new terminal:
 
@@ -94,11 +86,11 @@ python3 -m http.server 3000
 
 Open `http://localhost:3000`.
 
-## 9) Generate video
+## 8) Generate video
 
 1. Enter a video subject.
 2. Expand advanced options.
-3. Choose an Ollama model from the dropdown (loaded dynamically from Ollama).
+3. The model list shows the Claude models from `SCRIPT_MODEL`; Claude writes every step whatever is selected.
 4. Click Generate.
 
 Output file: `output.mp4` at project root.

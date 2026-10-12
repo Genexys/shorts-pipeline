@@ -37,7 +37,7 @@ uv run pytest tests/test_repository.py::test_create_job_persists_payload_and_que
 - `tests/test_api_topics.py`: POST/GET `/api/topics` validation (empty, overlong, non-dict body), duplicate rejection, and status/limit filtering.
 - `tests/test_autopilot.py`: autopilot tick behavior — payload/prompt building, slot-aware job creation, topic generation retries, finishing completed/vanished-job topics, the stall watchdog, the Telegram notifier binding, output cleanup, and end-to-end `run_tick`.
 - `tests/test_autopilot_config.py`: `AutopilotConfig.from_env` parsing/validation and the `slot_available` scheduling rule.
-- `tests/test_metadata.py`: JSON extraction from Ollama responses and YouTube metadata validation/generation.
+- `tests/test_metadata.py`: JSON extraction from model responses and YouTube metadata validation/generation.
 - `tests/test_notify.py`: Telegram message sending, env-var fallback, disabled-path logging, token scrubbing, and text truncation.
 - `tests/test_repository.py`: queue/repository behavior for create, claim, cancel, and completion events.
 - `tests/test_repository_topics.py`: topic repository helpers — normalization, duplicate rejection, scheduling queries, and job linkage.

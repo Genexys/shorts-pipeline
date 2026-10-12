@@ -3,7 +3,6 @@ x-app: &app
   image: moneyprinter:latest
   env_file: .env
   environment:
-    OLLAMA_BASE_URL: http://ollama:11434
     DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-moneyprinter}:${POSTGRES_PASSWORD:-moneyprinter}@postgres:5432/${POSTGRES_DB:-moneyprinter}
     IMAGEMAGICK_BINARY: /usr/bin/convert
     YOUTUBE_CLIENT_SECRETS_FILE: /app/secrets/client_secret.json
@@ -36,35 +35,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  ollama:
-    image: ollama/ollama
-    environment:
-      OLLAMA_KEEP_ALIVE: 2m
-    volumes:
-      - ollama_models:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-    restart: always
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  ollama-init:
-    image: ollama/ollama
-    entrypoint: ["sh", "-c", "ollama pull \"$$OLLAMA_MODEL\""]
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
-    depends_on:
-      ollama:
-        condition: service_healthy
-    restart: "no"
-
   api:
     <<: *app
     command: python Backend/main.py
@@ -75,8 +45,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ollama-init:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/topics', timeout=5)"]
       interval: 10s
@@ -125,4 +93,3 @@ services:
 
 volumes:
   postgres_data:
-  ollama_models:

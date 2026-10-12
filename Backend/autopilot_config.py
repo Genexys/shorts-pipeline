@@ -119,7 +119,12 @@ class AutopilotConfig:
             raise ConfigError(f"TZ '{tz_name}' is not a known timezone.") from err
 
         window_start, window_end = parse_window(get("AUTOPILOT_WINDOW") or "09:00-21:00")
-        ollama_model = get("OLLAMA_MODEL").strip() or "llama3.1:8b"
+        from writer import DEFAULT_MODEL
+
+        # Recorded on each job as aiModel. Claude writes everything and
+        # SCRIPT_MODEL picks which Claude; AUTOPILOT_MODEL and OLLAMA_MODEL named
+        # the local model this used to be.
+        model = get("SCRIPT_MODEL").strip() or DEFAULT_MODEL
 
         return cls(
             enabled=enabled,
@@ -127,7 +132,7 @@ class AutopilotConfig:
             videos_per_day=_parse_int("AUTOPILOT_VIDEOS_PER_DAY", get("AUTOPILOT_VIDEOS_PER_DAY"), 2, 1, 6),
             window_start=window_start,
             window_end=window_end,
-            model=get("AUTOPILOT_MODEL").strip() or ollama_model,
+            model=model,
             voice=get("AUTOPILOT_VOICE").strip() or "en_us_001",
             paragraphs=_parse_int("AUTOPILOT_PARAGRAPHS", get("AUTOPILOT_PARAGRAPHS"), 1, 1, 10),
             subtitles_position=get("AUTOPILOT_SUBTITLES_POSITION").strip() or "center,center",

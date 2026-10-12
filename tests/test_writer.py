@@ -91,28 +91,18 @@ def test_write_treats_empty_content_as_no_answer(monkeypatch):
     assert writer.write("prompt") is None
 
 
-# -- the fallback ------------------------------------------------------------
+# -- Claude only ---------------------------------------------------------------
 
 
-def test_creative_calls_fall_back_to_ollama(monkeypatch):
-    # The whole point of optional: no key, no behaviour change.
-    monkeypatch.setattr(writer, "write_with_model", lambda prompt: None)
-    monkeypatch.setattr(gpt, "generate_response", lambda p, m: "from ollama")
-    assert gpt.write_creative("prompt", "llama3.1:8b") == "from ollama"
-
-
-def test_creative_calls_prefer_the_stronger_model(monkeypatch):
+def test_creative_calls_go_to_claude(monkeypatch):
     monkeypatch.setattr(
         writer, "write_with_model", lambda prompt: writer.Written("from claude", "claude-opus-5-5")
     )
-    monkeypatch.setattr(
-        gpt, "generate_response",
-        lambda p, m: pytest.fail("should not have asked Ollama"),
-    )
-    assert gpt.write_creative("prompt", "llama3.1:8b") == "from claude"
+    assert gpt.write_creative("prompt", "any") == "from claude"
+    assert gpt.generate_response("prompt", "any") == "from claude"
 
 
-def test_search_terms_go_through_the_creative_path(monkeypatch):
+def test_search_terms_go_through_claude(monkeypatch):
     # Picking filmable shots is judgement, not extraction: the local model
     # returned "sulfur compounds" and "lacrimal glands" where the stronger one
     # returned "onion slices closeup" and "knife cutting board".
@@ -122,22 +112,36 @@ def test_search_terms_go_through_the_creative_path(monkeypatch):
             '["chopping onion", "knife cutting board"]', "claude-opus-5-5"
         ),
     )
-    monkeypatch.setattr(
-        gpt, "generate_response",
-        lambda p, m: pytest.fail("should not have asked Ollama"),
-    )
 
-    assert gpt.get_search_terms("onions", 2, "script", "llama3.1:8b") == [
+    assert gpt.get_search_terms("onions", 2, "script", "any") == [
         "chopping onion",
         "knife cutting board",
     ]
 
 
-def test_search_terms_still_fall_back_to_ollama(monkeypatch):
+def test_no_claude_model_is_an_error_not_a_local_answer(monkeypatch):
+    # The local model used to answer here. On 2026-09-28 it wrote five of a long
+    # video's eight sections, and the video went out with a fabricated claim.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
     monkeypatch.setattr(writer, "write_with_model", lambda prompt: None)
-    monkeypatch.setattr(gpt, "generate_response", lambda p, m: '["onion cutting"]')
 
-    assert gpt.get_search_terms("onions", 1, "script", "llama3.1:8b") == ["onion cutting"]
+    with pytest.raises(gpt.ModelUnavailable, match="No Claude model answered"):
+        gpt.write_creative("prompt", "any")
+    with pytest.raises(gpt.ModelUnavailable):
+        gpt.generate_response("prompt", "any")
+
+
+def test_no_key_says_so(monkeypatch):
+    with pytest.raises(gpt.ModelUnavailable, match="ANTHROPIC_API_KEY"):
+        gpt.generate_response("prompt", "any")
+
+
+def test_search_terms_without_a_model_are_empty_not_fatal(monkeypatch):
+    # The script is already written by then; the pipeline widens the search
+    # from the subject's words instead of failing the job.
+    monkeypatch.setattr(writer, "write_with_model", lambda prompt: None)
+
+    assert gpt.get_search_terms("onions", 1, "script", "any") == []
 
 
 def test_write_creative_reports_the_model_that_wrote(monkeypatch):
@@ -149,7 +153,7 @@ def test_write_creative_reports_the_model_that_wrote(monkeypatch):
         gpt.writer, "write_with_model", lambda prompt: writer.Written("Written by Opus.", "claude-opus-5-5")
     )
 
-    text = gpt.write_creative("p", "llama3.1:8b", report_model=seen.append)
+    text = gpt.write_creative("p", "any", report_model=seen.append)
 
     assert text == "Written by Opus."
     assert seen == ["claude-opus-5-5"]
@@ -159,15 +163,16 @@ def test_write_creative_reports_the_fallback_model(monkeypatch):
     import gpt
 
     seen = []
-    monkeypatch.setattr(gpt.writer, "write_with_model", lambda prompt: None)
-    monkeypatch.setattr(gpt, "generate_response", lambda p, m: "Written by Ollama.")
+    monkeypatch.setattr(
+        gpt.writer, "write_with_model",
+        lambda prompt: writer.Written("Written by Sonnet.", "claude-sonnet-5-5"),
+    )
 
-    text = gpt.write_creative("p", "llama3.1:8b", report_model=seen.append)
+    gpt.write_creative("p", "any", report_model=seen.append)
 
-    assert text == "Written by Ollama."
-    # The point of the field: a fallback must not be filed under the model that
-    # was asked for and did not write it.
-    assert seen == ["llama3.1:8b"]
+    # A fallback must not be filed under the model that was asked for and did
+    # not write it.
+    assert seen == ["claude-sonnet-5-5"]
 
 
 def _patch_sequence(monkeypatch, responses):

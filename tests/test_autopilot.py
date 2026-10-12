@@ -76,7 +76,7 @@ def test_build_payload_matches_frontend_shape():
         "anchor": "",
         # The opening-line experiment's arm; control unless drawn otherwise.
         "openingArm": "control",
-        "aiModel": "llama3.1:8b",
+        "aiModel": "claude-opus-5-5",
         "voice": "en_us_001",
         "paragraphNumber": 1,
         "automateYoutubeUpload": True,
@@ -122,7 +122,7 @@ def test_maybe_create_job_uses_planned_topic_first(pilot, session_factory):
         assert topics[0].job_id == job_id
 
 
-def test_maybe_create_job_generates_topic_with_ollama(pilot, session_factory):
+def test_maybe_create_job_generates_topic_with_the_model(pilot, session_factory):
     job_id = pilot.maybe_create_job(NOON)
 
     assert job_id is not None
@@ -130,7 +130,7 @@ def test_maybe_create_job_generates_topic_with_ollama(pilot, session_factory):
         topics = list_topics(session, None, 10)
         assert len(topics) == 1
         assert topics[0].subject == "Why the ocean is salty"
-        assert topics[0].source == "ollama"
+        assert topics[0].source == "claude"
         assert topics[0].niche == "ocean facts"
         assert get_job(session, job_id).payload["videoSubject"] == "Why the ocean is salty"
 

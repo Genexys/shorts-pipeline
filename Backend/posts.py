@@ -13,7 +13,7 @@ import random
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from gpt import extract_json_object, generate_response, write_creative
+from gpt import extract_json_object, generate_response
 from logstream import log
 
 # Poll shape is documented by YouTube: at most four options, 65 characters
@@ -330,11 +330,10 @@ def generate_post(
         )
 
     prompt = build_prompt(kind, subject, title, script, research)
-    # A quiz's marked answer goes out as correct in the channel's name, so it is
-    # written by the stronger model where one is configured. The other kinds
-    # stay on the local model, which writes them well enough for free.
-    write = write_creative if kind == QUIZ else generate_response
-    response = write(prompt, ai_model)
+    # Every kind is written by Claude. A quiz's marked answer goes out as correct
+    # in the channel's name, and the other kinds used to go to the local model,
+    # which is gone.
+    response = generate_response(prompt, ai_model)
     post = build_post(extract_json_object(response), kind, rng)
     if post is None:
         log("[!] The model returned no usable post text.", "warning")

@@ -3,7 +3,7 @@
 `Backend/autopilot.py` runs next to the API and the worker. Every minute it:
 
 1. Checks topics whose job finished: `completed` marks the topic `done`, `failed` or `cancelled` marks it `failed`, and sends a Telegram message; and warns once when a job has been queued or running for more than 3 hours. A published video is followed by a second message: a ready-to-paste community post, captioned onto a still from the video (see [Community posts](#community-posts)).
-2. Decides whether to queue a new job (see below) using a manually added topic first, otherwise a topic invented by Ollama for `AUTOPILOT_NICHE`.
+2. Decides whether to queue a new job (see below) using a manually added topic first, otherwise a topic invented by Claude for `AUTOPILOT_NICHE`.
 3. Once a day pulls settled performance numbers for every published video into `video_metrics`.
 4. Each morning records every published video's current view, like and comment counts, and reports the day's movement to Telegram.
 5. Each Monday sends a retention digest built from the settled Analytics numbers.
@@ -27,11 +27,11 @@ All of these must hold:
 - at least `window length / AUTOPILOT_VIDEOS_PER_DAY` has passed since the last topic was used (with the default `09:00-21:00` and 2 per day that is 6 hours);
 - no job is `queued` or `running`, including jobs started from the UI.
 
-Autopilot jobs are created with two attempts: a transient failure (TTS down, Ollama timeout) is retried once by the worker.
+Autopilot jobs are created with two attempts: a transient failure (TTS down, a Claude outage that outlasted the fallback) is retried once by the worker.
 
 ## Topics
 
-Every subject ever used is stored in the `topics` table with a normalized form (lowercase, letters, digits and spaces). Duplicates are rejected, and the last 50 subjects are passed to Ollama with an instruction not to repeat them.
+Every subject ever used is stored in the `topics` table with a normalized form (lowercase, letters, digits and spaces). Duplicates are rejected, and the last 50 subjects are passed to the model with an instruction not to repeat them.
 
 Add your own topics ahead of time:
 
@@ -58,7 +58,7 @@ Messages:
 - `❌ <subject>` + error + job id and attempts
 - `⚠️ <subject> cancelled` + job id
 - `⚠️ <subject>` + `job <id> queued for <N>h, worker may be stuck` — once per topic after 3 hours without a result
-- one warning after 10 consecutive minutes without a usable topic from Ollama
+- one warning after 10 consecutive minutes without a usable topic from the model
 
 If the token or chat id is empty, messages are printed to the log with a `[telegram disabled]` prefix.
 

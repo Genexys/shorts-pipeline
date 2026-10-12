@@ -1,6 +1,6 @@
 # Deploying to a VPS
 
-Target: Ubuntu 24.04, 4 vCPU, 16 GB RAM (8 GB works with `OLLAMA_MODEL=llama3.2:3b`), 40 GB disk, no GPU. Everything runs under Docker Compose; see `docs/docker.md` for the stack itself.
+Target: Ubuntu 24.04, 4 vCPU, 8 GB RAM, 40 GB disk, no GPU. There is no model server: every model call goes to the Claude API. Everything runs under Docker Compose; see `docs/docker.md` for the stack itself.
 
 ## 1. One-time: Google Cloud and YouTube
 
@@ -32,11 +32,11 @@ sudo usermod -aG docker $USER && newgrp docker
 docker compose version
 git clone <your fork url> MoneyPrinter && cd MoneyPrinter
 cp .env.example .env
-nano .env        # TIKTOK_SESSION_ID, PEXELS_API_KEY, OLLAMA_MODEL, AUTOPILOT_NICHE, TELEGRAM_*, TZ, POSTGRES_PASSWORD
+nano .env        # ANTHROPIC_API_KEY, TIKTOK_SESSION_ID, PEXELS_API_KEY, AUTOPILOT_NICHE, TELEGRAM_*, TZ, POSTGRES_PASSWORD
 mkdir -p secrets output Songs
 ```
 
-Recommended `.env` values for a 16 GB server: `OLLAMA_MODEL="llama3.1:8b"`, `AUTOPILOT_VIDEOS_PER_DAY="2"`, `AUTOPILOT_WINDOW="09:00-21:00"`, `TZ="Europe/Berlin"` (or your zone).
+Recommended `.env` values: `ANTHROPIC_API_KEY` (required), `AUTOPILOT_VIDEOS_PER_DAY="2"`, `AUTOPILOT_WINDOW="09:00-21:00"`, `TZ="Europe/Berlin"` (or your zone).
 
 Set `POSTGRES_PASSWORD` to a random alphanumeric value; it is interpolated into `DATABASE_URL`, so `@`, `:`, `/` and `#` would break the URL.
 
@@ -52,7 +52,6 @@ The worker reads them from `/app/secrets/` and writes the refreshed access token
 
 ```bash
 docker compose up -d --build
-docker compose logs -f ollama-init        # wait for the model pull to finish
 docker compose ps                         # api/worker/autopilot "healthy"/"running"
 docker compose logs -f autopilot worker
 ```

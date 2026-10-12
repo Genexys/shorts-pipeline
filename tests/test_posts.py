@@ -339,22 +339,21 @@ def test_a_quiz_needs_the_research_notes():
         generate_post("s", "t", "script", "model", kind=posts.QUIZ)
 
 
-def test_a_quiz_is_written_by_the_stronger_model(monkeypatch):
+def test_every_kind_is_written_by_claude(monkeypatch):
+    # The other kinds used to go to the local model; a quiz always went to
+    # Claude. All of them go through generate_response now, which is Claude.
     import json
 
     used = []
     monkeypatch.setattr(
-        posts, "write_creative", lambda p, m: used.append("creative") or json.dumps(QUIZ_ANSWER)
-    )
-    monkeypatch.setattr(
-        posts, "generate_response", lambda p, m: used.append("local") or "{}"
+        posts, "generate_response", lambda p, m: used.append("claude") or json.dumps(QUIZ_ANSWER)
     )
 
     post = generate_post(
         "s", "t", "script", "model", kind=posts.QUIZ, research="notes", rng=random.Random(1)
     )
 
-    assert used == ["creative"]
+    assert used == ["claude"]
     assert post.kind == posts.QUIZ
 
 

@@ -172,8 +172,8 @@ class PipelineResult:
     script: str                # persisted by the worker; community posts read it
     ai_model: str              # the model the request asked for
     # The model that actually wrote the script, which is not always the one
-    # asked for: write_creative prefers the stronger model and falls back to
-    # Ollama on any failure. Recording ai_model here instead filed every script
+    # asked for: the fallback Claude model stands in when the primary is
+    # overloaded. Recording ai_model here instead once filed every script
     # under llama3.1:8b, including the ones Opus wrote.
     script_model: str
     # Whether the stronger model was configured and did not end up writing.
@@ -200,6 +200,9 @@ class PipelineResult:
     # the next one can avoid repeating it, and so a review can see what played.
     music_track: Optional[str] = None
     music_theme: Optional[str] = None
+    # Dollars of Claude calls made for this video, as priced in writer.py. The
+    # console's usage page is the bill; this is for watching the balance.
+    claude_usd: Optional[float] = None
 
 
 # How many recent videos' music a new video avoids, while its theme has
@@ -234,6 +237,9 @@ def run_generation_pipeline(
     def guard_cancelled() -> None:
         if is_cancelled and is_cancelled():
             raise PipelineCancelled("Video generation was cancelled.")
+
+    # What this video's Claude calls cost, read back into the result below.
+    writer.reset_spend()
 
     fmt = resolve_format(data.get("format"))
     paragraph_number = int(data.get("paragraphNumber", 1))
@@ -408,8 +414,9 @@ def run_generation_pipeline(
         )
 
     script_fell_back = writer.is_configured() and script_model != writer.model_name()
-    # Behind the same condition: with no key, Ollama writing is the design, not
-    # a fallback, and a keyless setup keeps its configured privacy.
+    # Always False since the local model went (2026-10-12): a script is written
+    # by a Claude model or not at all. Kept because the worker records it and
+    # the autopilot holds a long video back on it.
     script_local = script_fell_back and writer.rank(script_model) == writer.LOCAL
     if script_fell_back:
         emit(
@@ -859,6 +866,9 @@ def run_generation_pipeline(
         except Exception as err:
             emit(f"[!] Instagram cross-post skipped: {err}", "warning")
 
+    spend = writer.spent()
+    emit(f"[$] Claude calls for this video: ${spend:.2f}.", "info")
+
     return PipelineResult(
         script=script,
         ai_model=ai_model,
@@ -882,4 +892,5 @@ def run_generation_pipeline(
         narration_fell_back=narration_fell_back,
         music_track=music_track,
         music_theme=music_theme if music_track else None,
+        claude_usd=spend,
     )

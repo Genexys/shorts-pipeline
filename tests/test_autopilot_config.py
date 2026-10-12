@@ -22,7 +22,7 @@ def test_from_env_defaults():
     assert config.videos_per_day == 2
     assert config.window_start == time(9, 0)
     assert config.window_end == time(21, 0)
-    assert config.model == "llama3.1:8b"
+    assert config.model == "claude-opus-5-5"
     assert config.voice == "en_us_001"
     assert config.paragraphs == 1
     assert config.subtitles_position == "center,center"
@@ -45,8 +45,7 @@ def test_from_env_reads_overrides():
             "AUTOPILOT_ENABLED": "False",
             "AUTOPILOT_VIDEOS_PER_DAY": "4",
             "AUTOPILOT_WINDOW": "08:30-12:30",
-            "OLLAMA_MODEL": "llama3.2:3b",
-            "AUTOPILOT_MODEL": "qwen3:8b",
+            "SCRIPT_MODEL": "claude-sonnet-5-5",
             "AUTOPILOT_VOICE": "en_uk_001",
             "AUTOPILOT_PARAGRAPHS": "2",
             "AUTOPILOT_USE_MUSIC": "yes",
@@ -62,7 +61,7 @@ def test_from_env_reads_overrides():
     assert config.videos_per_day == 4
     assert config.window_label == "08:30-12:30"
     assert config.min_gap_seconds == 3600
-    assert config.model == "qwen3:8b"
+    assert config.model == "claude-sonnet-5-5"
     assert config.voice == "en_uk_001"
     assert config.paragraphs == 2
     assert config.use_music is True
@@ -71,9 +70,12 @@ def test_from_env_reads_overrides():
     assert config.tz == ZoneInfo("Europe/Berlin")
 
 
-def test_model_falls_back_to_ollama_model():
-    config = AutopilotConfig.from_env({**BASE_ENV, "OLLAMA_MODEL": "llama3.2:3b"})
-    assert config.model == "llama3.2:3b"
+def test_the_old_local_model_settings_are_ignored():
+    # Claude writes every step; naming a local model must not put it on a job.
+    config = AutopilotConfig.from_env(
+        {**BASE_ENV, "OLLAMA_MODEL": "llama3.2:3b", "AUTOPILOT_MODEL": "qwen3:8b"}
+    )
+    assert config.model == "claude-opus-5-5"
 
 
 def test_niche_required_when_enabled():
