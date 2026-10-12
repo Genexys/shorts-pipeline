@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 from db import SessionLocal, init_db
 from logstream import log
-from pipeline import PipelineCancelled, run_generation_pipeline
+from pipeline import NoSources, PipelineCancelled, run_generation_pipeline
 from repository import (
     add_artifact,
     add_research_sources,
@@ -67,6 +67,10 @@ def process_next_job() -> bool:
     except PipelineCancelled as err:
         with SessionLocal() as session:
             mark_cancelled(session, job_id, str(err))
+    except NoSources as err:
+        # Not retried: a second search finds the same nothing.
+        with SessionLocal() as session:
+            mark_failed(session, job_id, str(err))
     except Exception as err:
         should_delay_retry = False
         with SessionLocal() as session:

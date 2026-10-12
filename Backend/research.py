@@ -44,6 +44,11 @@ SEARCH_PAGE_SIZE = 10
 # source, one sentence about spores spreading in damp air, never mentioned.
 MIN_USABLE_SOURCES = 2
 
+# How a job that found too few sources on its subject fails (pipeline.NoSources).
+# Here rather than in pipeline so the autopilot can read it off the failed job,
+# to give the slot to another topic, without importing the video stack.
+NO_SOURCES = "Too few sources"
+
 # Places where absurd-but-true material is dense enough to find by searching.
 # Better than asking a model to invent one: an invented curio is either an
 # overstatement it will later defend by fabricating, or a fact it half-recalls.

@@ -72,6 +72,58 @@ def test_a_problem_that_survives_the_rewrite_is_unresolved():
     assert [c.text for c in result.unresolved] == ["by mistake"]
 
 
+def test_what_the_recheck_finds_is_corrected_once_more():
+    # The droppings Short: the second reading found claims the first had passed.
+    second = FIXED.replace(" by mistake", "")
+    ask = Asker(
+        reply([("created the first pacemaker", UNSUPPORTED)], FIXED),
+        reply([("by mistake", UNSUPPORTED)], second),
+        reply([("1956", SUPPORTED)], second),
+    )
+
+    result = fact_check.check_script("pacemaker", SCRIPT, EVIDENCE, ask)
+
+    assert result.script == second
+    assert [c.text for c in result.fixed] == ["created the first pacemaker", "by mistake"]
+    assert result.unresolved == []
+    assert len(ask.prompts) == 3 and second in ask.prompts[2]
+
+
+def test_after_two_corrections_what_is_left_is_unresolved():
+    second = FIXED.replace(" by mistake", "")
+    third = second.replace("of the wrong value ", "")
+    ask = Asker(
+        reply([("created the first pacemaker", UNSUPPORTED)], FIXED),
+        reply([("by mistake", UNSUPPORTED)], second),
+        reply([("wrong value", UNSUPPORTED)], third),
+    )
+
+    result = fact_check.check_script("pacemaker", SCRIPT, EVIDENCE, ask)
+
+    assert result.script == second
+    assert [c.text for c in result.unresolved] == ["wrong value"]
+    assert len(ask.prompts) == 3
+
+
+def test_an_unusable_second_correction_keeps_the_first():
+    invented = FIXED.replace("1956", "1958")
+    ask = Asker(
+        reply([("created the first pacemaker", UNSUPPORTED)], FIXED),
+        reply([("by mistake", UNSUPPORTED)], invented),
+    )
+
+    result = fact_check.check_script("pacemaker", SCRIPT, EVIDENCE, ask)
+
+    assert result.script == FIXED
+    assert [c.text for c in result.unresolved] == ["by mistake"]
+
+
+def test_the_prompt_asks_for_claims_as_the_sentence_makes_them():
+    ask = Asker(reply([], SCRIPT))
+    fact_check.check_script("pacemaker", SCRIPT, EVIDENCE, ask)
+    assert "the same signal" in ask.prompts[0]
+
+
 def test_a_correction_that_invents_a_figure_is_not_used():
     invented = FIXED.replace("1956", "1958")
     ask = Asker(reply([("created the first pacemaker", UNSUPPORTED)], invented))

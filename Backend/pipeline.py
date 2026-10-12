@@ -73,6 +73,22 @@ class PipelineCancelled(Exception):
     pass
 
 
+class NoSources(Exception):
+    """The search found too little on the subject, so no video is made.
+
+    Fewer than research.MIN_USABLE_SOURCES and the brief is dropped, so the
+    script would be written from nothing and have nothing to be checked
+    against. On 2026-10-12 the source judge dropped all five results for
+    "some female animals signal they're ready to mate through their poo"; the
+    script that followed named no animal, and the fact check, left with common
+    knowledge, held it for two claims the science does not support. Retrying
+    finds the same nothing, so the worker does not.
+    """
+
+    def __init__(self, subject: str) -> None:
+        super().__init__(f"{research.NO_SOURCES} on the subject, so no video was made: {subject}")
+
+
 def _with_section_pauses(
     plan: list, audio_paths: list, pause_seconds: float
 ) -> list:
@@ -349,22 +365,36 @@ def run_generation_pipeline(
                 # of them being repeated once a section has said it.
                 return f"{section_brief}\n\n{facts_block}"
             return section_brief
-        if len(sources) < research.MIN_USABLE_SOURCES:
-            # A topic phrased colloquially matches chatter rather than
-            # reference material: "mushrooms have built-in umbrellas" returned
-            # six social results out of eight. The content words alone search
-            # better.
-            keywords = " ".join(keywords_from_subject(data["videoSubject"]))
-            if keywords:
-                emit(f'[!] Thin results; searching again for "{keywords}".', "warning")
-                for found in research.gather([keywords], limit=fmt.research_results):
-                    if all(found.url != existing.url for existing in sources):
-                        sources.append(found)
+        # A topic phrased colloquially matches chatter rather than reference
+        # material: "mushrooms have built-in umbrellas" returned six social
+        # results out of eight. The content words alone search better.
+        keywords = " ".join(keywords_from_subject(data["videoSubject"]))
+
+        def search_keywords() -> list:
+            emit(f'[!] Thin results; searching again for "{keywords}".', "warning")
+            return [
+                found
+                for found in research.gather([keywords], limit=fmt.research_results)
+                if all(found.url != existing.url for existing in sources)
+            ]
+
+        searched_keywords = False
+        if len(sources) < research.MIN_USABLE_SOURCES and keywords:
+            sources.extend(search_keywords())
+            searched_keywords = True
 
         # Judged once the thin-results search has had its turn, so a topic that
         # needed the second search is judged on everything it found.
         sources = on_topic(sources)
+        if len(sources) < research.MIN_USABLE_SOURCES and keywords and not searched_keywords:
+            # Plenty of results, few on the subject: the droppings Short had
+            # five, mostly about courtship in general.
+            sources.extend(on_topic(search_keywords()))
         emit(f"[+] Research: {len(sources)} source(s) found.", "info")
+        if len(sources) < research.MIN_USABLE_SOURCES:
+            # Below this the brief is dropped and the script written from
+            # nothing (below), so it is not written at all.
+            raise NoSources(data["videoSubject"])
 
     brief = research.format_brief(sources)
     if len(sources) < research.MIN_USABLE_SOURCES:

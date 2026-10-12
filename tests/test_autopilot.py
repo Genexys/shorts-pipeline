@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 import autopilot
+import research
 from autopilot import Autopilot, build_notifier, build_payload, build_topic_prompt
 from autopilot_config import AutopilotConfig
 from models import GenerationJob
@@ -305,6 +306,22 @@ def test_finish_completed_topics_reports_failure_and_cancel(pilot, session_facto
     with session_factory() as session:
         statuses = sorted(t.status for t in list_topics(session, None, 10))
         assert statuses == ["failed", "failed"]
+
+
+def test_a_topic_with_no_sources_gives_its_slot_to_another(pilot, session_factory, notifications):
+    skipped_id = pilot.maybe_create_job(NOON)
+    with session_factory() as session:
+        claim_next_queued_job(session)
+        mark_failed(session, skipped_id, f"{research.NO_SOURCES} on the subject, so no video was made: x")
+    pilot.finish_completed_topics()
+
+    assert notifications[0].startswith("⏭ Why the ocean is salty\n")
+    with session_factory() as session:
+        topic = list_topics(session, None, 10)[0]
+        assert topic.status == "skipped" and topic.used_at is None
+        add_topic(session, "Second ocean topic", None, "manual")
+    # Minutes later, well inside the gap a used slot would have left.
+    assert pilot.maybe_create_job(NOON + timedelta(minutes=5)) is not None
 
 
 def test_finish_completed_topics_marks_vanished_job_failed(pilot, session_factory, notifications):
