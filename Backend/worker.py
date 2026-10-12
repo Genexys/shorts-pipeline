@@ -107,6 +107,7 @@ def process_next_job() -> bool:
                         "musicTheme": result.music_theme,
                         "claudeUsd": result.claude_usd,
                         "factCheck": result.fact_check,
+                        "videoReview": result.video_review,
                         "reviewReasons": result.review_reasons,
                     },
                     commit=False,

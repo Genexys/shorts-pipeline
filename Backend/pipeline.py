@@ -12,6 +12,7 @@ import fact_check
 import footage_judge
 import knowledge
 import research
+import video_review
 from formats import LONG, VideoFormat, resolve_format
 from gpt import (
     generate_long_script,
@@ -208,6 +209,8 @@ class PipelineResult:
     # The fact check's findings (fact_check.ScriptCheck.summary), and every
     # reason the video went up private for review. Empty when nothing held it.
     fact_check: Optional[dict] = None
+    # What the look at the finished video found (video_review.Review.summary).
+    video_review: Optional[dict] = None
     review_reasons: list = field(default_factory=list)
 
 
@@ -797,6 +800,19 @@ def run_generation_pipeline(
     archived_path = f"{OUTPUT_DIR.name}/{job_id}.mp4"
     shutil.copy2(final_output_path, str(PROJECT_ROOT / archived_path))
 
+    # A look at what will actually be published, captions and all. A major
+    # problem holds the upload back like an unresolved fact.
+    guard_cancelled()
+    looked = video_review.review(
+        final_output_path,
+        script,
+        probe_duration(final_output_path),
+        TEMP_DIR / f"{job_id}-review",
+        ffmpeg_binary,
+    )
+    for problem in looked.major:
+        review_reasons.append(f"video review: {problem.describe()}")
+
     emit(f"[+] Video generated: {final_video_path} (archived as {archived_path})", "success")
 
     thumbnail_path: Optional[str] = None
@@ -928,5 +944,6 @@ def run_generation_pipeline(
         music_theme=music_theme if music_track else None,
         claude_usd=spend,
         fact_check=checked.summary(),
+        video_review=looked.summary(),
         review_reasons=review_reasons,
     )
