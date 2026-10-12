@@ -58,6 +58,8 @@ REQUEST_TIMEOUT_SECONDS = 120
 # the console's usage page is the bill. A model missing here is logged with its
 # tokens and no price rather than a wrong one.
 PRICES_PER_MTOK = {
+    "claude-fable-5-1": (10.0, 50.0),
+    "claude-fable-5": (10.0, 50.0),
     "claude-opus-5-5": (4.0, 20.0),
     "claude-opus-5": (5.0, 25.0),
     "claude-sonnet-5-5": (2.0, 10.0),
