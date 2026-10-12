@@ -291,6 +291,14 @@ institution. That is the safe fallback rather than the good one: the model
 given no sources fabricates plausible specifics, which is exactly the failure
 being avoided.
 
+With the key set, a subject needs at least two sources on topic. When the
+source judge keeps fewer, the content words of the subject are searched once
+more; if that still leaves fewer than two, no video is made. The job fails
+with `Too few sources`, without a retry, and the autopilot gives the slot to
+another topic. It used to write such a script without specifics: on
+2026-10-12 one about animals signalling through their droppings named no
+animal, and the fact check held it.
+
 Results from social networks, shops (Amazon under any country domain, eBay,
 Etsy), LinkedIn, Threads and answer sites (JustAnswer, Chegg) are dropped
 before they reach the brief or the description.
@@ -538,8 +546,11 @@ unsupported or wrong against the research brief and the verbatim facts. It
 also returns a corrected script. A correction is used only if it brings in no
 figure the script or its evidence lacked, and if it grows by at most 15%. It
 may shrink by up to 45%, since removing claims shortens a script. The
-correction is then checked again, and anything still unsupported holds the
-video.
+correction is then checked again. What that reading finds is corrected once
+more, within the same limits measured against the original, and read a third
+time; anything still unsupported holds the video. A claim is judged as its
+sentence makes it, so "zookeepers read the same signal" is not passed as
+"zookeepers measure hormones".
 
 Every pinned correction before 2026-10-12 was this kind of miss: Kelsey's
 hands given to Doolittle, "created" for "helped create", "Edison's Rival" for

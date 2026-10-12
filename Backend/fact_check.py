@@ -15,8 +15,9 @@ correction.
 
 The check lists the script's claims, marks each supported, unsupported or
 wrong against the research brief, and returns a corrected script when
-anything fails. The correction is read again. What survives that goes up
-private for review instead of public.
+anything fails. The correction is read again, and what that reading finds
+is corrected once more and read a third time. What survives goes up private
+for review instead of public.
 """
 
 import json
@@ -39,6 +40,14 @@ VERDICTS = (SUPPORTED, UNSUPPORTED, WRONG)
 MAX_SHRINK = 0.45
 MAX_GROWTH = 0.15
 
+# Corrections before what is left is held for review. Two, because a reading
+# finds claims the one before it passed. On 2026-10-12 a Short about animals
+# signalling through their droppings passed "Zookeepers measure hormones in
+# feces" on the first reading; the second read the whole sentence, "Zookeepers
+# read the same signal", and found it unsupported, with a correction ready. One
+# round left that correction unused and the video went up private.
+MAX_CORRECTIONS = 2
+
 CHECK_PROMPT = """
 You check the narration script of a popular-science YouTube video before it
 is recorded. Facts matter more than anything else on this channel: a wrong
@@ -54,7 +63,11 @@ verbatim from the pages they came from):
 {evidence}
 
 List every factual claim in the script: numbers, dates, names, who did what,
-causes, firsts, onlys, records. Judge each one:
+causes, firsts, onlys, records. Take each claim as the sentence makes it,
+with its links to the rest of the script: "zookeepers read the same signal"
+claims that zookeepers and the animals read one signal, not only that
+zookeepers measure something; "those cues" claims the cues are the ones just
+named. Judge each one:
 - "supported": the evidence says it, or it is uncontroversial common
   knowledge that any encyclopedia states plainly.
 - "unsupported": the evidence does not say it and it is not common
@@ -217,24 +230,36 @@ def check_script(
         log(f"[+] Fact check: {len(claims)} claims, all supported.", "success")
         return ScriptCheck(script=script, claims=claims, checked=True)
 
-    reason = acceptable_revision(script, revised, evidence)
-    if reason or revised.strip() == script.strip():
-        log(f"[!] Fact check: {len(bad)} claim(s) not supported, and the correction "
-            f"cannot be used ({reason or 'it changed nothing'}).", "warning")
-        return ScriptCheck(script=script, claims=claims, unresolved=bad, checked=True)
+    current = script
+    fixed: List[Claim] = []
+    for _ in range(MAX_CORRECTIONS):
+        # Measured against the original every round, so two corrections cannot
+        # between them shrink the video further than one may.
+        reason = acceptable_revision(script, revised, evidence)
+        if reason or revised.strip() == current.strip():
+            log(f"[!] Fact check: {len(bad)} claim(s) not supported, and the correction "
+                f"cannot be used ({reason or 'it changed nothing'}).", "warning")
+            return ScriptCheck(script=current, claims=claims, fixed=fixed, unresolved=bad, checked=True)
 
-    # The correction is read again: a rewrite is new text, and new text is
-    # exactly what this pass exists to doubt.
-    second = run(revised)
-    if second is None:
-        log("[!] Fact check: the corrected script could not be re-checked.", "warning")
-        return ScriptCheck(script=revised, claims=claims, fixed=bad, unresolved=bad, checked=True)
-    again, _ = second
-    still = problems(again)
-    log(f"[+] Fact check: corrected {len(bad)} claim(s); "
-        f"{len(still)} still unsupported after the rewrite.",
-        "warning" if still else "success")
-    return ScriptCheck(script=revised, claims=claims, fixed=bad, unresolved=still, checked=True)
+        # The correction is read again: a rewrite is new text, and new text is
+        # exactly what this pass exists to doubt.
+        again = run(revised)
+        if again is None:
+            log("[!] Fact check: the corrected script could not be re-checked.", "warning")
+            return ScriptCheck(script=revised, claims=claims, fixed=fixed + bad,
+                               unresolved=bad, checked=True)
+        fixed += bad
+        current = revised
+        again_claims, revised = again
+        bad = problems(again_claims)
+        for claim in bad:
+            log(f"    [{claim.verdict}] {claim.text}", "warning")
+        log(f"[+] Fact check: corrected {len(fixed)} claim(s); "
+            f"{len(bad)} still unsupported after the rewrite.",
+            "warning" if bad else "success")
+        if not bad:
+            break
+    return ScriptCheck(script=current, claims=claims, fixed=fixed, unresolved=bad, checked=True)
 
 
 def split_hashtags(description: str) -> tuple:

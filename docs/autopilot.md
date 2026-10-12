@@ -56,6 +56,7 @@ Messages:
   - with `🔒 uploaded as PRIVATE for review` instead, for a long video the local model helped write: it went up private whatever `YOUTUBE_PRIVACY_STATUS` says, and stays that way until published by hand (see "The writer" in `docs/configuration.md`)
 - `⚠️ The Anthropic credit balance has run out.` (or `Anthropic rejected the API key`) — sent by whichever process hit it, worker or autopilot, at most once every four hours each; scripts are written by the local model until it is fixed
 - `❌ <subject>` + error + job id and attempts
+- `⏭ <subject>` + `too few sources; skipped, another topic takes the slot` — the search found fewer than two sources on the subject, so no video was made and the slot is free again
 - `⚠️ <subject> cancelled` + job id
 - `⚠️ <subject>` + `job <id> queued for <N>h, worker may be stuck` — once per topic after 3 hours without a result
 - one warning after 10 consecutive minutes without a usable topic from the model

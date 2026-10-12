@@ -61,6 +61,7 @@ from repository import (
     normalize_subject,
     queue_topic_job,
     recent_topic_subjects,
+    release_topic_slot,
     topics_awaiting_result,
 )
 import anniversary
@@ -323,6 +324,12 @@ class Autopilot:
                     except Exception as err:
                         log(f"[-] Could not draft a post: {err}", "warning")
                     continue
+                elif job.status == "failed" and (job.error_message or "").startswith(
+                    research.NO_SOURCES
+                ):
+                    # Nothing to write it from: another topic takes the slot.
+                    message = f"⏭ {topic.subject}\ntoo few sources; skipped, another topic takes the slot\njob {job.id}"
+                    release_topic_slot(session, topic.id)
                 elif job.status == "failed":
                     error = (job.error_message or "unknown error")[:ERROR_TEXT_LIMIT]
                     message = f"❌ {topic.subject}\n{error}\njob {job.id}, attempts {job.attempt_count}"

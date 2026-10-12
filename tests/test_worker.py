@@ -1,5 +1,6 @@
 from pipeline import PipelineResult
 from repository import create_job, get_job, list_artifacts, list_job_events
+import research
 import worker
 
 
@@ -322,6 +323,27 @@ def test_process_next_job_requeues_when_attempts_remain(monkeypatch, session_fac
         assert second.attempt_count == 2
         assert second.error_message == "tts unavailable"
     assert sleeps == [worker.RETRY_DELAY_SECONDS]
+
+
+def test_a_subject_with_no_sources_fails_without_a_retry(monkeypatch, session_factory):
+    with session_factory() as session:
+        job = create_job(session, payload={"videoSubject": "poo signals"}, max_attempts=2)
+
+    monkeypatch.setattr(worker, "SessionLocal", session_factory)
+    _disable_cleanup(monkeypatch)
+    sleeps = _no_sleep(monkeypatch)
+
+    def fake_pipeline(*_args, **_kwargs):
+        raise worker.NoSources("poo signals")
+
+    monkeypatch.setattr(worker, "run_generation_pipeline", fake_pipeline)
+
+    assert worker.process_next_job() is True
+    with session_factory() as session:
+        failed = get_job(session, job.id)
+        assert failed.status == "failed"
+        assert failed.error_message.startswith(research.NO_SOURCES)
+    assert sleeps == []
 
 
 def test_process_next_job_cancels_instead_of_requeue_when_cancel_races_failure(

@@ -397,6 +397,22 @@ def mark_topic_finished(session: Session, topic_id: int, status: str) -> None:
     session.commit()
 
 
+def release_topic_slot(session: Session, topic_id: int) -> None:
+    """Marks a topic skipped and gives its slot back.
+
+    The slot counters read used_at, so clearing it lets the next tick queue
+    another topic in its place. The subject stays in the table, so it is not
+    suggested again.
+    """
+    topic = session.get(Topic, topic_id)
+    if not topic:
+        return
+    topic.status = "skipped"
+    topic.used_at = None
+    topic.completed_at = utcnow()
+    session.commit()
+
+
 def recent_topic_subjects(session: Session, limit: int = 50) -> list[str]:
     stmt = select(Topic.subject).order_by(Topic.id.desc()).limit(limit)
     return list(session.scalars(stmt).all())
