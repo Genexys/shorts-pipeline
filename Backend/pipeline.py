@@ -8,12 +8,14 @@ from uuid import uuid4
 
 from moviepy import AudioFileClip, concatenate_audioclips
 
+import fact_check
 import footage_judge
 import knowledge
 import research
 from formats import LONG, VideoFormat, resolve_format
 from gpt import (
     generate_long_script,
+    generate_response,
     keywords_from_subject,
     generate_metadata,
     generate_script,
@@ -203,6 +205,10 @@ class PipelineResult:
     # Dollars of Claude calls made for this video, as priced in writer.py. The
     # console's usage page is the bill; this is for watching the balance.
     claude_usd: Optional[float] = None
+    # The fact check's findings (fact_check.ScriptCheck.summary), and every
+    # reason the video went up private for review. Empty when nothing held it.
+    fact_check: Optional[dict] = None
+    review_reasons: list = field(default_factory=list)
 
 
 # How many recent videos' music a new video avoids, while its theme has
@@ -429,6 +435,23 @@ def run_generation_pipeline(
         raise RuntimeError(
             "Could not generate a script. Try a different model or prompt."
         )
+
+    # Why this video should go up private for the owner to look at first. Each
+    # check that can find something it cannot fix adds a line; any line holds
+    # the upload back.
+    review_reasons: list = []
+
+    guard_cancelled()
+    checked = fact_check.check_script(data["videoSubject"], script, brief, generate_response)
+    if checked.script != script:
+        emit("[+] Script corrected by the fact check:", "info")
+        emit(checked.script, "info")
+    script = checked.script
+    for claim in checked.unresolved:
+        review_reasons.append(f"fact check, {claim.verdict}: {claim.text}")
+    if not checked.checked:
+        # Not held: an outage at this step would otherwise hold every video.
+        emit("[!] The script went out without a fact check.", "warning")
 
     search_terms = get_search_terms(
         data["videoSubject"], fmt.search_term_count, script, ai_model
@@ -698,6 +721,12 @@ def run_generation_pipeline(
         opening_title=fmt.lead_with_payoff,
     )
 
+    title, description, metadata_problems = fact_check.check_metadata(
+        script, title, description, generate_response
+    )
+    if metadata_problems:
+        emit(f"[+] Metadata corrected: {'; '.join(metadata_problems)}", "info")
+
     description = research.append_sources(description, sources)
 
     emit("[+] Metadata for YouTube upload:", "info")
@@ -794,7 +823,7 @@ def run_generation_pipeline(
     configured_privacy, privacy_warning = resolve_privacy_status(
         os.getenv("YOUTUBE_PRIVACY_STATUS")
     )
-    held = held_for_review(fmt, script_local)
+    held = held_for_review(fmt, script_local) or bool(review_reasons)
     privacy_status = "private" if held else configured_privacy
     category_id = (os.getenv("YOUTUBE_CATEGORY_ID") or "28").strip() or "28"
     youtube_video_id: Optional[str] = None
@@ -805,7 +834,12 @@ def run_generation_pipeline(
         guard_cancelled()
         if privacy_warning:
             emit(f"[!] {privacy_warning}", "warning")
-        if held:
+        if held and review_reasons:
+            emit(
+                "[!] Uploading as private for review: " + "; ".join(review_reasons),
+                "warning",
+            )
+        elif held:
             emit(
                 f"[!] Part of this script was written by {script_model}; uploading "
                 "as private for review.",
@@ -893,4 +927,6 @@ def run_generation_pipeline(
         music_track=music_track,
         music_theme=music_theme if music_track else None,
         claude_usd=spend,
+        fact_check=checked.summary(),
+        review_reasons=review_reasons,
     )
