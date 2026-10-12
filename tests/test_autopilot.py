@@ -76,6 +76,8 @@ def test_build_payload_matches_frontend_shape():
         "anchor": "",
         # The opening-line experiment's arm; control unless drawn otherwise.
         "openingArm": "control",
+        # No persona unless AUTOPILOT_PERSONA_SHARE draws one.
+        "persona": "",
         "aiModel": "claude-opus-5-5",
         "voice": "en_us_001",
         "paragraphNumber": 1,

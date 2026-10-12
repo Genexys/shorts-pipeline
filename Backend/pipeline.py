@@ -11,6 +11,7 @@ from moviepy import AudioFileClip, concatenate_audioclips
 import fact_check
 import footage_judge
 import knowledge
+import persona as personas
 import research
 import video_review
 from formats import LONG, VideoFormat, resolve_format
@@ -213,6 +214,8 @@ class PipelineResult:
     fact_check: Optional[dict] = None
     # What the look at the finished video found (video_review.Review.summary).
     video_review: Optional[dict] = None
+    # The persona that told the video (persona.PERSONAS key), or None.
+    persona: Optional[str] = None
     review_reasons: list = field(default_factory=list)
 
 
@@ -266,6 +269,11 @@ def run_generation_pipeline(
     opening_arm = data.get("openingArm")
     if opening_arm:
         emit(f"[+] Opening-line experiment: {opening_arm} arm.", "info")
+    # The character telling this video, chosen by the autopilot; None for the
+    # plain narrator. Shorts only: long form has no mascot or burned captions.
+    character = personas.get(data.get("persona")) if fmt.burn_subtitles else None
+    if character:
+        emit(f"[+] Persona: {character.name}.", "info")
     anchor = (data.get("anchor") or "").strip()
     use_music = data.get("useMusic", False)
     automate_youtube_upload = data.get("automateYoutubeUpload", False)
@@ -392,6 +400,10 @@ def run_generation_pipeline(
         nonlocal script_model
         script_model = name
 
+    def paced(words: Optional[int]) -> Optional[int]:
+        """A word count for the persona's delivery; unchanged for the narrator."""
+        return int(words * character.pace) if (character and words) else words
+
     if fmt is LONG:
         script = generate_long_script(
             data["videoSubject"],
@@ -414,14 +426,15 @@ def run_generation_pipeline(
             data["customPrompt"],
             # A curio needs fewer words than an anniversary; a caller that
             # named its own count still gets that count.
-            target_words=target_words or target_words_for(register, fmt.target_words),
+            target_words=paced(target_words or target_words_for(register, fmt.target_words)),
             research=brief,
             register=register,
             lead_with_payoff=fmt.lead_with_payoff,
             anchor=anchor,
-            max_words=words_for_seconds(fmt.max_seconds),
+            max_words=paced(words_for_seconds(fmt.max_seconds)),
             report_model=note_model,
             opening_arm=opening_arm,
+            persona_rules=character.rules if character else "",
         )
 
     script_fell_back = writer.is_configured() and script_model != writer.model_name()
@@ -621,9 +634,13 @@ def run_generation_pipeline(
         sentences,
         make_path=lambda: str(TEMP_DIR / f"{uuid4()}.mp3"),
         tiktok_voice=voice,
-        elevenlabs_voice_id=fmt.elevenlabs_voice_id,
+        elevenlabs_voice_id=character.voice_id if character else fmt.elevenlabs_voice_id,
         elevenlabs_model=fmt.elevenlabs_model,
         on_log=emit,
+        voice_settings=(
+            {"stability": character.stability, "similarity_boost": 0.8, "use_speaker_boost": True}
+            if character else None
+        ),
     )
     # Whether the format wanted the paid voice and did not get it. Recorded
     # rather than only logged: running out of credits is otherwise discovered
@@ -701,6 +718,14 @@ def run_generation_pipeline(
     finally:
         temp_audio.close()
 
+    mascot_plan: list = []
+    if character:
+        # One pose per sentence, timed from the captions' own words.
+        mascot_plan = personas.pose_plan(
+            character, script, personas.read_cues(subtitles_path),
+            probe_duration(tts_path), generate_response,
+        )
+
     try:
         final_video_path = generate_video(
             combined_video_path,
@@ -713,6 +738,8 @@ def run_generation_pipeline(
             # channel. See AUTOPILOT_COLOR in autopilot_config.py.
             text_color or "#F4EEE3",
             fmt,
+            caption_style=character.caption_style if character else "plain",
+            mascot=[(str(path), start, end) for path, start, end in mascot_plan],
         )
     except Exception as err:
         raise RuntimeError(
@@ -951,5 +978,6 @@ def run_generation_pipeline(
         claude_usd=spend,
         fact_check=checked.summary(),
         video_review=looked.summary(),
+        persona=data.get("persona") if character else None,
         review_reasons=review_reasons,
     )

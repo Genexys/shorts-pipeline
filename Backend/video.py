@@ -11,7 +11,7 @@ import requests
 import srt_equalizer
 import assemblyai as aai
 
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 from pathlib import Path
 # Only the audio clip type survives here: the video path is ffmpeg now, and
 # AudioFileClip is still what the pipeline hands to generate_subtitles.
@@ -1090,8 +1090,105 @@ def end_dialogue_before_next(lines: List[str]) -> List[str]:
     return ended
 
 
+# Burning captions, for a persona that wants them (persona.Persona.caption_style).
+# Each word is drawn in four layers: a flickering orange-red glow, a red body
+# with a dark edge, an orange band and a pale-yellow top, the bands made with
+# \clip so the letters run from yellow to red like a flame. libass has no
+# gradient fill; layered clips are how one is drawn. Picked by the owner on
+# 2026-10-12 from three fonts.
+FIRE_FONT_FILE = "BlackOpsOne-Regular.ttf"
+FIRE_FONT_NAME = "Black Ops One"
+FIRE_FONT_SIZE = 128
+# Width a caption may take, leaving room for the glow at the frame's edges.
+FIRE_SIDE_MARGIN_PX = 60
+# Below this fit, a hyphenated word goes on two lines instead of shrinking.
+# "SYN-PROPANETHIAL-S-OXIDE." would otherwise come out at 46 %.
+FIRE_WRAP_BELOW = 70
+_fire_font = None
+
+
+def _fire_measure(word: str) -> float:
+    global _fire_font
+    if _fire_font is None:
+        from PIL import ImageFont
+
+        _fire_font = ImageFont.truetype(str(FONTS_DIR / FIRE_FONT_FILE), FIRE_FONT_SIZE)
+    return _fire_font.getlength(word) + 2 * 11
+
+
+def fire_fit(word: str, frame_width: int) -> int:
+    """Percent scale at which a caption fits the frame; 100 for an ordinary word.
+
+    Single-word Shorts captions are sized for words, and a chemical name runs
+    off both edges at full size: "LACHRYMATORY-FACTOR" did, on the first
+    burning-caption render.
+    """
+    width = _fire_measure(word)
+    room = frame_width - 2 * FIRE_SIDE_MARGIN_PX
+    return min(100, int(100 * room / width)) if width else 100
+
+
+def _fire_line(start: str, end: str, word: str, x: int, y: int, scale: int) -> List[str]:
+    size = FIRE_FONT_SIZE * scale // 100
+    top, yellow, orange = y - size // 2 - 40, y - int(size * 0.12), y + int(size * 0.18)
+    base = (
+        rf"\an5\pos({x},{y})\fscx{int(scale * 1.2)}\fscy{int(scale * 1.2)}"
+        rf"\t(0,90,\fscx{scale}\fscy{scale})"
+    )
+    flicker = (
+        r"\t(0,120,\blur24\3c&H0020FF&)\t(120,240,\blur16\3c&H0070FF&)"
+        r"\t(240,360,\blur22\3c&H0030FF&)"
+    )
+    layers = (
+        rf"{{{base}\1a&HFF&\bord34\blur20\3c&H0040FF&\shad0{flicker}}}",
+        rf"{{{base}\1c&H0A30E0&\bord11\3c&H00001C&\shad8\4c&H000000&\4a&H30&}}",
+        rf"{{{base}\1c&H1A9AFF&\bord0\shad0\clip(0,{top},{x * 2},{orange})}}",
+        rf"{{{base}\1c&HA0F3FF&\bord0\shad0\clip(0,{top},{x * 2},{yellow})}}",
+    )
+    return [f"Dialogue: {i},{start},{end},Default,,0,0,0,,{tag}{word}" for i, tag in enumerate(layers)]
+
+
+def fire_dialogue(start: str, end: str, word: str, fmt: VideoFormat = SHORT) -> List[str]:
+    """The four-layer burning caption for one cue, on two lines if it must."""
+    x, y = fmt.width // 2, fmt.height // 2
+    scale = fire_fit(word, fmt.width)
+    if scale < FIRE_WRAP_BELOW and "-" in word.strip("-"):
+        cuts = [i for i, c in enumerate(word) if c == "-"]
+        cut = min(cuts, key=lambda i: abs(i - len(word) / 2))
+        first, second = word[: cut + 1], word[cut + 1 :]
+        scale = min(fire_fit(first, fmt.width), fire_fit(second, fmt.width))
+        gap = int(FIRE_FONT_SIZE * scale / 100 * 0.62)
+        return (_fire_line(start, end, first, x, y - gap, scale)
+                + _fire_line(start, end, second, x, y + gap, scale))
+    return _fire_line(start, end, word, x, y, scale)
+
+
+def burn_fire(lines: List[str], fmt: VideoFormat = SHORT) -> List[str]:
+    """The script's lines with the style set to the fire font and each cue layered."""
+    out = []
+    for line in lines:
+        if line.startswith("Style:"):
+            fields = line.split(",")
+            fields[1], fields[2] = FIRE_FONT_NAME, str(FIRE_FONT_SIZE)
+            out.append(",".join(fields))
+        elif line.lstrip().startswith("Dialogue:"):
+            fields = line.split(",", 9)
+            if len(fields) < 10:
+                out.append(line)
+                continue
+            word = re.sub(r"\{[^}]*\}", "", fields[9]).replace("\\N", " ").strip()
+            out += fire_dialogue(fields[1], fields[2], word, fmt)
+        else:
+            out.append(line)
+    return out
+
+
+CAPTION_STYLES = ("plain", "fire")
+
+
 def patch_ass_script(
-    script: str, subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT
+    script: str, subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT,
+    caption_style: str = "plain",
 ) -> str:
     """Sets the script's resolution and replaces its style definition.
 
@@ -1125,7 +1222,10 @@ def patch_ass_script(
                 lines.append(f"PlayResX: {fmt.width}")
                 lines.append(f"PlayResY: {fmt.height}")
                 seen_play_res_x = seen_play_res_y = True
-    return "\n".join(end_dialogue_before_next(lines)) + "\n"
+    lines = end_dialogue_before_next(lines)
+    if caption_style == "fire":
+        lines = burn_fire(lines, fmt)
+    return "\n".join(lines) + "\n"
 
 
 def prepare_ass_subtitles(
@@ -1133,6 +1233,7 @@ def prepare_ass_subtitles(
     subtitles_position: str,
     text_colour: str,
     fmt: VideoFormat = SHORT,
+    caption_style: str = "plain",
 ) -> str:
     """Converts the .srt to a styled .ass sized for the real frame."""
     ass_path = TEMP_DIR / f"{uuid.uuid4()}.ass"
@@ -1142,7 +1243,8 @@ def prepare_ass_subtitles(
     )
     ass_path.write_text(
         patch_ass_script(
-            ass_path.read_text(encoding="utf-8"), subtitles_position, text_colour, fmt
+            ass_path.read_text(encoding="utf-8"), subtitles_position, text_colour, fmt,
+            caption_style,
         ),
         encoding="utf-8",
     )
@@ -1158,8 +1260,14 @@ def build_render_command(
     subtitles_position: str,
     text_color: str,
     fmt: VideoFormat = SHORT,
+    caption_style: str = "plain",
+    mascot: Sequence[Tuple[str, float, float]] = (),
 ) -> List[str]:
     """The ffmpeg command that attaches the voiceover, burning subtitles if asked.
+
+    `mascot` is a persona's pose plan, (image, start, end) per segment. Each
+    pose goes over the captions in the same pass, so a persona costs no extra
+    encode.
 
     When the format does not burn subtitles there is nothing to draw, so the
     video stream is copied rather than re-encoded: the picture already left
@@ -1178,16 +1286,25 @@ def build_render_command(
         # libass needs the font by family name, and finds it only if told where
         # to look; the file lives outside any system font directory.
         ass_path = prepare_ass_subtitles(
-            subtitles_path, subtitles_position, text_color, fmt
+            subtitles_path, subtitles_position, text_color, fmt, caption_style
         )
-        command += ["-vf", f"ass='{ass_path}':fontsdir='{FONTS_DIR}'"]
+        captions = f"ass='{ass_path}':fontsdir='{FONTS_DIR}'"
+        if mascot:
+            for image, _, _ in mascot:
+                command += ["-loop", "1", "-i", str(image)]
+            command += ["-filter_complex", mascot_filter(captions, mascot, fmt)]
+            video_map = "[vout]"
+        else:
+            command += ["-vf", captions]
+            video_map = "0:v:0"
         video_args = encoder_args(threads, final=True)
     else:
         video_args = ["-c:v", "copy"]
+        video_map = "0:v:0"
 
     command += [
         "-map",
-        "0:v:0",
+        video_map,
         "-map",
         "1:a:0",
         *video_args,
@@ -1201,6 +1318,38 @@ def build_render_command(
     return command
 
 
+# The mascot in the corner: its width against the frame's, and how far above
+# the bottom it stands, clear of YouTube's own caption and button overlays.
+MASCOT_WIDTH_RATIO = 0.28
+MASCOT_MARGIN_X_RATIO = 0.037
+MASCOT_BOTTOM_RATIO = 0.135
+# A small bounce, so it reads as alive rather than pasted on.
+MASCOT_BOUNCE_PX = 8
+
+
+def mascot_filter(captions: str, mascot: Sequence[Tuple[str, float, float]],
+                  fmt: VideoFormat = SHORT) -> str:
+    """filter_complex: captions on input 0, then one overlay per pose segment.
+
+    Pose images are inputs 2.. in plan order (input 1 is the narration).
+    """
+    width = int(fmt.width * MASCOT_WIDTH_RATIO)
+    margin_x = int(fmt.width * MASCOT_MARGIN_X_RATIO)
+    bottom = int(fmt.height * MASCOT_BOTTOM_RATIO)
+    parts = [f"[0:v]{captions}[c0]"]
+    previous = "c0"
+    for index, (_, start, end) in enumerate(mascot):
+        parts.append(f"[{index + 2}:v]scale={width}:-1[m{index}]")
+        label = "vout" if index == len(mascot) - 1 else f"c{index + 1}"
+        parts.append(
+            f"[{previous}][m{index}]overlay=x=W-w-{margin_x}:"
+            f"y=H-h-{bottom}+{MASCOT_BOUNCE_PX}*sin(t*9):"
+            f"enable='between(t,{start:.2f},{end:.2f})'[{label}]"
+        )
+        previous = label
+    return ";".join(parts)
+
+
 def generate_video(
     combined_video_path: str,
     tts_path: str,
@@ -1209,6 +1358,8 @@ def generate_video(
     subtitles_position: str,
     text_color: str,
     fmt: VideoFormat = SHORT,
+    caption_style: str = "plain",
+    mascot: Sequence[Tuple[str, float, float]] = (),
 ) -> str:
     """
     Attaches the voiceover, burning the subtitles in when the format wants them.
@@ -1239,6 +1390,8 @@ def generate_video(
         subtitles_position,
         text_color,
         fmt,
+        caption_style,
+        mascot,
     )
     subprocess.run(command, check=True, capture_output=True, text=True)
     return "output.mp4"

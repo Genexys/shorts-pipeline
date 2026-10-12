@@ -74,6 +74,7 @@ class AutopilotConfig:
     curio_share: int
     anniversary_share: int
     opening_experiment_share: int
+    persona_share: int
     output_retention_days: int
     telegram_bot_token: str
     telegram_chat_id: str
@@ -173,6 +174,13 @@ class AutopilotConfig:
                 50,
                 0,
                 100,
+            ),
+            # Percent of Shorts told by the persona (persona.ARENA: the Fact
+            # Arena announcer, TITAN, burning captions). 0 by default: switched
+            # on by the owner, once the opening-line experiment has been read,
+            # so the two do not blur each other.
+            persona_share=_parse_int(
+                "AUTOPILOT_PERSONA_SHARE", get("AUTOPILOT_PERSONA_SHARE"), 0, 0, 100
             ),
             output_retention_days=_parse_int("OUTPUT_RETENTION_DAYS", get("OUTPUT_RETENTION_DAYS"), 7, 1, 365),
             telegram_bot_token=get("TELEGRAM_BOT_TOKEN").strip(),
@@ -301,3 +309,21 @@ def choose_opening_arm(
         return OPENING_CONTROL
     drawn = random.randint(1, 100) if roll is None else roll
     return OPENING_EVERYDAY if drawn <= config.opening_experiment_share else OPENING_CONTROL
+
+
+def choose_persona(
+    config: AutopilotConfig, format_name: str, roll: Optional[int] = None
+) -> str:
+    """The persona telling the next video, or "" for the plain narrator.
+
+    Drawn per video, like the opening arm, so the two kinds of Shorts spread
+    across hours and days and can be compared on the engaged share. Shorts
+    only: long form has no burned captions for the mascot to sit beside.
+    """
+    from persona import ARENA
+
+    if format_name != "short" or config.persona_share <= 0:
+        return ""
+    drawn = random.randint(1, 100) if roll is None else roll
+    return ARENA if drawn <= config.persona_share else ""
+

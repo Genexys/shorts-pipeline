@@ -584,6 +584,7 @@ def generate_script(
     max_words: Optional[int] = None,
     report_model: Optional[Callable[[str], None]] = None,
     opening_arm: Optional[str] = None,
+    persona_rules: str = "",
     _retry: bool = True,
 ) -> Optional[str]:
     """
@@ -660,7 +661,7 @@ def generate_script(
     
     Subject: {video_subject}
 {length}    Language: {voice}
-{OPENING_RULES if lead_with_payoff else ""}{opening_rules_for(opening_arm) if lead_with_payoff else ""}{ENDING_RULES}{anchor_rules(anchor)}{register_rules(register)}{research_rules(research)}
+{OPENING_RULES if lead_with_payoff else ""}{opening_rules_for(opening_arm) if lead_with_payoff else ""}{ENDING_RULES}{anchor_rules(anchor)}{register_rules(register)}{persona_rules}{research_rules(research)}
     """
 
     # Generate script
@@ -802,6 +803,7 @@ def generate_script(
                     max_words=max_words,
                     report_model=report_model,
                     opening_arm=opening_arm,
+                    persona_rules=persona_rules,
                     _retry=False,
                 ) or final_script
 

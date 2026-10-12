@@ -100,6 +100,7 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             "claudeUsd": None,
             "factCheck": None,
             "videoReview": None,
+            "persona": None,
             "reviewReasons": [],
         }
         assert artifacts["youtube_video"].path == "https://youtu.be/vid123"

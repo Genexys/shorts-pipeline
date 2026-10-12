@@ -75,6 +75,7 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_CURIO_SHARE` | Percent of videos that report something absurd but true instead of explaining how something works, 0..100. See [Registers](#registers). | `40` |
 | `AUTOPILOT_ANNIVERSARY_SHARE` | Percent of videos built from an event that happened on today's date, 0..100. See [Registers](#registers). | `10` |
 | `AUTOPILOT_OPENING_EXPERIMENT_SHARE` | Percent of explainer and curio Shorts written with the experimental opening rule, 0..100. `0` ends the experiment, `100` adopts the rule. See [Opening-line experiment](#opening-line-experiment). | `50` |
+| `AUTOPILOT_PERSONA_SHARE` | Percent of Shorts told by the persona (the Fact Arena announcer, TITAN, burning captions), 0..100. `0` is the plain narrator only. See [Personas](#personas). | `0` |
 | `OPENING_VARIANTS` | Alternative first sentences Claude drafts for each Short before keeping the strongest (or the original), 0..8. `0` is off. Leave it off until the opening-line experiment has been read; see [Opening-line experiment](#opening-line-experiment). | `0` |
 | `OUTPUT_RETENTION_DAYS` | Days to keep `output/` videos and thumbnails, 1..365. | `7` |
 | `REQUIRE_MOUNTS` | `true` makes `worker` and `autopilot` refuse to start when they cannot see the YouTube token (and, with `AUTOPILOT_USE_MUSIC` on, any `.mp3` under `Songs/`). For hosts where those are known to exist; catches the empty bind mounts Docker Desktop creates when WSL integration is late. See `docs/docker.md`. | `false` |
@@ -484,6 +485,44 @@ the register falls back to an explainer rather than forcing one.
 
 The register is chosen when the job is queued and travels in its payload, since
 the script is written in another process.
+
+## Personas
+
+A persona is a character who tells the facts. It has its own voice, captions
+and mascot, and it is defined in `Backend/persona.py`. The autopilot draws one
+for `AUTOPILOT_PERSONA_SHARE` percent of Shorts and stores the result in the
+job payload as `persona`. The video artifact records it under the same name, so
+persona Shorts can be compared with plain ones on the engaged share. Long form
+never gets one.
+
+There is one persona so far, picked on 2026-10-12 from four samples: **the Fact
+Arena announcer**.
+
+- **Script.** The persona's rules are added after the register's: a booming
+  tournament announcer who ends on "FACT... CONFIRMED." The rules state that
+  the drama is in the delivery and never in the facts, and the fact check runs
+  on the script as on any other.
+- **Length.** The announcer reads slower than the calm narrator. At 80 words a
+  Short ran 50.6 s; at 64 words it ran 36.5 s. So the word target and the word
+  ceiling are both multiplied by the persona's `pace` (0.8).
+- **Voice.** "Xavier - Dominating, Metalic Announcer" (`YOq2y2Up4RgXP2HyXjE5`),
+  a verified professional clone in the public ElevenLabs library with a 730-day
+  notice period. It runs on v4 at stability 0.35, so the voice can act.
+- **Captions** (`caption_style: fire`). Black Ops One (`fonts/`, OFL). Each word
+  is drawn in four layers: a flickering orange-red glow, a red body with a dark
+  edge, then an orange band and a pale-yellow top clipped on, so the letters run
+  from yellow to red like a flame. Words pop in at 120%. Every word is measured
+  against the frame. A long one shrinks to fit, and a hyphenated chemical name
+  too long for one line breaks at its middle hyphen.
+- **Mascot.** TITAN (`assets/mascot/titan/`) sits in the bottom-right corner
+  and bounces slightly.
+  - Poses: talking, hyped, impressed, celebrating.
+  - A short Claude call picks one pose per sentence. Each pose switches in when
+    the caption cues reach that sentence's first word.
+  - The overlay runs in the same ffmpeg pass as the captions.
+
+Keep `AUTOPILOT_PERSONA_SHARE` at 0 while the opening-line experiment runs.
+Two experiments at once would blur each other.
 
 ## Checks before publishing
 

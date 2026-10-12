@@ -90,6 +90,7 @@ def synthesize_sentences(
     elevenlabs_voice_id: Optional[str] = None,
     elevenlabs_model: Optional[str] = None,
     on_log: Optional[Callable[[str, str], None]] = None,
+    voice_settings: Optional[dict] = None,
 ) -> Tuple[List[str], str]:
     """Narrates every sentence with one service, falling back as a whole.
 
@@ -130,6 +131,7 @@ def synthesize_sentences(
                     next_text=(
                         sentences[index + 1] if index + 1 < len(sentences) else None
                     ),
+                    **({"voice_settings": voice_settings} if voice_settings else {}),
                 )
                 paths.append(path)
             return paths, ELEVENLABS
