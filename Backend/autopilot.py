@@ -10,7 +10,7 @@ import textwrap
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -104,6 +104,12 @@ DIGEST_HOUR = 10
 # Nothing younger than this has settled data to rank on. See §7.5 of the plan:
 # the threshold is arithmetic, not caution.
 DIGEST_MIN_AGE_DAYS = 7
+# How many topics the model drafts before choosing one, and how many of the
+# channel's best and worst Shorts it is shown while choosing. One idea per call
+# used to be the whole search; ten drafted and one chosen costs a few hundred
+# tokens more and compares the idea against its alternatives.
+TOPIC_CANDIDATES = 8
+TOPIC_EXAMPLES = 6
 # What each format is ranked on, in words. Shorts rank on the share of viewers
 # who did not swipe away at once (formats.ENGAGED_SHARE), long form on seconds
 # watched.
@@ -158,6 +164,8 @@ def build_topic_prompt(
     recent: list[str],
     register: str = EXPLAINER,
     material: str = "",
+    best: Sequence[str] = (),
+    worst: Sequence[str] = (),
 ) -> str:
     # Substitution happens after dedent/strip (via .format, not an f-string): recent
     # subjects are unindented, and interpolating them before dedent would drag the
@@ -170,7 +178,7 @@ def build_topic_prompt(
 
         Channel niche: {niche}
 
-        {material}Propose ONE new video topic. Requirements:
+        {material}Every topic must meet these requirements:
         - Written in English.
         - Between {min_words} and {max_words} words.
         - {brief}
@@ -179,7 +187,12 @@ def build_topic_prompt(
         Topics already used (do not repeat, do not paraphrase):
         {recent_block}
 
-        Return ONLY a JSON object: {{"subject": "..."}}
+        {performance}First write {candidates} candidate topics that meet the requirements.
+        Then choose the one a viewer scrolling a feed is least likely to swipe
+        past in the first two seconds: the one whose surprising claim they can
+        recognise from their own life at once.
+
+        Return ONLY a JSON object: {{"candidates": ["...", "..."], "subject": "..."}}
         """
     ).strip()
     material_block = (
@@ -196,7 +209,34 @@ def build_topic_prompt(
         recent_block=recent_block,
         brief=TOPIC_BRIEFS[register],
         material=material_block,
+        performance=performance_block(best, worst),
+        candidates=TOPIC_CANDIDATES,
     )
+
+
+def performance_block(best: Sequence[str], worst: Sequence[str]) -> str:
+    """What this channel's own numbers say, for the topic prompt; "" without any.
+
+    Ranked on the share of viewers who did not swipe away at once, which is
+    what decided how far a Short travelled in the first month: every Short got
+    a test batch of about a thousand views, and the ones viewers stayed on
+    were the ones that got more.
+    """
+    if not best and not worst:
+        return ""
+    lines = ["What this channel's own viewers did, by the share who stayed past the first seconds."]
+    if best:
+        lines.append("Kept the most viewers:")
+        lines += [f"- {subject}" for subject in best]
+    if worst:
+        lines.append("Lost the most viewers at once:")
+        lines += [f"- {subject}" for subject in worst]
+    lines.append(
+        "Openings set in the viewer's own day (a spoon, a jar lid, their own "
+        "voice) kept the most; openings on a name, a place or a species kept the "
+        "fewest."
+    )
+    return "\n        ".join(lines) + "\n\n        "
 
 
 class Autopilot:
@@ -510,7 +550,11 @@ class Autopilot:
                 # An explainer beats an anniversary forced out of nothing.
                 register = EXPLAINER
 
-        prompt = build_topic_prompt(self.config.niche, recent, register, material)
+        best = top_performing_subjects(session, "short", TOPIC_EXAMPLES, DIGEST_MIN_AGE_DAYS)
+        worst = worst_performing_subjects(session, "short", TOPIC_EXAMPLES, DIGEST_MIN_AGE_DAYS)
+        prompt = build_topic_prompt(
+            self.config.niche, recent, register, material, best=best, worst=worst
+        )
         last_problem = "no response"
         for attempt in range(1, TOPIC_ATTEMPTS + 1):
             try:
@@ -521,6 +565,10 @@ class Autopilot:
                 continue
             parsed = extract_json_object(response)
             subject = parsed.get("subject") if isinstance(parsed, dict) else None
+            candidates = parsed.get("candidates") if isinstance(parsed, dict) else None
+            if isinstance(candidates, list) and candidates:
+                log(f"[+] {len(candidates)} topic candidates: "
+                    + " | ".join(str(c)[:60] for c in candidates[:TOPIC_CANDIDATES]), "info")
             if not isinstance(subject, str) or not subject.strip():
                 last_problem = "response is not JSON with a 'subject' key"
                 log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
