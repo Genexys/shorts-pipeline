@@ -19,6 +19,8 @@ from gpt import (
     generate_response,
     keywords_from_subject,
     generate_metadata,
+    opening_variant_count,
+    strengthen_opening,
     generate_script,
     get_search_terms,
     select_music_theme,
@@ -443,6 +445,10 @@ def run_generation_pipeline(
     # check that can find something it cannot fix adds a line; any line holds
     # the upload back.
     review_reasons: list = []
+
+    if fmt.lead_with_payoff and opening_variant_count():
+        # Before the fact check, so a new first sentence is checked with the rest.
+        script = strengthen_opening(script, data["videoSubject"], opening_arm, register)
 
     guard_cancelled()
     checked = fact_check.check_script(data["videoSubject"], script, brief, generate_response)

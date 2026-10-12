@@ -75,6 +75,7 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_CURIO_SHARE` | Percent of videos that report something absurd but true instead of explaining how something works, 0..100. See [Registers](#registers). | `40` |
 | `AUTOPILOT_ANNIVERSARY_SHARE` | Percent of videos built from an event that happened on today's date, 0..100. See [Registers](#registers). | `10` |
 | `AUTOPILOT_OPENING_EXPERIMENT_SHARE` | Percent of explainer and curio Shorts written with the experimental opening rule, 0..100. `0` ends the experiment, `100` adopts the rule. See [Opening-line experiment](#opening-line-experiment). | `50` |
+| `OPENING_VARIANTS` | Alternative first sentences Claude drafts for each Short before keeping the strongest (or the original), 0..8. `0` is off. Leave it off until the opening-line experiment has been read; see [Opening-line experiment](#opening-line-experiment). | `0` |
 | `OUTPUT_RETENTION_DAYS` | Days to keep `output/` videos and thumbnails, 1..365. | `7` |
 | `REQUIRE_MOUNTS` | `true` makes `worker` and `autopilot` refuse to start when they cannot see the YouTube token (and, with `AUTOPILOT_USE_MUSIC` on, any `.mp3` under `Songs/`). For hosts where those are known to exist; catches the empty bind mounts Docker Desktop creates when WSL integration is late. See `docs/docker.md`. | `false` |
 | `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
@@ -409,6 +410,13 @@ GROUP BY 1, 2 ORDER BY 2, 1;
 Then set `AUTOPILOT_OPENING_EXPERIMENT_SHARE` to `100` to keep the rule, or
 `0` to drop it.
 
+After that, `OPENING_VARIANTS=4` has Claude draft four alternative first
+sentences for every Short, under the opening rules in force, and keep the
+strongest or the original. A chosen sentence must pass the same gates as a
+written one: at most 16 words, not a weak opening, and no figure the script
+lacked. The fact check runs after it. It is off until the experiment is read,
+because variants under both arms would blur the difference being measured.
+
 ## Registers
 
 Every video is an **explainer** — how something works — a **curio** (a real
@@ -476,6 +484,43 @@ the register falls back to an explainer rather than forcing one.
 
 The register is chosen when the job is queued and travels in its payload, since
 the script is written in another process.
+
+## Checks before publishing
+
+Three Claude passes look at each video before it is uploaded. Whatever they
+cannot fix holds the upload back. It goes up **private**, whatever
+`YOUTUBE_PRIVACY_STATUS` says, and the autopilot's Telegram report lists the
+reasons under "🔒 uploaded as PRIVATE for review". The video artifact records
+each check, along with `reviewReasons`.
+
+**Fact check** (`Backend/fact_check.py`, recorded as `factCheck`). After the
+script is written, a second call lists every claim and marks it supported,
+unsupported or wrong against the research brief and the verbatim facts. It
+also returns a corrected script. A correction is used only if it brings in no
+figure the script or its evidence lacked, and if it grows by at most 15%. It
+may shrink by up to 45%, since removing claims shortens a script. The
+correction is then checked again, and anything still unsupported holds the
+video.
+
+Every pinned correction before 2026-10-12 was this kind of miss: Kelsey's
+hands given to Doolittle, "created" for "helped create", "Edison's Rival" for
+an Edison licensee. Tried on five such Shorts, the check caught the pacemaker
+overstatement, the Xerxes claim and the garlic mechanism stated as fact.
+
+**Metadata check.** The title and description lose any claim the checked script
+does not make. Only claims are checked, never length or style, and the hashtag
+line is kept.
+
+**Video review** (`Backend/video_review.py`, recorded as `videoReview`). Twelve
+frames are taken from the finished file, captions burned in, and read by
+`VIDEO_REVIEW_MODEL` (Sonnet 5.5 by default; `off` turns it off) alongside the
+narration. It looks for black frames, footage unrelated to the narration,
+wrong captions, burned-in text and watermarks. A major problem holds the
+upload; a minor one is logged.
+
+With no model available, a check is skipped rather than failed, and the video
+goes out as before. An outage must not hold every video. The checks cost about
+$0.07–0.10 per video, which shows in `claudeUsd`.
 
 ## The writer
 

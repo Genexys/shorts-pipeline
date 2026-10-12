@@ -1036,6 +1036,88 @@ _DATELINE_OPENING_RE = re.compile("|".join(DATELINE_OPENING_PATTERNS), re.IGNORE
 OPENING_MAX_WORDS = 16
 
 
+# How many alternative first sentences to draft before keeping the strongest.
+# 0 turns it off, and it is off by default until the opening-line experiment
+# (AUTOPILOT_OPENING_EXPERIMENT_SHARE) has been read: drafting variants under
+# both arms would blur the difference the experiment measures. The first
+# month made the case for it: the share of viewers still watching after the
+# first seconds decided how far a Short travelled, and the first sentence is
+# most of those seconds.
+def opening_variant_count() -> int:
+    try:
+        return max(0, min(8, int(os.getenv("OPENING_VARIANTS", "0") or 0)))
+    except ValueError:
+        return 0
+
+
+OPENING_VARIANTS_PROMPT = """
+    Here is the narration of a popular-science YouTube Short.
+
+    Subject: {subject}
+
+    Script:
+    {script}
+
+    Its first sentence decides whether a viewer scrolling a feed keeps watching.
+    Write {count} alternative first sentences. Each must:
+    - say only what the script already says: no new fact, figure or name;
+    - lead into the script's second sentence as naturally as the original does;
+    - follow these rules:
+{rules}
+    Then choose the strongest of your alternatives and the original. Keep the
+    original if none is clearly better.
+
+    Return ONLY a JSON object:
+    {{"variants": ["...", "..."], "chosen": "..."}}
+"""
+
+
+def strengthen_opening(
+    script: str, subject: str, opening_arm: Optional[str] = None,
+    register: Optional[str] = None, count: Optional[int] = None,
+) -> str:
+    """The script with its first sentence replaced by a stronger draft, or as it was.
+
+    The chosen sentence must pass the same gates as a written one: under
+    OPENING_MAX_WORDS, not weak, and no figure the script lacked. The fact
+    check runs after this, so anything it says is checked like the rest.
+    Never raises.
+    """
+    count = opening_variant_count() if count is None else count
+    sentences = split_sentences(script or "")
+    if count <= 0 or len(sentences) < 2:
+        return script
+    rules = OPENING_RULES + opening_rules_for(opening_arm)
+    prompt = OPENING_VARIANTS_PROMPT.format(
+        subject=subject.strip(), script=script.strip(), count=count, rules=rules
+    )
+    try:
+        parsed = extract_json_object(generate_response(prompt, ""))
+    except Exception as err:
+        log(f"[!] Could not draft opening variants ({err}).", "warning")
+        return script
+    chosen = parsed.get("chosen") if isinstance(parsed, dict) else None
+    if not isinstance(chosen, str) or not chosen.strip():
+        return script
+    chosen = " ".join(chosen.split())
+    original = sentences[0]
+    if _same_sentence(chosen, original):
+        log("[+] Opening variants: the original stays.", "info")
+        return script
+    problems = []
+    if len(chosen.split()) > OPENING_MAX_WORDS:
+        problems.append("too long")
+    if opens_weakly(chosen, register):
+        problems.append("weak")
+    if not set(_DIGITS.findall(chosen)) <= set(_DIGITS.findall(script)):
+        problems.append("new figure")
+    if problems:
+        log(f"[!] Opening variant not used ({', '.join(problems)}): {chosen}", "warning")
+        return script
+    log(f"[+] Opening variants: '{original}' -> '{chosen}'", "info")
+    return script.replace(original, chosen, 1)
+
+
 def opening_rules_for(opening_arm: Optional[str]) -> str:
     """The extra opening instruction for an experiment arm, or "" for control."""
     return EVERYDAY_OPENING_RULES if opening_arm == OPENING_EVERYDAY else ""
