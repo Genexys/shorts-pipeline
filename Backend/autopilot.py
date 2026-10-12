@@ -302,6 +302,7 @@ class Autopilot:
         script_model = ""
         written_locally = False
         uploaded_private = False
+        review_reasons: list = []
         for artifact in list_artifacts(session, job_id):
             metadata = artifact.metadata_json or {}
             if artifact.artifact_type == "video":
@@ -326,6 +327,7 @@ class Autopilot:
                         "the stronger model was unavailable or declined"
                     )
                 script_model = metadata.get("scriptModel") or ""
+                review_reasons = list(metadata.get("reviewReasons") or [])
                 written_locally = (
                     bool(metadata.get("scriptLocal")) and metadata.get("format") == "long"
                 )
@@ -341,6 +343,14 @@ class Autopilot:
                 "🔒 uploaded as PRIVATE for review — part of the script was "
                 f"written by the local model ({script_model}). Watch it, then "
                 "publish it by hand in YouTube Studio if it holds up."
+            )
+        if review_reasons and uploaded_private:
+            # A check found something it could not fix. Nothing else will
+            # publish the video, so the report says what to look at.
+            warnings.append(
+                "🔒 uploaded as PRIVATE for review:\n"
+                + "\n".join(f"  • {reason}" for reason in review_reasons[:5])
+                + "\nCheck it, fix or pin a correction, then publish it by hand."
             )
         if script_warning:
             warnings.append(script_warning)

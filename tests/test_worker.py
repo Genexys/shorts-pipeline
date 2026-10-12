@@ -98,6 +98,8 @@ def test_process_next_job_marks_completed_and_records_artifacts(
             "music": None,
             "musicTheme": None,
             "claudeUsd": None,
+            "factCheck": None,
+            "reviewReasons": [],
         }
         assert artifacts["youtube_video"].path == "https://youtu.be/vid123"
         assert artifacts["youtube_video"].metadata_json == {

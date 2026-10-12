@@ -590,3 +590,32 @@ def test_a_held_video_that_never_uploaded_keeps_the_warning_line(session_factory
     message = sent[0]
     assert "⚠️ written by llama3.1:8b" in message
     assert "PRIVATE" not in message
+
+
+def test_the_report_lists_why_a_checked_video_was_held(session_factory):
+    sent = []
+    _finished(
+        session_factory,
+        {"format": "short", "scriptModel": "claude-opus-5-5",
+         "reviewReasons": ["fact check, wrong: he invented it in 1958"]},
+        privacy="private",
+    )
+
+    _pilot(session_factory, sent).finish_completed_topics()
+
+    message = sent[0]
+    assert "PRIVATE for review" in message
+    assert "he invented it in 1958" in message
+
+
+def test_review_reasons_on_a_public_upload_add_no_lock_line(session_factory):
+    sent = []
+    _finished(
+        session_factory,
+        {"format": "short", "scriptModel": "claude-opus-5-5", "reviewReasons": ["x"]},
+        privacy="public",
+    )
+
+    _pilot(session_factory, sent).finish_completed_topics()
+
+    assert "PRIVATE" not in sent[0]
