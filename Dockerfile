@@ -18,6 +18,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY Backend Backend
 COPY fonts fonts
+# Persona mascots (Backend/persona.py); without them a persona video has no overlay.
+COPY assets assets
 COPY Frontend Frontend
 
 RUN mkdir -p temp subtitles output Songs secrets

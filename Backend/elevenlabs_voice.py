@@ -58,7 +58,8 @@ V4_VOICE_SETTINGS = {"stability": 0.5, "similarity_boost": 0.8, "use_speaker_boo
 
 
 def _body(
-    text: str, model: str, previous_text: Optional[str], next_text: Optional[str]
+    text: str, model: str, previous_text: Optional[str], next_text: Optional[str],
+    voice_settings: Optional[dict] = None,
 ) -> dict:
     body = {"text": text, "model_id": model}
     if supports_stitching(model):
@@ -67,7 +68,8 @@ def _body(
         if next_text:
             body["next_text"] = next_text
     if is_v4(model):
-        body["voice_settings"] = dict(V4_VOICE_SETTINGS)
+        # A persona brings its own; see persona.Persona.stability.
+        body["voice_settings"] = dict(voice_settings or V4_VOICE_SETTINGS)
         # "auto" leaves it to the model whether "$25,000" or "4.23 grams per
         # gallon" are expanded into words. "on" always does. Only on v4: Flash
         # forces it on the Enterprise plan alone.
@@ -92,6 +94,7 @@ def tts(
     model: str = ELEVENLABS_MODEL,
     previous_text: Optional[str] = None,
     next_text: Optional[str] = None,
+    voice_settings: Optional[dict] = None,
 ) -> None:
     """Synthesizes one piece of text to an mp3 file.
 
@@ -116,7 +119,7 @@ def tts(
         response = requests.post(
             f"{ELEVENLABS_URL}/{voice_id}",
             headers={"xi-api-key": key, "Content-Type": "application/json"},
-            json=_body(text, model, previous_text, next_text),
+            json=_body(text, model, previous_text, next_text, voice_settings),
             timeout=ELEVENLABS_TIMEOUT,
         )
         response.raise_for_status()

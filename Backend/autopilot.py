@@ -20,6 +20,7 @@ from autopilot_config import (
     AutopilotConfig,
     ConfigError,
     choose_opening_arm,
+    choose_persona,
     choose_register,
     next_format,
     slot_available,
@@ -126,6 +127,7 @@ def build_payload(
     register: str = EXPLAINER,
     anchor: str = "",
     opening_arm: str = OPENING_CONTROL,
+    persona: str = "",
 ) -> dict:
     """Same shape as Frontend/app.js sends, plus upload flag and thread count."""
     return {
@@ -141,6 +143,8 @@ def build_payload(
         # The opening-line experiment's arm. Stored with the job so the results
         # can be read back from generation_jobs.payload against video_metrics.
         "openingArm": opening_arm,
+        # The persona telling it (persona.PERSONAS key), "" for the narrator.
+        "persona": persona,
         "aiModel": config.model,
         "voice": config.voice,
         "paragraphNumber": config.paragraphs,
@@ -507,18 +511,20 @@ class Autopilot:
             )
 
             opening_arm = choose_opening_arm(self.config, format_name, register)
+            persona = choose_persona(self.config, format_name)
             job = queue_topic_job(
                 session,
                 topic,
                 build_payload(
                     self.config, topic.subject, format_name, register, anchor,
-                    opening_arm,
+                    opening_arm, persona,
                 ),
                 now=now,
             )
             log(
                 f"[+] Autopilot queued {format_name} {register} job {job.id} "
-                f"for topic '{topic.subject}' (opening: {opening_arm})",
+                f"for topic '{topic.subject}' (opening: {opening_arm}"
+                f"{', persona: ' + persona if persona else ''})",
                 "success",
             )
             return job.id

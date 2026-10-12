@@ -108,6 +108,7 @@ def process_next_job() -> bool:
                         "claudeUsd": result.claude_usd,
                         "factCheck": result.fact_check,
                         "videoReview": result.video_review,
+                        "persona": result.persona,
                         "reviewReasons": result.review_reasons,
                     },
                     commit=False,
