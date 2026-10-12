@@ -321,7 +321,7 @@ def test_an_empty_balance_alerts_the_owner_and_skips_the_fallback(env):
     assert env.sleeps == []
     assert len(env.alerts) == 1
     assert "credit balance" in env.alerts[0]
-    assert "local model" in env.alerts[0]
+    assert "every step needs Claude" in env.alerts[0]
     assert "Top up" in env.alerts[0]
 
 
@@ -362,7 +362,7 @@ def test_a_rejected_key_is_reported_as_the_key(env):
     writer.write_with_model("prompt")
 
     assert "API key" in env.alerts[0]
-    assert "local model" in env.alerts[0]
+    assert "every step needs Claude" in env.alerts[0]
 
 
 def test_an_ordinary_bad_request_is_not_an_account_problem(env):
@@ -411,31 +411,30 @@ def test_write_creative_reports_the_fallback_model_that_wrote(env, monkeypatch):
     monkeypatch.setattr(writer, "write_with_model", lambda prompt: writer.Written("By Sonnet.", FALLBACK))
     seen = []
 
-    assert gpt.write_creative("p", "llama3.1:8b", report_model=seen.append) == "By Sonnet."
+    assert gpt.write_creative("p", "any", report_model=seen.append) == "By Sonnet."
     assert seen == [FALLBACK]
 
 
 def test_a_long_script_reports_its_weakest_section(env, monkeypatch):
-    # Opus, then Sonnet, then llama: reporting the first that was not Opus
-    # would file a part-llama script as Sonnet's.
+    # Opus, then Sonnet, then Opus again: reporting the last writer would file
+    # a part-Sonnet script as Opus's.
     drafts = iter(
         [
             writer.Written("Opus prose.", PRIMARY),
             writer.Written("Sonnet prose.", FALLBACK),
-            None,
+            writer.Written("Opus again.", PRIMARY),
         ]
     )
     monkeypatch.setattr(writer, "write_with_model", lambda prompt: next(drafts))
-    monkeypatch.setattr(gpt, "generate_response", lambda p, m: "Local prose.")
     monkeypatch.setattr(gpt, "generate_outline", lambda *a, **k: ["One", "Two", "Three"])
     seen = []
 
     gpt.generate_long_script(
-        "s", 150, "llama3.1:8b", "en_us_001", "", section_count=3,
+        "s", 150, "any", "en_us_001", "", section_count=3,
         report_model=seen.append,
     )
 
-    assert seen == ["llama3.1:8b"]
+    assert seen == [FALLBACK]
 
 
 def test_a_long_script_part_sonnet_is_reported_as_sonnet(env, monkeypatch):

@@ -506,7 +506,7 @@ class Autopilot:
             try:
                 response = self.generate(prompt, self.config.model)
             except Exception as err:
-                last_problem = f"Ollama error: {err}"
+                last_problem = f"model error: {err}"
                 log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
                 continue
             parsed = extract_json_object(response)
@@ -529,7 +529,7 @@ class Autopilot:
                 last_problem = f"subject has {word_count} words: '{subject}'"
                 log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
                 continue
-            topic = add_topic(session, subject, self.config.niche, "ollama")
+            topic = add_topic(session, subject, self.config.niche, "claude")
             if topic is None:
                 last_problem = f"duplicate topic '{normalize_subject(subject)}'"
                 log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")

@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("PEXELS_API_KEY", "test-key")
 os.environ.setdefault("TIKTOK_SESSION_ID", "test-session")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 os.environ.setdefault("IMAGEMAGICK_BINARY", "/bin/echo")
 os.environ.setdefault("DATABASE_URL", "sqlite:///moneyprinter_cors_origins_bootstrap.db")
 

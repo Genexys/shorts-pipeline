@@ -9,7 +9,7 @@ from sqlalchemy import and_, case, select
 
 from db import SessionLocal, init_db
 from formats import FORMATS
-from gpt import list_ollama_models
+from gpt import list_models
 from logstream import log
 from models import Topic
 from repository import (
@@ -54,25 +54,17 @@ PORT = 8080
 
 @app.route("/api/models", methods=["GET"])
 def models():
-    try:
-        available_models, default_model = list_ollama_models()
-        return jsonify(
-            {
-                "status": "success",
-                "models": available_models,
-                "default": default_model,
-            }
-        )
-    except Exception as err:
-        log(f"[-] Error fetching Ollama models: {str(err)}", "error")
-        return jsonify(
-            {
-                "status": "error",
-                "message": "Could not fetch Ollama models. Is Ollama running?",
-                "models": [os.getenv("OLLAMA_MODEL", "llama3.1:8b")],
-                "default": os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
-            }
-        )
+    # The Claude models the pipeline writes with: SCRIPT_MODEL first, then its
+    # fallback. Shown in the UI for the record; the choice there no longer
+    # changes who writes.
+    available_models, default_model = list_models()
+    return jsonify(
+        {
+            "status": "success",
+            "models": available_models,
+            "default": default_model,
+        }
+    )
 
 
 @app.route("/api/generate", methods=["POST"])

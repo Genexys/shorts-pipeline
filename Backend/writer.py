@@ -7,11 +7,16 @@ one that merely sounds like it is exactly the discrimination a small model
 lacks. The music theme belongs here too: seven subjects to choose between,
 on which the local model was inconsistent.
 
-Optional by construction. With no ANTHROPIC_API_KEY the pipeline runs entirely
-on Ollama, as it always has.
+Since 2026-10-12 every model call goes here; the local model is gone. It
+used to write whatever Claude could not. On 2026-09-28 that was five of a
+long video's eight sections and its search terms, and the video went out
+with a fabricated claim about a real doctor. A step Claude cannot do now
+fails, and that job's slot passes, which costs less than a wrong video in
+the channel's name. ANTHROPIC_API_KEY is required.
 """
 
 import os
+import threading
 import time
 from typing import Dict, Iterable, NamedTuple, Optional, Tuple
 
@@ -31,13 +36,13 @@ DEFAULT_MODEL = "claude-opus-5-5"
 # what Claude Opus 5 did with no setting at all, so moving model without this
 # would also have quietly cut the thinking behind every script. Every current
 # Claude model accepts it; Claude Haiku 4.5 does not, so a SCRIPT_MODEL set to
-# that would fail and go to the local model.
+# that would fail every call.
 EFFORT = "high"
 # When the model's safety classifiers decline a request, the API re-runs it on
 # the model Anthropic recommends for that kind of refusal, in the same call.
 # Claude Opus 5.5 added biology to the categories it declines, and this channel
 # is half biology — horned lizards, opossums, onion chemistry. Without it a false
-# positive costs the retry below and then goes to the local model.
+# positive costs the retry below and then the step.
 SERVER_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Asked only when the primary is overloaded or down. Sonnet is a step down from
 # Opus and a long way up from the 8B model. On 2026-09-28 the drop went from
@@ -47,6 +52,25 @@ SERVER_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 DEFAULT_FALLBACK_MODEL = "claude-sonnet-5-5"
 MAX_TOKENS = 16000
 REQUEST_TIMEOUT_SECONDS = 120
+
+# Dollars per million input and output tokens, from Anthropic's price list on
+# 2026-10-12. Used only to log what each call cost and to total it per video;
+# the console's usage page is the bill. A model missing here is logged with its
+# tokens and no price rather than a wrong one.
+PRICES_PER_MTOK = {
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-opus-5": (5.0, 25.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+}
+
+# What the calls since the last reset_spend() cost, in dollars. The worker runs
+# one job at a time, so a reset at the start of a job and a read at the end give
+# that video's bill. The footage check calls from its own client and reports
+# here too. Guarded because it batches its requests.
+_spend_lock = threading.Lock()
+_spent_usd = 0.0
 
 # How long to wait before asking the primary again while it is overloaded or
 # unreachable. On 2026-09-28 claude-opus-5 answered 529 overloaded_error
@@ -234,12 +258,60 @@ def _alert_account_problem(err: Exception) -> None:
             )
         send_telegram(
             f"⚠️ {problem}\n"
-            "Scripts are now being written by the local model.\n"
+            "No video can be written until this is fixed: every step needs Claude.\n"
             f"{action}\n\n"
             f"{scrub(str(err))[:500]}"
         )
     except Exception as alert_err:
         log(f"[-] Could not send the account alert: {scrub(str(alert_err))}", "warning")
+
+
+def price_of(model: str, input_tokens: int, output_tokens: int) -> Optional[float]:
+    """Dollars for one call, or None for a model with no known price."""
+    prices = next(
+        (PRICES_PER_MTOK[name] for name in sorted(PRICES_PER_MTOK, key=len, reverse=True)
+         if (model or "").startswith(name)),
+        None,
+    )
+    if prices is None:
+        return None
+    return (input_tokens * prices[0] + output_tokens * prices[1]) / 1_000_000
+
+
+def record_usage(model: str, usage, purpose: str = "") -> None:
+    """Logs one call's tokens and cost, and adds it to the running total.
+
+    Never raises: a response without usage, or a model with no price, costs the
+    log line its number, not the call its result.
+    """
+    global _spent_usd
+    try:
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        input_tokens += int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        input_tokens += int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        return
+    cost = price_of(model, input_tokens, output_tokens)
+    label = f" for {purpose}" if purpose else ""
+    if cost is None:
+        log(f"[$] {model}{label}: {input_tokens} in, {output_tokens} out.", "info")
+        return
+    with _spend_lock:
+        _spent_usd += cost
+    log(f"[$] {model}{label}: {input_tokens} in, {output_tokens} out, ${cost:.3f}.", "info")
+
+
+def reset_spend() -> None:
+    global _spent_usd
+    with _spend_lock:
+        _spent_usd = 0.0
+
+
+def spent() -> float:
+    """Dollars recorded since the last reset_spend()."""
+    with _spend_lock:
+        return round(_spent_usd, 4)
 
 
 def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[Written], str]:
@@ -269,6 +341,11 @@ def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[Writte
             _alert_account_problem(err)
         return None, kind
 
+    served = getattr(response, "model", None)
+    served = served if isinstance(served, str) and served else model
+    # Billed whether or not the text turns out usable, so recorded first.
+    record_usage(served, getattr(response, "usage", None))
+
     if getattr(response, "stop_reason", None) == "refusal":
         return None, REFUSED
 
@@ -278,8 +355,6 @@ def _attempt(model: str, prompt: str, max_retries: int) -> Tuple[Optional[Writte
     if not text:
         log(f"[!] {model} returned nothing usable.", "warning")
         return None, FAILED
-    served = getattr(response, "model", None)
-    served = served if isinstance(served, str) and served else model
     if served != model:
         log(f"[!] {model} declined this one; {served} answered in its place.", "warning")
     return Written(text, served), WROTE
@@ -327,7 +402,7 @@ def _ask(model: str, prompt: str, patient: bool) -> Tuple[Optional[Written], str
     written, kind = once(f"{RETRY_PREAMBLE}\n{prompt}")
     if kind == REFUSED:
         log(
-            f"[!] {model} declined it twice; the local model writes this one.",
+            f"[!] {model} declined it twice.",
             "warning",
         )
     return written, kind
@@ -339,21 +414,21 @@ def write_with_model(prompt: str) -> Optional[Written]:
     Never raises. The primary is waited out through an overload, then the
     fallback model is asked; an account problem tells the owner and skips the
     fallback, which bills the same account. A missing key, a refusal that
-    survives the retry or anything else returns None, and the caller falls back
-    to the local model — a video written by Ollama beats no video.
+    survives the retry or anything else returns None, and the caller decides
+    what that step does without a model: gpt.generate_response raises.
     """
     if not is_configured():
         return None
 
     primary = model_name()
     fallback = fallback_model_name()
-    stand_in = fallback or "the local model"
+    stand_in = f"{fallback} writes this one" if fallback else "this step has no model"
 
     remaining = _down_until.get(primary, float("-inf")) - _clock()
     if remaining > 0:
         log(
-            f"[!] {primary} ran out of retries recently; {stand_in} writes this "
-            f"one, and {primary} is tried again in {int(remaining // 60) + 1} min.",
+            f"[!] {primary} ran out of retries recently; {stand_in}, "
+            f"and {primary} is tried again in {int(remaining // 60) + 1} min.",
             "warning",
         )
         kind = OUTAGE
@@ -365,8 +440,8 @@ def write_with_model(prompt: str) -> Optional[Written]:
             _down_until[primary] = _clock() + OUTAGE_MEMORY_SECONDS
             log(
                 f"[!] {primary} still unavailable after "
-                f"{len(OUTAGE_BACKOFF_SECONDS) + 1} tries; {stand_in} writes this "
-                f"one, and every call in the next {OUTAGE_MEMORY_SECONDS // 60} min.",
+                f"{len(OUTAGE_BACKOFF_SECONDS) + 1} tries; {stand_in}, "
+                f"and so does every call in the next {OUTAGE_MEMORY_SECONDS // 60} min.",
                 "warning",
             )
 
@@ -377,7 +452,7 @@ def write_with_model(prompt: str) -> Optional[Written]:
     if written:
         return written
     if kind == OUTAGE:
-        log(f"[!] {fallback} unavailable too; the local model writes this one.", "warning")
+        log(f"[!] {fallback} unavailable too; this step has no model.", "warning")
     return None
 
 

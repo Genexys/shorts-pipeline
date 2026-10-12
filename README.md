@@ -12,7 +12,7 @@ Sponsored by Post Bridge
 
 Automate the creation of YouTube Shorts by providing a video topic.
 
-MoneyPrinter is Ollama-first: script generation and metadata are fully powered by local Ollama models.
+Every model call (topics, scripts, search terms, metadata) goes to the Claude API. `ANTHROPIC_API_KEY` is required.
 
 MoneyPrinter now uses a DB-backed generation queue (API + worker + Postgres in Docker) for reliable, restart-safe processing.
 
@@ -38,12 +38,7 @@ Docs are centralized in [`docs/`](docs/README.md):
 
 ### Which AI provider does MoneyPrinter use?
 
-MoneyPrinter is fully Ollama-based. Start Ollama, pull a model, and select the model in the UI.
-
-```bash
-ollama serve
-ollama pull llama3.1:8b
-```
+The Claude API, for every model call. Set `ANTHROPIC_API_KEY` in `.env`; `SCRIPT_MODEL` picks the model (default `claude-opus-5-5`). See "The writer" in [docs/configuration.md](docs/configuration.md).
 
 ### How do I get the TikTok session ID?
 

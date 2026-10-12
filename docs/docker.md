@@ -5,31 +5,28 @@
 | Service | Image | Role |
 |---|---|---|
 | `postgres` | `postgres:16-alpine` | job queue, events, topics |
-| `ollama` | `ollama/ollama` | LLM server (CPU), models in the `ollama_models` volume, `OLLAMA_KEEP_ALIVE=2m` |
-| `ollama-init` | `ollama/ollama` | one-shot `ollama pull $OLLAMA_MODEL`, exits when done |
 | `api` | built from `Dockerfile` | Flask API on `127.0.0.1:8080` |
 | `worker` | same image | executes generation jobs, uploads to YouTube |
 | `autopilot` | same image | schedules topics and jobs, Telegram reports, output cleanup |
 | `frontend` | same image | static UI on `127.0.0.1:8001` |
 
-`api`, `worker` and `autopilot` start only after Postgres is healthy and `ollama-init` has finished; `worker` and `autopilot` also wait until the API answers `GET /api/topics`, which guarantees the schema exists.
+`api`, `worker` and `autopilot` start only after Postgres is healthy; `worker` and `autopilot` also wait until the API answers `GET /api/topics`, which guarantees the schema exists.
 
-`OLLAMA_KEEP_ALIVE=2m` unloads the model between the script and the metadata calls, which frees RAM during rendering but means the model is read from disk again for the metadata step; raise `OLLAMA_TIMEOUT` if that step times out.
+There is no model server in the stack. Every model call goes to the Claude API (see "The writer" in docs/configuration.md); the `ollama` and `ollama-init` services were removed on 2026-10-12. On a host that ran them before, `docker compose ... up -d --remove-orphans` removes the old containers. The `ollama_models` volume holding the pulled weights (several GB) is left alone; `docker volume rm shorts-pipeline_ollama_models` frees it.
 
 ## Prerequisites
 
 - Docker Engine with the compose plugin (`docker compose version` prints v2.x).
-- `.env` created from `.env.example` and filled in. The compose file overrides `OLLAMA_BASE_URL`, `DATABASE_URL`, `IMAGEMAGICK_BINARY` and the two `YOUTUBE_*_FILE` paths for the containers, so leave those alone.
-- Memory: `llama3.1:8b` needs about 6 GB of RAM for Ollama alone; use `OLLAMA_MODEL=llama3.2:3b` on an 8 GB machine.
+- `.env` created from `.env.example` and filled in. The compose file overrides `DATABASE_URL`, `IMAGEMAGICK_BINARY` and the two `YOUTUBE_*_FILE` paths for the containers, so leave those alone.
+- `ANTHROPIC_API_KEY` in `.env`: the worker refuses to start without it.
 
 ## First start
 
 ```bash
-cp .env.example .env            # edit: TIKTOK_SESSION_ID, PEXELS_API_KEY, AUTOPILOT_NICHE, TELEGRAM_*, TZ, POSTGRES_PASSWORD
+cp .env.example .env            # edit: ANTHROPIC_API_KEY, TIKTOK_SESSION_ID, PEXELS_API_KEY, AUTOPILOT_NICHE, TELEGRAM_*, TZ, POSTGRES_PASSWORD
 mkdir -p secrets output Songs
 # copy client_secret.json and youtube_token.json into secrets/ (see docs/deploy.md)
 docker compose up -d --build
-docker compose logs -f ollama-init   # first model pull, a few minutes
 docker compose logs -f autopilot worker
 ```
 
@@ -58,7 +55,6 @@ curl -X POST http://localhost:8080/api/topics -H "Content-Type: application/json
 | `./output/` | `worker`, `autopilot` | `<job_id>.mp4` archives and `<job_id>.jpg` thumbnails, pruned after `OUTPUT_RETENTION_DAYS` |
 | `./Songs/` | `api`, `worker` | background music uploaded via the UI |
 | `postgres_data` | `postgres` | database |
-| `ollama_models` | `ollama` | pulled models |
 
 `temp/` and `subtitles/` live inside the worker container and are cleared per job.
 
@@ -74,35 +70,17 @@ docker compose down                                # stop (volumes are kept)
 
 Pause the autopilot without stopping anything else: set `AUTOPILOT_ENABLED=false` in `.env`, then `docker compose up -d autopilot`. Finished jobs are still reported to Telegram.
 
-Change the model: edit `OLLAMA_MODEL` in `.env`, then `docker compose up -d` (ollama-init pulls the new model, the app services restart).
+Change the model: edit `SCRIPT_MODEL` (and `SCRIPT_FALLBACK_MODEL`) in `.env`, then `docker compose up -d` so the app services pick it up.
 
 ## Local runs on a Mac
 
-Docker Desktop gives the `ollama` container no GPU, and CPU inference inside its VM is far slower than native Ollama on the same machine: measured 0.3 tokens/s for `llama3.2:3b` with every vCPU busy. Jobs then fail with `Failed to connect to Ollama: timed out`. For local runs keep `ollama serve` running on the Mac, pull the model natively (`ollama pull llama3.1:8b`), and point the app containers at it with an override file:
-
-```yaml
-# compose.mac.yml (untracked)
-services:
-  api:
-    environment:
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
-  worker:
-    environment:
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
-  autopilot:
-    environment:
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
-```
-
-```bash
-docker compose -f docker-compose.yml -f compose.mac.yml up -d --build
-```
-
-The `ollama` and `ollama-init` services still start and pull the model but sit idle. None of this applies to a Linux VPS, where Ollama runs natively inside the container.
+The stack runs on a Mac as it is; with no model server it no longer needs the
+native-Ollama override this section used to describe. Rendering stays on the
+CPU, since Docker Desktop's Linux VM has no path to VideoToolbox.
 
 ## Local runs on Windows (NVIDIA GPU)
 
-Windows is the better host for unattended runs: WSL2 exposes the NVIDIA GPU to Linux containers, so both Ollama inference and video encoding run on hardware. A Mac cannot do this at all — VideoToolbox is a macOS framework and the containers live in Docker Desktop's Linux VM, which has no path to it.
+Windows is the better host for unattended runs: WSL2 exposes the NVIDIA GPU to Linux containers, so video encoding runs on hardware. A Mac cannot do this at all — VideoToolbox is a macOS framework and the containers live in Docker Desktop's Linux VM, which has no path to it.
 
 Prerequisites: the NVIDIA driver installed on Windows (not inside WSL — WSL uses the Windows driver), Docker Desktop on the WSL2 backend, and a working GPU passthrough. Verify passthrough before anything else:
 
@@ -116,7 +94,7 @@ Then start the stack with the tracked override:
 docker compose -f docker-compose.yml -f compose.win.yml up -d --build
 ```
 
-`compose.win.yml` reserves the GPU for `ollama` and `worker`, and sets `FFMPEG_BINARY=/usr/bin/ffmpeg` on the worker. That last part is load-bearing: MoviePy defaults to the `imageio-ffmpeg` binary, which is built without nvenc, so without it the GPU reservation is a silent no-op and every encode quietly stays on the CPU.
+`compose.win.yml` reserves the GPU for `worker`, and sets `FFMPEG_BINARY=/usr/bin/ffmpeg` on the worker. That last part is load-bearing: MoviePy defaults to the `imageio-ffmpeg` binary, which is built without nvenc, so without it the GPU reservation is a silent no-op and every encode quietly stays on the CPU.
 
 Verify the encoder actually answers before changing any render settings:
 
@@ -150,8 +128,7 @@ docker compose -f docker-compose.yml -f compose.win.yml up -d --force-recreate w
 
 ## Troubleshooting
 
-- `ollama-init` exits non-zero: no internet access or unknown model name; `docker compose logs ollama-init`.
-- `api` never becomes healthy: `docker compose logs api`; usually a missing required variable (`TIKTOK_SESSION_ID`, `PEXELS_API_KEY`).
+- `api` never becomes healthy: `docker compose logs api`; usually a missing required variable (`ANTHROPIC_API_KEY`, `TIKTOK_SESSION_ID`, `PEXELS_API_KEY`).
 - `autopilot` restarts in a loop with `configuration error`: `AUTOPILOT_NICHE` is empty or `AUTOPILOT_WINDOW` is invalid.
 - Upload skipped with `No valid YouTube credentials`: `secrets/youtube_token.json` is missing or invalid; recreate it on a machine with a browser (docs/deploy.md). If the file is there on the host, the container has an empty mount instead — see "Empty mounts after a reboot" above.
 - `worker` or `autopilot` log `refuses to start`: `REQUIRE_MOUNTS` is on and the container cannot see its token or songs. Check from inside, `docker compose exec worker ls /app/secrets /app/Songs`, then recreate the container.

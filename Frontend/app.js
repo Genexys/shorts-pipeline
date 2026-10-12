@@ -66,8 +66,8 @@ function setModelOptions(models, preferredModel) {
   }
 }
 
-async function loadOllamaModels(reuseEnabled) {
-  const fallbackModel = localStorage.getItem("aiModelValue") || "llama3.1:8b";
+async function loadModels(reuseEnabled) {
+  const fallbackModel = localStorage.getItem("aiModelValue") || "claude-opus-5-5";
 
   try {
     const data = await apiRequest("/api/models", {
@@ -95,14 +95,14 @@ async function loadOllamaModels(reuseEnabled) {
 
     if (models.length === 0) {
       setModelOptions([defaultModel], preferredModel);
-      showToast("No Ollama models found. Pull one with: ollama pull llama3.1:8b", "error");
+      showToast("The backend listed no Claude models. Check SCRIPT_MODEL.", "error");
       return;
     }
 
     setModelOptions(models, preferredModel);
   } catch {
     setModelOptions([fallbackModel], fallbackModel);
-    showToast("Could not load Ollama models. Is backend/Ollama running?", "error");
+    showToast("Could not load the model list. Is the backend running?", "error");
   }
 }
 
@@ -391,7 +391,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const reuseEnabled =
     localStorage.getItem("reuseChoicesToggleValue") === "true";
 
-  await loadOllamaModels(reuseEnabled);
+  await loadModels(reuseEnabled);
 
   aiModel.addEventListener("change", (e) => {
     localStorage.setItem("aiModelValue", e.target.value);

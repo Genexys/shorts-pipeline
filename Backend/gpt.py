@@ -3,7 +3,6 @@ import os
 import json
 import random
 import unicodedata
-from ollama import Client, ResponseError
 
 from dotenv import load_dotenv
 from logstream import log
@@ -15,80 +14,53 @@ from utils import ENV_FILE, MUSIC_THEMES
 # Load environment variables
 load_dotenv(ENV_FILE)
 
-# Set environment variables
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "180"))
-
-# Reasoning models emit a long chain of thought before answering, and put it in
-# a separate `thinking` field that never reaches `content`. Measured on this
-# box: qwen3.5:4b spent 521 seconds producing 12 151 characters of reasoning
-# and returned an empty answer, where the same request with thinking off took
-# 17 seconds. The pipeline needs the answer, not the reasoning. Models that
-# cannot reason accept the flag and ignore it, so it is sent unconditionally.
-THINKING_DISABLED = os.getenv("OLLAMA_THINKING", "").strip().lower() in (
-    "",
-    "0",
-    "off",
-    "false",
-    "no",
-)
+class ModelUnavailable(RuntimeError):
+    """No Claude model answered: no key, the balance ran out, or an outage
+    outlasted the fallback."""
 
 
-def _ollama_client() -> Client:
-    return Client(host=OLLAMA_BASE_URL, timeout=OLLAMA_TIMEOUT)
+# Who answered the last generate_response call, for write_creative to report.
+# The worker runs one job at a time and these calls are sequential within it.
+_served_by: Optional[str] = None
 
 
-def _extract_model_name(model_obj) -> str:
-    if hasattr(model_obj, "model") and getattr(model_obj, "model"):
-        return str(getattr(model_obj, "model")).strip()
-    if hasattr(model_obj, "name") and getattr(model_obj, "name"):
-        return str(getattr(model_obj, "name")).strip()
-    if isinstance(model_obj, dict):
-        return str(model_obj.get("model") or model_obj.get("name") or "").strip()
-    return ""
+def list_models() -> Tuple[List[str], str]:
+    """The Claude models the pipeline writes with, and the one it asks first."""
+    primary = writer.model_name()
+    models = [primary] + [m for m in (writer.fallback_model_name(),) if m]
+    return models, primary
 
 
-def list_ollama_models() -> Tuple[List[str], str]:
-    """
-    Returns available Ollama model names and configured default model.
+def generate_response(prompt: str, ai_model: str = "") -> str:
+    """One completion from Claude.
+
+    Every model call in the pipeline comes here or through write_creative. The
+    local model that used to answer here is gone (see writer.py), so with no
+    Claude model available this raises instead of producing text.
+
+    Args:
+        prompt (str): The whole request.
+        ai_model (str): Ignored. Kept so the many callers that pass the job's
+            model keep working; writer.SCRIPT_MODEL decides.
 
     Returns:
-        Tuple[List[str], str]: (available model names, default model)
+        str: The model's reply.
+
+    Raises:
+        ModelUnavailable: If no Claude model answered.
     """
-    try:
-        response = _ollama_client().list()
-    except Exception as err:
-        raise RuntimeError(f"Failed to fetch Ollama models: {err}") from err
-
-    models = []
-    if hasattr(response, "models") and getattr(response, "models") is not None:
-        models = list(getattr(response, "models"))
-    elif isinstance(response, dict):
-        models = response.get("models") or []
-
-    model_names = [_extract_model_name(model) for model in models]
-    model_names = [name for name in model_names if name]
-
-    unique_names = list(dict.fromkeys(model_names))
-
-    if OLLAMA_MODEL and OLLAMA_MODEL in unique_names:
-        default_model = OLLAMA_MODEL
-    elif unique_names:
-        default_model = unique_names[0]
-    else:
-        default_model = OLLAMA_MODEL if OLLAMA_MODEL else ""
-
-    return unique_names, default_model
-
-
-def _chat(client, model_name: str, messages: list, disable_thinking):
-    """One chat call, optionally asking the model not to think out loud."""
-    if disable_thinking is None:
-        return client.chat(model=model_name, messages=messages, stream=False)
-    return client.chat(
-        model=model_name, messages=messages, stream=False, think=not disable_thinking
-    )
+    global _served_by
+    _served_by = None
+    written = writer.write_with_model(prompt)
+    if written is None:
+        if not writer.is_configured():
+            raise ModelUnavailable("ANTHROPIC_API_KEY is not set; every step needs Claude.")
+        raise ModelUnavailable(
+            f"No Claude model answered ({writer.model_name()}"
+            f"{', then ' + writer.fallback_model_name() if writer.fallback_model_name() else ''})."
+        )
+    _served_by = written.model
+    return written.text
 
 
 def write_creative(
@@ -96,104 +68,22 @@ def write_creative(
     ai_model: str,
     report_model: Optional[Callable[[str], None]] = None,
 ) -> str:
-    """A completion for the calls where judgement shows: topic, script, music theme.
+    """generate_response, and tell `report_model` which Claude model wrote it.
 
-    Prefers the stronger model when one is configured and falls back to Ollama
-    on any failure. Everything else in the pipeline is structured extraction
-    and stays local.
+    The writer says which model answered, since the fallback model stands in
+    for the primary when that one is overloaded, and the API's refusal fallback
+    can answer in its place. Recording the model asked for instead is how every
+    script once came to be filed under llama3.1:8b whoever wrote it.
 
-    `report_model` is told which model actually wrote it. Without it the caller
-    can only record what it asked for, which is how every script in the
-    database came to be filed under llama3.1:8b regardless of who wrote it —
-    and that is exactly the field we need when comparing retention by author.
-    The writer says which Claude model answered, since the fallback model
-    stands in for the primary when that one is overloaded.
+    Raises:
+        ModelUnavailable: If no Claude model answered.
     """
-    written = writer.write_with_model(prompt)
-    if written:
-        if report_model:
-            report_model(written.model)
-        return written.text
+    global _served_by
+    _served_by = None
+    text = generate_response(prompt, ai_model)
     if report_model:
-        report_model((ai_model or "").strip() or OLLAMA_MODEL)
-    return generate_response(prompt, ai_model)
-
-
-def generate_response(prompt: str, ai_model: str) -> str:
-    """
-    Generate a script for a video, depending on the subject of the video.
-
-    Args:
-        video_subject (str): The subject of the video.
-        ai_model (str): The AI model to use for generation.
-
-
-    Returns:
-
-        str: The response from the AI model.
-
-    """
-
-    model_name = (ai_model or "").strip() or OLLAMA_MODEL
-
-    try:
-        client = _ollama_client()
-        messages = [{"role": "user", "content": prompt}]
-        try:
-            try:
-                response = _chat(client, model_name, messages, THINKING_DISABLED)
-            except TypeError:
-                # An ollama client too old to know the parameter. Reasoning
-                # models will be slow rather than broken.
-                response = _chat(client, model_name, messages, None)
-        except ResponseError as err:
-            if err.status_code == 404:
-                try:
-                    response = client.generate(
-                        model=model_name, prompt=prompt, stream=False
-                    )
-                except ResponseError as fallback_err:
-                    if (
-                        fallback_err.status_code == 404
-                        and "not found" in str(fallback_err).lower()
-                    ):
-                        available_models, _ = list_ollama_models()
-                        available = (
-                            ", ".join(available_models) if available_models else "none"
-                        )
-                        raise RuntimeError(
-                            f"Ollama model '{model_name}' is not installed. Available models: {available}. "
-                            f"Install it with: ollama pull {model_name}"
-                        ) from fallback_err
-                    raise
-            else:
-                raise
-    except RuntimeError:
-        raise
-    except Exception as err:
-        raise RuntimeError(f"Failed to connect to Ollama: {err}") from err
-
-    content = ""
-    if hasattr(response, "message") and getattr(response, "message") is not None:
-        message = getattr(response, "message")
-        if hasattr(message, "content") and getattr(message, "content"):
-            content = str(getattr(message, "content")).strip()
-        elif isinstance(message, dict):
-            content = str(message.get("content") or "").strip()
-
-    if not content:
-        if hasattr(response, "response") and getattr(response, "response"):
-            content = str(getattr(response, "response")).strip()
-        elif isinstance(response, dict):
-            content = (
-                str(response.get("message", {}).get("content") or "")
-                or str(response.get("response") or "")
-            ).strip()
-
-    if not content:
-        raise RuntimeError("Ollama returned an empty response.")
-
-    return content
+        report_model(_served_by or writer.model_name())
+    return text
 
 
 # How something came to be known. Not every subject has that story; see
@@ -985,7 +875,13 @@ def get_search_terms(
     """
 
     # Generate search terms
-    response = write_creative(prompt, ai_model)
+    try:
+        response = write_creative(prompt, ai_model)
+    except ModelUnavailable as err:
+        # The script is already written by now. An empty list hands the caller
+        # its usual fallback rather than failing a job that is nearly done.
+        log(f"[!] No model for the search terms ({err}).", "warning")
+        return []
     log(response, "info")
 
     search_terms = parse_string_array(response)
@@ -1697,8 +1593,8 @@ def keywords_from_subject(
 ) -> List[str]:
     """Content words of a topic, in order, for when the model returns no tags.
 
-    Pure and deterministic: this is the floor under an Ollama answer that came
-    back without usable tags, and a video with four topical keywords is worth
+    Pure and deterministic: this is the floor under a model answer that came
+    back without usable tags, or no answer at all, and a video with four topical keywords is worth
     considerably more than one with none.
     """
     words = ascii_words(subject)
@@ -1789,8 +1685,9 @@ def append_hashtags(description: str, hashtags: List[str]) -> str:
     return f"{body[:room]}\n\n{block}"
 
 
-# How much of the script the local model sees when it has to write the
-# metadata. Five keywords and two sentences of summary do not need eight hundred
+# How much of the script the local model saw when it had to write the
+# metadata; unused since the local model went on 2026-10-12, and kept for the
+# excerpt helper's tests. Five keywords and two sentences of summary do not need eight hundred
 # words of context, and asking an 8B model for them with that much cost the tags
 # outright: both long videos published on 2026-09-14 came back with a valid
 # title and description and no tags at all, while every Short that day — same
@@ -1894,22 +1791,23 @@ def generate_metadata(
     """
     Generate YouTube title, description and tags with a single JSON request.
 
-    Written by the stronger model, reading the whole script, when one is
-    configured. This was the local model's job on the grounds that metadata is
-    structured extraction, and the title and description are not: they are the
-    two claims every viewer reads, and the week of 2026-09-27 put more false
-    statements into them than into the narration (see METADATA_RULES). The
-    local model still writes them when the writer cannot, from the excerpt it
-    can manage.
+    Written by Claude, reading the whole script. This was the local model's job
+    on the grounds that metadata is structured extraction, and the title and
+    description are not: they are the two claims every viewer reads, and the
+    week of 2026-09-27 put more false statements into them than into the
+    narration (see METADATA_RULES). With no model the subject stands in, as it
+    does for an answer that is not JSON: plain, but nothing in it is invented.
 
     Returns:
         Tuple[str, str, List[str]]: validated (title, description, tags).
     """
-    response = writer.write(metadata_prompt(video_subject, script, format_label, True))
-    if not response:
+    try:
         response = generate_response(
-            metadata_prompt(video_subject, script, format_label, False), ai_model
+            metadata_prompt(video_subject, script, format_label, True), ai_model
         )
+    except ModelUnavailable as err:
+        log(f"[!] No model for the metadata ({err}).", "warning")
+        response = ""
 
     raw = extract_json_object(response)
     if raw is None:
@@ -1952,11 +1850,10 @@ def select_music_theme(
     """
     Picks a background-music theme for a script, by what it is about.
 
-    Asked of the stronger model, with Ollama as the fallback. On twenty recent
-    Shorts on 2026-10-05, llama3.1:8b gave two different themes for the same
-    script in seven of them, and twice filed a shower-curtain explainer under
-    the odd-research theme; Opus placed all twenty sensibly. Four bare moods
-    were within the local model's reach, seven subjects are not.
+    Asked of Claude. On twenty recent Shorts on 2026-10-05, llama3.1:8b gave
+    two different themes for the same script in seven of them, and twice filed
+    a shower-curtain explainer under the odd-research theme; Opus placed all
+    twenty sensibly.
 
     Best effort by design: the theme only decides which Songs/ subfolder is
     preferred, so an outage or a malformed answer must not fail a job that is

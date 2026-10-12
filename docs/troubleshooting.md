@@ -1,11 +1,11 @@
 # Troubleshooting
 
-## No Ollama models in dropdown
+## Jobs fail with "No Claude model answered" or "ANTHROPIC_API_KEY is not set"
 
-- Ensure Ollama is running: `ollama serve`
-- Ensure at least one model exists: `ollama list`
-- Pull a model if needed: `ollama pull llama3.1:8b`
-- Verify backend can reach Ollama base URL in `.env` (`OLLAMA_BASE_URL`)
+- Every model call goes to the Claude API; there is no local model to fall back to.
+- Check `ANTHROPIC_API_KEY` in `.env`, then recreate the containers so they read it.
+- Check the credit balance in the Anthropic console. When it runs out, the owner gets one Telegram message.
+- An overload is waited out for three and a half minutes, then `SCRIPT_FALLBACK_MODEL` is asked. See "The writer" in `docs/configuration.md`.
 
 ## Frontend cannot connect to backend
 

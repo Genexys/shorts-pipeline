@@ -10,7 +10,6 @@ Run:
 """
 
 import argparse
-import os
 import sys
 from typing import List, Optional
 
@@ -20,6 +19,7 @@ from db import SessionLocal, init_db
 from posts import POST_KINDS, available_kinds, generate_post
 from repository import get_research_sources, get_script, list_published_videos
 from utils import ENV_FILE
+import writer
 
 
 def resolve_video(session, video_id: Optional[str]) -> tuple[str, str, str]:
@@ -57,7 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--latest", action="store_true", help="explicit form of the default")
     parser.add_argument("--kind", choices=POST_KINDS, help="default: a random kind per post")
     parser.add_argument("--count", type=int, default=1, help="how many to draft (default 1)")
-    parser.add_argument("--model", help="override AUTOPILOT_MODEL / OLLAMA_MODEL")
     return parser
 
 
@@ -66,12 +65,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     init_db()
 
-    model = (
-        args.model
-        or os.getenv("AUTOPILOT_MODEL", "").strip()
-        or os.getenv("OLLAMA_MODEL", "").strip()
-        or "llama3.1:8b"
-    )
+    # Recorded with the post; Claude writes every one (writer.SCRIPT_MODEL).
+    model = writer.model_name()
 
     with SessionLocal() as session:
         try:

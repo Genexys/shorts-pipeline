@@ -431,53 +431,6 @@ def test_generate_script_without_research_forbids_specifics(monkeypatch):
 # -- reasoning models --------------------------------------------------------
 
 
-class _FakeChatClient:
-    """Records the kwargs of each chat call and returns a fixed answer."""
-
-    def __init__(self, calls, reject_think=False):
-        self.calls = calls
-        self.reject_think = reject_think
-
-    def chat(self, **kwargs):
-        if self.reject_think and "think" in kwargs:
-            raise TypeError("chat() got an unexpected keyword argument 'think'")
-        self.calls.append(kwargs)
-        return {"message": {"content": "an answer"}}
-
-
-def test_generate_response_asks_the_model_not_to_think(monkeypatch):
-    # qwen3.5:4b left to itself spent 521s on 12k characters of reasoning and
-    # returned an empty answer. The pipeline needs the answer.
-    calls: list = []
-    monkeypatch.setattr(gpt, "THINKING_DISABLED", True)
-    monkeypatch.setattr(gpt, "_ollama_client", lambda: _FakeChatClient(calls))
-
-    assert gpt.generate_response("hi", "qwen3.5:4b") == "an answer"
-    assert calls[0]["think"] is False
-
-
-def test_generate_response_can_leave_thinking_on(monkeypatch):
-    calls: list = []
-    monkeypatch.setattr(gpt, "THINKING_DISABLED", False)
-    monkeypatch.setattr(gpt, "_ollama_client", lambda: _FakeChatClient(calls))
-
-    gpt.generate_response("hi", "qwen3.5:4b")
-    assert calls[0]["think"] is True
-
-
-def test_generate_response_falls_back_for_an_old_client(monkeypatch):
-    # A client that predates the parameter must still work; reasoning models
-    # are then slow rather than broken.
-    calls: list = []
-    monkeypatch.setattr(gpt, "THINKING_DISABLED", True)
-    monkeypatch.setattr(
-        gpt, "_ollama_client", lambda: _FakeChatClient(calls, reject_think=True)
-    )
-
-    assert gpt.generate_response("hi", "llama3.1:8b") == "an answer"
-    assert "think" not in calls[0]
-
-
 # -- script length -----------------------------------------------------------
 
 
@@ -1274,9 +1227,9 @@ def test_metadata_excerpt_bounds_a_script_with_no_sentence_breaks():
     assert len(gpt.metadata_excerpt(script).split()) == gpt.METADATA_SCRIPT_WORDS
 
 
-def test_generate_metadata_does_not_send_the_whole_long_script(monkeypatch):
-    # Both long videos on 2026-09-14 came back with a title, a description and
-    # no tags; every Short that day got five to seven from the same prompt.
+def test_generate_metadata_reads_the_whole_long_script(monkeypatch):
+    # The excerpt was for the 8B model, which lost the tags on a long script.
+    # Claude reads all of it, so a title can name what the whole video is about.
     seen = {}
 
     def fake(prompt, model):
@@ -1288,8 +1241,20 @@ def test_generate_metadata_does_not_send_the_whole_long_script(monkeypatch):
 
     gpt.generate_metadata("subject", script, "model")
 
-    assert "word199" in seen["prompt"]
-    assert "word400" not in seen["prompt"]
+    assert "word799" in seen["prompt"]
+
+
+def test_generate_metadata_without_a_model_uses_the_subject(monkeypatch):
+    # Plain, but nothing in it is invented.
+    def unavailable(prompt, model):
+        raise gpt.ModelUnavailable("no model")
+
+    monkeypatch.setattr(gpt, "generate_response", unavailable)
+
+    title, description, tags = gpt.generate_metadata("Why the sea is salty", "A script.", "m")
+
+    assert title
+    assert tags  # derived from the subject
 
 
 def test_generate_metadata_logs_the_response_when_tags_are_unusable(monkeypatch, capsys):

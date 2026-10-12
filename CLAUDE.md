@@ -4,16 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MoneyPrinter automates YouTube Shorts creation from text topics. It uses Ollama for script generation, TikTok TTS for voiceover, Pexels for stock footage, and moviepy/ImageMagick for video composition. Output: a 9:16 vertical video (`output.mp4`).
+MoneyPrinter automates YouTube Shorts creation from text topics. It uses the Claude API for every model call (topic, script, search terms, metadata, source judge, footage check), ElevenLabs or TikTok TTS for voiceover, Pexels for stock footage, and moviepy/ImageMagick for video composition. Output: a 9:16 vertical video (`output.mp4`).
 
 ## Commands
 
 ### Setup
 ```bash
-cp .env.example .env        # then fill in API keys
+cp .env.example .env        # then fill in API keys (ANTHROPIC_API_KEY is required)
 uv sync                     # install dependencies
-ollama serve                # start Ollama (separate terminal)
-ollama pull llama3.1:8b     # pull default model
 ```
 
 ### Run (local)
@@ -27,10 +25,10 @@ python3 -m http.server 3000 --directory Frontend           # frontend on :3000
 ### Run (Docker)
 ```bash
 mkdir -p secrets output Songs      # secrets/: client_secret.json + youtube_token.json
-docker compose up -d --build       # postgres, ollama (+model pull), api :8080, worker, autopilot, frontend :8001
+docker compose up -d --build       # postgres, api :8080, worker, autopilot, frontend :8001
 docker compose logs -f autopilot worker
 ```
-Ports bind to 127.0.0.1 only; on a server use `ssh -L 8080:127.0.0.1:8080 -L 8001:127.0.0.1:8001`. See `docs/docker.md` and `docs/deploy.md`. On a Mac, Ollama inside Docker is too slow to finish a job; use the native-Ollama override described in the "Local runs on a Mac" section of docs/docker.md. On Windows with an NVIDIA GPU, use the tracked `compose.win.yml` override ("Local runs on Windows" in docs/docker.md) — it is the only host where hardware encoding is reachable from the containers.
+Ports bind to 127.0.0.1 only; on a server use `ssh -L 8080:127.0.0.1:8080 -L 8001:127.0.0.1:8001`. See `docs/docker.md` and `docs/deploy.md`. On Windows with an NVIDIA GPU, use the tracked `compose.win.yml` override ("Local runs on Windows" in docs/docker.md) — it is the only host where hardware encoding is reachable from the containers.
 
 ### Verify
 ```bash
@@ -54,7 +52,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
   → worker.py claims queued job
   → research.py: Firecrawl search → sources; knowledge.py: best pages read in full,
      verbatim facts stored (knowledge_pages, facts) and added to the brief
-  → gpt.py: generate_script() via Ollama
+  → gpt.py: generate_script() via Claude (writer.py; no local model)
   → gpt.py: get_search_terms() → JSON keywords
   → search.py: Pexels API → download stock clips to temp/
   → tiktokvoice.py: TTS per sentence → MP3 chunks (threaded)
@@ -81,7 +79,8 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 | `main.py` | Flask app and queue/job endpoints |
 | `worker.py` | Job consumer that executes generation pipeline |
 | `db.py`/`models.py`/`repository.py` | DB engine, schema, queue/event persistence |
-| `gpt.py` | Ollama client: script generation, search terms, YouTube metadata |
+| `gpt.py` | Prompts and parsing: script generation, search terms, YouTube metadata; every completion goes through `writer.py` |
+| `writer.py` | Claude API client: retries, fallback model, refusal handling, per-call cost logging |
 | `video.py` | Video processing: combine clips, burn subtitles, merge audio, mix ducked background music |
 | `search.py` | Pexels stock video search and download |
 | `tiktokvoice.py` | TikTok TTS API (60+ voices, 300-char chunking, threaded) |
@@ -108,11 +107,12 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 
 ## Required Environment Variables
 
+- `ANTHROPIC_API_KEY` — Claude writes every step; the worker refuses to start without it
 - `TIKTOK_SESSION_ID` — TikTok cookie for TTS
 - `PEXELS_API_KEY` — stock video API
 - `IMAGEMAGICK_BINARY` — leave empty to auto-detect from PATH
 
-Optional: `CORS_ORIGINS`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`, `YOUTUBE_CLIENT_SECRETS_FILE`, `YOUTUBE_TOKEN_FILE`, `AUTOPILOT_*`, `OUTPUT_RETENTION_DAYS`, `REQUIRE_MOUNTS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TZ` (see `docs/autopilot.md`)
+Optional: `CORS_ORIGINS`, `SCRIPT_MODEL`, `SCRIPT_FALLBACK_MODEL`, `FOOTAGE_MODEL`, `ASSEMBLY_AI_API_KEY`, `DATABASE_URL`, `YOUTUBE_PRIVACY_STATUS`, `YOUTUBE_CATEGORY_ID`, `YOUTUBE_CLIENT_SECRETS_FILE`, `YOUTUBE_TOKEN_FILE`, `AUTOPILOT_*`, `OUTPUT_RETENTION_DAYS`, `REQUIRE_MOUNTS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TZ` (see `docs/autopilot.md`)
 
 ## Conventions
 

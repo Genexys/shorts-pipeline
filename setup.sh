@@ -142,12 +142,6 @@ check_prereqs() {
     warn 'ImageMagick not found (some text rendering features may fail).'
   fi
 
-  if command_exists ollama; then
-    ok 'ollama found'
-  else
-    warn 'ollama not found (required for script generation).'
-  fi
-
   if [ "$missing_critical" -eq 1 ]; then
     error 'Missing critical dependencies. Please install them, then rerun setup.'
     return 1
@@ -257,34 +251,12 @@ install_dependencies() {
   return 0
 }
 
-check_ollama_models() {
-  if ! command_exists ollama; then
-    return 0
-  fi
-
-  if ! ask_yes_no 'Check local Ollama models now?' 'y'; then
-    return 0
-  fi
-
-  info 'Querying Ollama model list...'
-  if ollama list; then
-    ok 'Ollama is reachable.'
+check_anthropic_key() {
+  # Claude writes every step; without the key no video can be made.
+  if [ -f .env ] && grep -Eq '^ANTHROPIC_API_KEY="?[^"[:space:]]+' .env; then
+    ok 'ANTHROPIC_API_KEY is set in .env'
   else
-    warn 'Could not query Ollama. If needed, run: ollama serve'
-    return 0
-  fi
-
-  if ask_yes_no 'Pull default model llama3.1:8b now?' 'n'; then
-    printf 'Model name [llama3.1:8b]: '
-    read -r model_name
-    model_name="${model_name:-llama3.1:8b}"
-
-    info "Pulling model $model_name ..."
-    if ollama pull "$model_name"; then
-      ok "Model $model_name is ready"
-    else
-      warn "Failed to pull model $model_name"
-    fi
+    warn 'ANTHROPIC_API_KEY is empty in .env (required: Claude writes every step).'
   fi
 }
 
@@ -309,7 +281,7 @@ main() {
     exit 1
   fi
 
-  check_ollama_models
+  check_anthropic_key
   print_next_steps
   ok 'Setup complete. Happy building!'
 }

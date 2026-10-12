@@ -11,9 +11,9 @@ Use `.env.example` as your template.
 | `TIKTOK_SESSION_ID` | TikTok session cookie (`sessionid`) used for TTS voice endpoint calls. |
 | `PEXELS_API_KEY` | API key used to fetch stock video clips. |
 | `PIXABAY_API_KEY` | *Optional.* A second stock library, merged with Pexels. Empty uses Pexels alone. Long videos need it — see [Stock footage](#stock-footage). |
-| `ANTHROPIC_API_KEY` | *Optional.* Writes the topic and the script with a stronger model — see [The writer](#the-writer). Empty keeps everything on Ollama. |
+| `ANTHROPIC_API_KEY` | **Required.** Claude writes every step — see [The writer](#the-writer). The worker refuses to start without it. |
 | `SCRIPT_MODEL` | *Optional.* Model for the writer's calls — see [The writer](#the-writer). | `claude-opus-5-5` |
-| `SCRIPT_FALLBACK_MODEL` | *Optional.* Second Claude model, used only while `SCRIPT_MODEL` is overloaded or down — see [The writer](#the-writer). Unset uses the default; set to an empty value to go straight to Ollama instead. | `claude-sonnet-5-5` |
+| `SCRIPT_FALLBACK_MODEL` | *Optional.* Second Claude model, used only while `SCRIPT_MODEL` is overloaded or down — see [The writer](#the-writer). Unset uses the default; set to an empty value for no fallback. | `claude-sonnet-5-5` |
 | `FOOTAGE_MODEL` | *Optional.* Model that looks at a frame of every stock clip before it is used — see [Stock footage](#stock-footage). Needs `ANTHROPIC_API_KEY`; `off` turns the check off. | `claude-sonnet-5-5` |
 | `FIRECRAWL_API_KEY` | *Optional.* Grounds scripts in real search results and lists the sources in the description — see [Research](#research). Empty writes scripts with no specifics at all. |
 
@@ -22,9 +22,6 @@ Use `.env.example` as your template.
 | Variable | Description | Default |
 |---|---|---|
 | `IMAGEMAGICK_BINARY` | Absolute path to ImageMagick executable. If empty, auto-detected from `PATH`. | auto-detect |
-| `OLLAMA_BASE_URL` | Ollama server base URL used for model listing and chat generation. | `http://localhost:11434` |
-| `OLLAMA_MODEL` | Fallback model if frontend does not send a model value. | `llama3.1:8b` |
-| `OLLAMA_TIMEOUT` | Seconds to wait for one Ollama response. | `180` |
 | `ELEVENLABS_API_KEY` | Narration for formats that ask for it. Empty keeps everything on the free TikTok voice. See [Narration](#narration). | empty |
 | `ASSEMBLY_AI_API_KEY` | If set, AssemblyAI times the subtitles: its transcript is aligned to the script, and the script's own words are shown at the times it heard them (its transcript is shown instead when fewer than half the words line up). If empty, local subtitle generation is used. | empty |
 | `POSTGRES_DB` | Database name for Docker Postgres service. | `moneyprinter` |
@@ -68,7 +65,6 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `AUTOPILOT_NICHE` | Channel niche in free text. Required when enabled; the process exits with code 1 without it. | none |
 | `AUTOPILOT_VIDEOS_PER_DAY` | Maximum jobs per local day, 1..6. | `2` |
 | `AUTOPILOT_WINDOW` | `HH:MM-HH:MM` in `TZ`, start before end, same day. | `09:00-21:00` |
-| `AUTOPILOT_MODEL` | Ollama model for topics and scripts. | `OLLAMA_MODEL` |
 | `AUTOPILOT_VOICE` | TikTok TTS voice. | `en_us_001` |
 | `AUTOPILOT_PARAGRAPHS` | Paragraphs in the script, 1..10. | `1` |
 | `AUTOPILOT_SUBTITLES_POSITION` | Same values as the UI. | `center,center` |
@@ -113,9 +109,8 @@ Songs/dark/track.mp3
 Themes follow what a video is about, not a mood. The writer model reads the
 script and a one-line description of each theme (`MUSIC_THEMES` in
 `Backend/utils.py`), picks one, and a random track is taken from that folder.
-That is Opus, falling back to Ollama like the script does. On twenty recent
-Shorts, llama3.1:8b gave inconsistent answers for seven, and Opus placed all
-twenty sensibly.
+On twenty recent Shorts, the local llama3.1:8b this used to run on gave
+inconsistent answers for seven, and Opus placed all twenty sensibly.
 
 | Theme | For |
 |---|---|
@@ -269,16 +264,10 @@ every clip is rejected and nothing replaces them, they are all used anyway.
 
 ## Notes
 
-- Ollama models shown in the frontend are fetched from backend endpoint `/api/models`, which queries `OLLAMA_BASE_URL/api/tags`.
-- Pull models before use, for example:
-
-```bash
-ollama pull llama3.1:8b
-```
-
+- The model list in the frontend comes from `/api/models`: `SCRIPT_MODEL` and its fallback. It is shown for the record; Claude writes every step whatever is selected.
 - If ImageMagick is not discovered automatically, set `IMAGEMAGICK_BINARY` explicitly.
 - New architecture uses a database-backed job queue. In Docker, use Postgres via `DATABASE_URL`.
-- Under Docker Compose, `OLLAMA_BASE_URL`, `DATABASE_URL`, `IMAGEMAGICK_BINARY`, `YOUTUBE_CLIENT_SECRETS_FILE` and `YOUTUBE_TOKEN_FILE` are set by `docker-compose.yml`.
+- Under Docker Compose, `DATABASE_URL`, `IMAGEMAGICK_BINARY`, `YOUTUBE_CLIENT_SECRETS_FILE` and `YOUTUBE_TOKEN_FILE` are set by `docker-compose.yml`.
 - Set `FLASK_DEBUG=1` to enable the Werkzeug debugger and reloader locally; never set it in Docker.
 
 ## Research
@@ -490,94 +479,74 @@ the script is written in another process.
 
 ## The writer
 
-With `ANTHROPIC_API_KEY` set, four calls leave Ollama: the **topic**, the
-**script**, the **stock search terms**, and the **YouTube title, description
-and tags**. The music mood stays behind: that is structured extraction, and the
-local model does it well and for free.
+Claude writes every step: the **topic**, the **script**, the **stock search
+terms**, the **YouTube title, description and tags**, the **source judge**, the
+**music theme**, the **long-form outline and sections**, and the **community
+posts**. The footage check also uses Claude, through its own model setting
+(`FOOTAGE_MODEL`). All of it goes through `Backend/writer.py`, and
+`ANTHROPIC_API_KEY` is required.
 
-Search terms were on that list until an onion video searched "tear gas
-escape" — a metaphor from its own script — and came back with birds
-scattering off a river. Deciding whether a phrase names something a camera
-can point at is judgement, not extraction.
+Until 2026-10-12 a local Ollama model wrote whatever Claude could not, and it
+wrote the cheaper steps by default. It was taken out because of what it wrote:
+- In the week of 2026-09-27 it put more false statements into titles and
+  descriptions than the writer put into the narration. "Edison's
+  Hydroelectric Rival" was a plant built on Edison's licence, and "the first
+  pacemaker" appeared where the source said "helped create".
+- Asked for search terms, it returned "tear gas escape", a metaphor lifted
+  from the script, and the footage came back as birds scattering off a river.
+- On 2026-09-28 it wrote five of a long video's eight sections during an Opus
+  outage, and the video went out with a fabricated claim about a real doctor.
 
-Metadata moved for the same reason. In the week of 2026-09-27 the local model
-put more false statements into titles and descriptions than the writer put into
-the narration — "Edison's Hydroelectric Rival" for a plant built on Edison's
-licence, "the first pacemaker" where the source said "helped create" — and on
-long videos it read only the first 200 words, so a video about the first CT
-scan was titled and tagged as one about Röntgen. The writer reads the whole
-script and may say only what the script says. If it is unavailable, the local
-model writes the metadata from the 200-word excerpt, as before.
+**When no Claude model answers, the step fails rather than guessing.**
 
-Those two are where judgement shows. A curio in particular lives or dies on
-whether the subject is genuinely absurd rather than merely phrased as though it
-were, and telling those apart is exactly the discrimination a small model
-lacks. It can write joke-shaped text; it cannot reliably tell whether the joke
-landed.
-
-Failure is never fatal: whatever happens, the call ends with some model's text
-— a video written locally beats no video. But the local model is the last
-resort, not the first, and what happens before it depends on what went wrong.
+| Step | Without a model |
+|---|---|
+| topic | no job this tick; the autopilot tries again next tick |
+| script | the job fails; the next slot queues a fresh topic |
+| metadata | the subject becomes the title and description, so the video stays plain but nothing in it is invented |
+| search terms | empty, and the pipeline widens the search from the subject's own words |
+| music theme | the flat `Songs/` folder |
+| source judge | every source is kept |
 
 **Overload or outage.** A 529, 500, 502, 503 or 504, a rate limit (429), a
-dropped connection or a timeout is waited out: the primary model is asked again
+dropped connection or a timeout is waited out. The primary model is asked again
 after 30 s, 60 s and 120 s (`OUTAGE_BACKOFF_SECONDS` in `Backend/writer.py`),
-three and a half minutes in all. The SDK's own retries are off for these
-requests; they are a fraction of a second apart, and on 2026-09-28 they gave up
-on an overloaded Opus at once, so llama3.1:8b wrote five of a long video's
-eight sections and its search terms.
+three and a half minutes in all. If the outage outlasts that,
+`SCRIPT_FALLBACK_MODEL` (Sonnet by default) writes the call. For the next ten
+minutes, every call goes straight to the fallback. Set
+`SCRIPT_FALLBACK_MODEL` to an empty value to have no fallback.
 
-If the ladder runs out, `SCRIPT_FALLBACK_MODEL` (Sonnet by default) writes the
-call, with only the SDK's quick retries. The process then remembers the outage
-for ten minutes: every call in that time goes straight to the fallback model
-without climbing the ladder again, since a long video makes eight section calls
-and the search terms, and three and a half minutes each would hold the queue
-for half an hour. Only if the fallback model fails too does Ollama write. With
-`SCRIPT_FALLBACK_MODEL` set to an empty value, Ollama writes instead, and still
-without the ladder for those ten minutes.
-
-**Refusal.** Asked once more with the purpose of the request stated, as before.
-A refusal is not an outage: no waiting, no fallback model, and a second refusal
-goes to Ollama.
+**Refusal.** The request is asked once more with its purpose stated. A refusal
+is not an outage: there is no waiting and no fallback model.
 
 **Account problem.** A 400 saying the credit balance is too low, a 402, or an
 authentication or permission error (401, 403) cannot be waited out, and the
-fallback model bills the same account, so the call goes straight to Ollama and
-the owner is told: one Telegram message (via `TELEGRAM_BOT_TOKEN` and
-`TELEGRAM_CHAT_ID`) saying scripts are now written by the local model and the
-balance needs topping up — or, for 401/403, the key needs checking. It is sent
-at most once every four hours per process, so the worker and the autopilot may
-each send one. On 2026-09-27 the balance ran out at 15:00 and every call
-quietly fell back to llama until a video was reviewed by hand.
+fallback model bills the same account. So the step has no model, and the owner
+gets one Telegram message (via `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`)
+saying no video can be written until the balance is topped up, or, for
+401/403, until the key is checked. It is sent at most once every four hours
+per process, so the worker and the autopilot may each send one.
 
-Anything else — an unknown model, a malformed request, an empty answer — goes
-to Ollama at once, as before.
+**Who wrote it.** The script records the model that actually wrote it, as
+`scriptModel` on the video artifact. A long script is written a section at a
+time and can change hands part way, so it is filed under its weakest writer:
+Opus and Sonnet make a Sonnet script. `scriptFellBack` means the script was not
+written by the primary. `scriptLocal` stays false now that there is no local
+model.
 
-**Who wrote it.** The script records the model that actually wrote it
-(`scriptModel` on the video artifact). A long script is written a section at a
-time and can change hands part way, so it is filed under its weakest writer,
-ranked local < fallback Claude < primary: Opus and Sonnet make a Sonnet script,
-and any section by Ollama makes an Ollama script. The video artifact carries
-`scriptFellBack` (not written by the primary) and `scriptLocal` (written, at
-least in part, by the local model instead of Claude); both stay false when no
-key is configured, since Ollama writing is then the design and not a fallback.
-
-**A long video the local model helped write goes up private**, whatever
-`YOUTUBE_PRIVACY_STATUS` says, and is not cross-posted to Instagram. The
-autopilot's Telegram report says so plainly, so it can be watched and
-published by hand in YouTube Studio. On 2026-09-28 such a video went out public
-with a fabricated claim about a real doctor (https://youtu.be/uynIVYwuEvw).
-A Short keeps the configured status, and its report carries the usual
-`⚠️ written by …` line. The privacy actually used is recorded on the
-`youtube_video` artifact as `privacyStatus`.
+**What it costs.** Each call logs its tokens and price, for example
+`[$] claude-opus-5-5: 3120 in, 2410 out, $0.061.` The rates are in
+`PRICES_PER_MTOK`. The footage check reports its calls in the same way. Each
+video's total goes on its video artifact as `claudeUsd`, and the worker logs it
+as `[$] Claude calls for this video: $0.42.` The console's usage page is the
+bill; this is for watching the balance between top-ups.
 
 **Model and effort.** The default is Claude Opus 5.5 ($4 / $20 per million
 input / output tokens; Claude Opus 5, used until 2026-10-03, was $5 / $25).
 Every request sets `effort: high`. Opus 5.5 would otherwise think at `medium`,
 which is less than Opus 5 did with no setting at all. The model's thinking is
-billed as output. At four videos a day, with the topic, script, search terms,
-metadata and source judge, this is a few dollars a month, small next to the
-narration bill. The console's usage page has the real figure.
+billed as output, and `claudeUsd` on each video artifact is the measured cost
+per video.
 
 **Refusal fallback.** Each request also asks for the API's server-side refusal
 fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). If

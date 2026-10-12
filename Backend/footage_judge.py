@@ -173,6 +173,11 @@ def _ask(frames: Sequence[Frame], subject: str, narration: str) -> Dict[str, Ver
             "format": {"type": "json_schema", "schema": SCHEMA},
         },
     )
+    writer.record_usage(
+        getattr(response, "model", None) or model_name(),
+        getattr(response, "usage", None),
+        "the footage check",
+    )
     if getattr(response, "stop_reason", None) == "refusal":
         raise RuntimeError("the model declined")
     text = next(block.text for block in response.content if block.type == "text")

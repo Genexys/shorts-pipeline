@@ -104,17 +104,18 @@ def _no_claude(monkeypatch):
     monkeypatch.setattr(gpt.writer, "write_with_model", lambda prompt: None)
 
 
-def test_select_music_theme_prefers_the_stronger_model(monkeypatch):
+def test_select_music_theme_is_asked_of_claude(monkeypatch):
     monkeypatch.setattr(
         gpt.writer, "write_with_model",
         lambda prompt: gpt.writer.Written('{"theme": "space"}', "claude-opus-5-5"),
     )
+    assert gpt.select_music_theme("Sputnik", "A beeping sphere.", "any") == "space"
 
-    def local(prompt, model):
-        raise AssertionError("the local model must not be asked")
 
-    monkeypatch.setattr(gpt, "generate_response", local)
-    assert gpt.select_music_theme("Sputnik", "A beeping sphere.", "llama3.1:8b") == "space"
+def test_select_music_theme_without_a_model_is_none(monkeypatch):
+    # No key here (conftest), so generate_response raises ModelUnavailable;
+    # the video falls back to the flat Songs/ folder rather than failing.
+    assert gpt.select_music_theme("Sputnik", "A beeping sphere.", "any") is None
 
 
 def test_every_theme_is_described_by_subject():

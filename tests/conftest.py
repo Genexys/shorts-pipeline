@@ -52,22 +52,14 @@ def offline(monkeypatch):
     gpt.py loads the project .env at import, so a configured ANTHROPIC_API_KEY
     or FIRECRAWL_API_KEY leaks into the suite: write_creative went to Claude
     instead of the patched generate_response, which cost money, made the run
-    non-deterministic and took it from 40 seconds to seven minutes. Tests that
-    want either key set it themselves.
+    non-deterministic and took it from 40 seconds to seven minutes. With the
+    key empty, a test that does not patch generate_response gets
+    ModelUnavailable rather than a live call. Tests that want either key set it
+    themselves.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("FIRECRAWL_API_KEY", "")
     # Loaded from .env at import like the keys above. A test that reaches an
     # entry point must not refuse to run because the test box has no mounts.
     monkeypatch.delenv("REQUIRE_MOUNTS", raising=False)
-    # Ollama is free, but reaching it is still a live call, and the suite was
-    # quietly relying on the host being unable to resolve "ollama" — run the
-    # same tests inside the compose network and three of them fail, because a
-    # code path that is meant to give up instead succeeds and sends a second
-    # Telegram message. Point it at a closed port so the outcome is the same
-    # wherever the suite runs. Tests that want a model patch generate_response.
-    # Set on the module, not the environment: gpt.py reads OLLAMA_BASE_URL once
-    # at import, so an env var set here would arrive far too late.
-    import gpt
 
-    monkeypatch.setattr(gpt, "OLLAMA_BASE_URL", "http://127.0.0.1:1")

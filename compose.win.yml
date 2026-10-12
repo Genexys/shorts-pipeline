@@ -1,4 +1,4 @@
-# Windows override: NVIDIA GPU for Ollama and for hardware video encoding.
+# Windows override: NVIDIA GPU for hardware video encoding.
 #
 # Usage (Windows + WSL2 + Docker Desktop with the NVIDIA runtime):
 #
@@ -10,18 +10,6 @@
 # that cannot do hardware encoding at all.
 
 services:
-  ollama:
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
   worker:
     environment:
       # MoviePy defaults to the imageio-ffmpeg binary, which is built
