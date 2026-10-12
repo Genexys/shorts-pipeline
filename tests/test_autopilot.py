@@ -93,7 +93,40 @@ def test_build_topic_prompt_mentions_niche_and_recent():
     prompt = build_topic_prompt("ocean facts", ["Old topic one", "Old topic two"])
     assert "ocean facts" in prompt
     assert "Old topic one" in prompt
-    assert '{"subject"' in prompt
+    assert '"subject"' in prompt
+
+
+def test_build_topic_prompt_drafts_candidates_before_choosing():
+    prompt = build_topic_prompt("ocean facts", [])
+    assert '"candidates"' in prompt
+    assert "8 candidate topics" in prompt
+    assert "least likely to swipe" in prompt
+
+
+def test_build_topic_prompt_shows_the_channel_numbers_when_there_are_some():
+    prompt = build_topic_prompt(
+        "ocean facts", [], best=["Why a spoon in soup gets hot"], worst=["Drake came home"]
+    )
+    assert "Kept the most viewers:\n        - Why a spoon in soup gets hot" in prompt
+    assert "Lost the most viewers at once:\n        - Drake came home" in prompt
+
+
+def test_build_topic_prompt_without_numbers_says_nothing_about_them():
+    assert "Kept the most viewers" not in build_topic_prompt("ocean facts", [])
+
+
+def test_topic_generation_reads_the_ranking(pilot, session_factory, monkeypatch):
+    import autopilot
+
+    asked = []
+    monkeypatch.setattr(autopilot, "top_performing_subjects", lambda *a, **k: ["A best one"])
+    monkeypatch.setattr(autopilot, "worst_performing_subjects", lambda *a, **k: ["A worst one"])
+    original = pilot.generate
+    pilot.generate = lambda prompt, model: asked.append(prompt) or original(prompt, model)
+
+    pilot.maybe_create_job(NOON)
+
+    assert "A best one" in asked[0] and "A worst one" in asked[0]
 
 
 def test_start_message(pilot):
