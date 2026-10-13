@@ -98,6 +98,20 @@ def test_too_little_left_between_fades_drops_the_clip():
     assert video.usable_footage([(0.0, 0.6), (1.2, 1.5)], 1.5, 1.5) is None
 
 
+def test_black_after_the_opening_ends_the_shot_there():
+    # The 2026-10-13 door clip: clear for 7.1 s, then black to its end.
+    assert video.usable_footage([(7.133, 10.367)], 10.4, 10.4) == pytest.approx((0.0, 7.133))
+
+
+def test_a_dip_after_the_opening_ends_the_shot_rather_than_dropping_the_clip():
+    spans = [(0.0, 0.5), (9.0, 9.4), (12.0, 12.3)]
+    assert video.usable_footage(spans, 20.0, 20.0) == pytest.approx((0.5, 8.5))
+
+
+def test_a_dip_inside_the_opening_still_drops_the_clip():
+    assert video.usable_footage([(2.333, 3.4), (8.3, 9.0)], 11.63, 11.63) is None
+
+
 # -- find_usable_footage --------------------------------------------------------
 
 
@@ -116,13 +130,20 @@ def _patch_probes(monkeypatch, spans_by_path, duration=10.0):
 def test_find_usable_footage_skips_lead_ins_and_drops_black_clips(monkeypatch):
     checked = _patch_probes(
         monkeypatch,
-        {"fade.mp4": [(0.0, 1.0)], "black.mp4": [(0.0, 3.96)]},
+        {"fade.mp4": [(0.0, 1.0)], "black.mp4": [(0.0, 9.96)]},
     )
 
     footage = video.find_usable_footage(["clean.mp4", "fade.mp4", "black.mp4"])
 
     assert footage == {"clean.mp4": (0.0, 10.0), "fade.mp4": (1.0, 9.0)}
-    assert all(seconds == video.BLACK_PROBE_SECONDS for _, seconds in checked)
+    assert all(seconds == 10.0 for _, seconds in checked)
+
+
+def test_find_usable_footage_looks_as_far_as_the_longest_shot_can_run(monkeypatch):
+    checked = _patch_probes(monkeypatch, {}, duration=60.0)
+    video.find_usable_footage(["long.mp4"])
+    assert checked == [("long.mp4", video.BLACK_SCAN_SECONDS)]
+    assert video.BLACK_SCAN_SECONDS >= video.MAX_ADAPTIVE_SHOT_SECONDS + video.BLACK_PROBE_SECONDS
 
 
 def test_find_usable_footage_probes_no_further_than_a_short_clip_runs(monkeypatch):
@@ -138,7 +159,7 @@ def test_find_usable_footage_uses_a_clip_it_could_not_check(monkeypatch):
 
 
 def test_find_usable_footage_keeps_everything_rather_than_nothing(monkeypatch):
-    _patch_probes(monkeypatch, {"a.mp4": [(0.0, 3.96)], "b.mp4": [(0.0, 3.96)]})
+    _patch_probes(monkeypatch, {"a.mp4": [(0.0, 9.96)], "b.mp4": [(0.0, 9.96)]})
     assert video.find_usable_footage(["a.mp4", "b.mp4"]) == {
         "a.mp4": (0.0, 10.0),
         "b.mp4": (0.0, 10.0),
@@ -207,7 +228,7 @@ def test_combine_videos_measures_footage_when_not_given_it(monkeypatch, tmp_path
     monkeypatch.setattr(video, "TEMP_DIR", tmp_path)
     monkeypatch.setattr(video, "report_black_spans", lambda *args: [])
     commands = _capture_runs(monkeypatch)
-    _patch_probes(monkeypatch, {"black.mp4": [(0.0, 3.96)]}, duration=30.0)
+    _patch_probes(monkeypatch, {"black.mp4": [(0.0, 23.96)]}, duration=30.0)
 
     video.combine_videos(["black.mp4", "clean.mp4"], 9.0, 2, SHORT)
 

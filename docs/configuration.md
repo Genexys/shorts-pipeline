@@ -251,14 +251,17 @@ repeating.
 
 **Black openings are skipped.** Many stock clips open on a fade up from
 black, and a shot used to start on the clip's first frame. Before combining,
-the first four seconds of each clip are checked with `blackdetect`, cropped
-the way the format frames them:
+each clip is checked with `blackdetect` as far as a shot can run (24 seconds:
+the 20-second longest shot after a lead-in), cropped the way the format frames
+it:
 
 - black from the first frame: the shot starts after it;
-- black running to the end of those four seconds, or the clip's own fade-out:
+- black running to the end of what was checked, or the clip's own fade-out:
   the shot stops before it;
-- black that comes and goes inside them, or black throughout: the clip is not
-  used.
+- black that first comes after the first four seconds: the shot stops before
+  it (a Short's line can hold one clip for ten seconds or more);
+- black that comes and goes inside the first four seconds, or black
+  throughout: the clip is not used.
 
 If that would leave no clips, all of them are used as before. The combined
 video is then checked again, and any black of half a second or more is logged

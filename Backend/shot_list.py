@@ -26,7 +26,7 @@ from typing import Callable, List, Optional, Sequence, Tuple
 
 from logstream import log
 from speech import _letters, for_narration, sentence_starts, split_sections, split_sentences
-from video import effective_clip_cap, plan_clip_segments
+from video import MIN_SHOT_SECONDS, effective_clip_cap, plan_clip_segments
 
 # Roughly one beat per this many words, so a 80-word Short gets six to ten.
 # Fewer and a beat outlasts its picture; more and a shot is over before the
@@ -264,11 +264,17 @@ def plan_segments(
     kept[-1][0] += carried
 
     segments: List[Tuple[str, float]] = []
-    for length, sources in kept:
+    for index, (length, sources) in enumerate(kept):
         cap = effective_clip_cap(length, len(sources), max_clip_seconds)
         # One even rhythm: the varied one cuts a lone clip short and then
         # shows it again to fill the beat.
-        segments.extend(plan_clip_segments(sources, length, cap, rhythm=(1.0,)))
+        planned = plan_clip_segments(sources, length, cap, rhythm=(1.0,))
+        # A beat's clips can run out a moment before its end, leaving a
+        # sliver that restarts one of them: 0.03 s of the door clip's first
+        # frame on 2026-10-13. The next beat starts that much sooner instead.
+        if len(planned) > 1 and planned[-1][1] < MIN_SHOT_SECONDS and index + 1 < len(kept):
+            kept[index + 1][0] += planned.pop()[1]
+        segments.extend(planned)
     return segments
 
 

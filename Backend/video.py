@@ -748,6 +748,13 @@ def build_concat_filter(
 # 1920x426 Pixabay clip measured 0.9 s of black at full width and was black for
 # its entire 2.7 s shot once cut to 9:16.
 BLACK_PROBE_SECONDS = 4.0
+# How far into a clip the check looks: as far as it can play. A shot used to
+# last four seconds at most, but a Short's line can hold one clip for longer:
+# on 2026-10-13 a door clip ran 10.4 s and went black at 7.1 s, after the
+# window, for 3.2 s on air. The longest shot, after a lead-in up to the
+# opening window. Measured on that day's clips, the longer look costs one to
+# three seconds a clip.
+BLACK_SCAN_SECONDS = MAX_ADAPTIVE_SHOT_SECONDS + BLACK_PROBE_SECONDS
 # blackdetect's own threshold, and the one the renders were audited with.
 BLACK_PIXEL_THRESHOLD = 0.10
 # Shortest black worth acting on at the start of a clip. Below this it passes
@@ -804,7 +811,10 @@ def detect_black_spans(
 
 
 def usable_footage(
-    spans: List[Tuple[float, float]], probed: float, duration: float
+    spans: List[Tuple[float, float]],
+    probed: float,
+    duration: float,
+    opening: float = BLACK_PROBE_SECONDS,
 ) -> Optional[Tuple[float, float]]:
     """Where a clip's shot should start and how much of it may be used.
 
@@ -814,19 +824,23 @@ def usable_footage(
     Black from the first frame is a fade-in: the shot starts after it. Black
     running off the end of the window is a fade-out, or black that may go on
     past where we looked: the shot stops before it. Black that comes and goes
-    inside the window means the clip dips to black, and it does it again where
-    we did not look — the filament-bulb clip in 5ae3b3fc flickered off at 0,
-    2.8 and 6.8 seconds, and a skeleton on a black ground in 0257be12 dipped at
-    2.3 and again at 8.3 — so the clip is not used. Nor is one that is black
-    for the whole window, or that leaves too little to make a shot.
+    inside the first `opening` seconds means the clip dips to black, and it
+    does it again later — the filament-bulb clip in 5ae3b3fc flickered off at
+    0, 2.8 and 6.8 seconds, and a skeleton on a black ground in 0257be12 dipped
+    at 2.3 and again at 8.3 — so the clip is not used. Nor is one that is black
+    for the whole window, or that leaves too little to make a shot. Black that
+    first comes later than that ends the shot where it starts: everything
+    before it has been seen to be clear.
 
     Returns:
         (start offset, usable seconds), or None to drop the clip.
     """
     start, end = 0.0, duration
     for black_start, black_end in spans:
+        if black_start >= end:
+            break
         leading = black_start <= BLACK_EDGE_SECONDS
-        trailing = black_end >= probed - BLACK_EDGE_SECONDS
+        trailing = black_end >= probed - BLACK_EDGE_SECONDS or black_start >= opening
         if leading and trailing:
             return None
         if leading:
@@ -855,7 +869,7 @@ def find_usable_footage(
     footage: Dict[str, Tuple[float, float]] = {}
     for path in video_paths:
         duration = durations[path]
-        probed = min(BLACK_PROBE_SECONDS, duration)
+        probed = min(BLACK_SCAN_SECONDS, duration)
         spans = detect_black_spans(path, probed, fmt)
         if spans is None:
             footage[path] = (0.0, duration)

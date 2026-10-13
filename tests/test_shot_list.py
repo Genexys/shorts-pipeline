@@ -183,6 +183,17 @@ def test_an_empty_opening_line_gives_its_time_to_the_next():
     assert segments == [("b.mp4", 5.0)]
 
 
+def test_a_sliver_left_when_a_lines_clips_run_out_goes_to_the_next_line():
+    # 2026-10-13: one 10.39 s clip for a 10.42 s line restarted for 0.03 s.
+    segments = shot_list.plan_segments(
+        [(0.0, 10.42), (10.42, 14.0)],
+        [[("door.mp4", 10.39)], [("hand.mp4", 12.0)]],
+        5.0,
+    )
+    assert [path for path, _ in segments] == ["door.mp4", "hand.mp4"]
+    assert sum(seconds for _, seconds in segments) == pytest.approx(14.0)
+
+
 def test_no_clips_at_all_is_an_error():
     with pytest.raises(ValueError):
         shot_list.plan_segments([(0.0, 5.0)], [[]], 5.0)
