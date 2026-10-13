@@ -909,6 +909,7 @@ def combine_videos(
     fmt: VideoFormat = SHORT,
     on_segments: Optional[Callable[[List[Tuple[str, float]]], None]] = None,
     footage: Optional[Dict[str, Tuple[float, float]]] = None,
+    segments: Optional[List[Tuple[str, float]]] = None,
 ) -> str:
     """
     Combines stock clips into one video of the format's shape and the requested
@@ -927,6 +928,9 @@ def combine_videos(
             so the caller can record which footage plays when.
         footage: find_usable_footage() for these clips, when the caller has
             already measured it. Clips missing from it are not used.
+        segments: The (path, seconds) shots already planned, as the shot
+            list does to cut them to the narration. None plans them here,
+            cycling through `video_paths`.
 
     Returns:
         str: The path to the combined video.
@@ -936,19 +940,20 @@ def combine_videos(
 
     if footage is None:
         footage = find_usable_footage(video_paths, fmt)
-    sources = [(path, footage[path][1]) for path in video_paths if path in footage]
     starts = {path: start for path, (start, _) in footage.items()}
-    cap = effective_clip_cap(
-        float(max_duration), len(sources), float(fmt.max_clip_duration)
-    )
-    if cap > fmt.max_clip_duration:
-        log(
-            f"[!] Only {len(sources)} clips for {max_duration:.0f}s; holding each "
-            f"shot up to {cap:.1f}s instead of {fmt.max_clip_duration:.0f}s "
-            f"rather than repeating footage.",
-            "warning",
+    if segments is None:
+        sources = [(path, footage[path][1]) for path in video_paths if path in footage]
+        cap = effective_clip_cap(
+            float(max_duration), len(sources), float(fmt.max_clip_duration)
         )
-    segments = plan_clip_segments(sources, float(max_duration), cap)
+        if cap > fmt.max_clip_duration:
+            log(
+                f"[!] Only {len(sources)} clips for {max_duration:.0f}s; holding each "
+                f"shot up to {cap:.1f}s instead of {fmt.max_clip_duration:.0f}s "
+                f"rather than repeating footage.",
+                "warning",
+            )
+        segments = plan_clip_segments(sources, float(max_duration), cap)
     if on_segments:
         on_segments(list(segments))
 

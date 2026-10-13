@@ -74,6 +74,9 @@ For each clip, decide:
   flag or landmarks, a modern rocket or building standing in for a historical
   one the narration names); it is horror or Halloween imagery in a story that
   is neither; or there is nothing to see (blank, blurred, a title card).
+  When a clip comes with the line it plays under, judge it against that line
+  too: it does not fit when it shows something the line would contradict, or
+  something a viewer would not connect with what is being said.
 - problem: a few words naming what is wrong, or "" when it fits.
 
 {listing}"""
@@ -108,6 +111,8 @@ class Frame:
     path: str
     jpeg: bytes
     term: str
+    # The narration it plays under, when footage is chosen line by line.
+    line: str = ""
 
 
 @dataclass(frozen=True)
@@ -140,7 +145,9 @@ def _client():
 def _ask(frames: Sequence[Frame], subject: str, narration: str) -> Dict[str, Verdict]:
     """Verdicts for one batch, keyed by path. Raises on any failure."""
     listing = "\n".join(
-        f"Clip {number}: found by \"{frame.term}\"" for number, frame in enumerate(frames, 1)
+        f"Clip {number}: found by \"{frame.term}\""
+        + (f", plays while the narrator says: \"{frame.line}\"" if frame.line else "")
+        for number, frame in enumerate(frames, 1)
     )
     content: List[dict] = [
         {
@@ -226,8 +233,9 @@ def vet_footage(
     """The footage to use, and which of it may open the video.
 
     `footage` is find_usable_footage's map of path to (start, seconds).
-    `check` judges paths (judge, with the frames taken); `replace` fetches up
-    to n more clips and returns their footage, possibly fewer or none. Clips
+    `check` judges paths (judge, with the frames taken); `replace` is given
+    the rejected paths, fetches a clip for each where it can, and returns
+    their footage, possibly fewer or none. Clips
     the check rejects are dropped and replaced, for up to `rounds` rounds.
 
     Openers are the clips judged real footage. Clips nobody judged count as
@@ -241,7 +249,7 @@ def vet_footage(
     pending = dict(footage)
     for round_number in range(rounds + 1):
         verdicts = check(list(pending)) if pending else {}
-        dropped = 0
+        dropped: List[str] = []
         for path, window in pending.items():
             verdict = verdicts.get(path)
             if verdict is None or verdict.keep:
@@ -249,7 +257,7 @@ def vet_footage(
                 if verdict is None or verdict.kind == FOOTAGE:
                     openers.add(path)
                 continue
-            dropped += 1
+            dropped.append(path)
             rejected[path] = window
             log(
                 f"[!] Not using {describe(path)}: {verdict.kind}"

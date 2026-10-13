@@ -6,7 +6,7 @@ is worse than the cheaper voice throughout.
 """
 
 import re
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import elevenlabs_voice
 import tiktokvoice
@@ -31,6 +31,29 @@ def split_sentences(block: str) -> List[str]:
     """
     parts = re.split(r"(?<=[.!?])\s+", block.strip())
     return [part.strip() for part in parts if part.strip()]
+
+
+def _letters(text: str) -> int:
+    return len(re.sub(r"[^0-9A-Za-z]", "", text or ""))
+
+
+def sentence_starts(sentences: Sequence[str], cues: Sequence[Tuple[float, float, str]]) -> List[float]:
+    """When each sentence begins, from the caption cues.
+
+    Cues carry the script's own words on the narration's timing, so walking
+    them by letters reaches each sentence's first word whatever the cue width.
+    """
+    if not cues:
+        return [0.0] * len(sentences)
+    starts, before, consumed, index = [], 0, 0, 0
+    for sentence in sentences:
+        # Skip the cues that hold the sentences already placed.
+        while index < len(cues) - 1 and consumed + _letters(cues[index][2]) <= before:
+            consumed += _letters(cues[index][2])
+            index += 1
+        starts.append(cues[index][0])
+        before += _letters(sentence)
+    return starts
 
 
 # ElevenLabs reads a semicolon as a full stop and then delivers what follows as
