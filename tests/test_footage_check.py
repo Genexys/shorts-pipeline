@@ -188,8 +188,8 @@ def test_rejected_clips_are_replaced_by_the_next_results():
     footage = {"a": (0.0, 9.0), "pelican": (0.0, 9.0), "court": (0.2, 9.0)}
     asked = []
 
-    def replace(count):
-        asked.append(count)
+    def replace(rejected):
+        asked.append(rejected)
         return {"b": (0.0, 9.0), "c": (0.0, 9.0)}
 
     kept, openers = footage_judge.vet_footage(
@@ -197,7 +197,7 @@ def test_rejected_clips_are_replaced_by_the_next_results():
         _check_from({"a": GOOD, "pelican": PELICAN, "court": COURT, "b": GOOD, "c": RENDERED}),
         replace,
     )
-    assert asked == [2]
+    assert asked == [["pelican", "court"]]
     assert list(kept) == ["a", "b", "c"]
     assert kept["a"] == (0.0, 9.0)
     # A realistic render illustrates; only real footage opens.
@@ -207,8 +207,8 @@ def test_rejected_clips_are_replaced_by_the_next_results():
 def test_replacements_are_checked_too_but_only_so_many_times():
     asked = []
 
-    def replace(count):
-        asked.append(count)
+    def replace(rejected):
+        asked.append(len(rejected))
         return {f"cartoon{len(asked)}": (0.0, 9.0)}
 
     verdicts = {"a": GOOD, "pelican": PELICAN}
@@ -223,7 +223,7 @@ def test_replacements_are_checked_too_but_only_so_many_times():
 def test_a_clip_nobody_judged_is_used_and_may_open():
     # A check that could not run changes nothing.
     kept, openers = footage_judge.vet_footage(
-        {"a": (0.0, 9.0), "b": (0.0, 9.0)}, lambda paths: {}, lambda count: {}
+        {"a": (0.0, 9.0), "b": (0.0, 9.0)}, lambda paths: {}, lambda rejected: {}
     )
     assert list(kept) == ["a", "b"]
     assert openers == {"a", "b"}
@@ -233,7 +233,7 @@ def test_nothing_left_to_replace_with_keeps_what_passed():
     kept, _ = footage_judge.vet_footage(
         {"a": (0.0, 9.0), "court": (0.0, 9.0)},
         _check_from({"a": GOOD, "court": COURT}),
-        lambda count: {},
+        lambda rejected: {},
     )
     assert list(kept) == ["a"]
 
@@ -243,7 +243,7 @@ def test_if_everything_is_rejected_everything_is_used_after_all():
     kept, openers = footage_judge.vet_footage(
         {"pelican": (0.0, 9.0), "court": (0.5, 9.0)},
         _check_from({"pelican": PELICAN, "court": COURT}),
-        lambda count: {},
+        lambda rejected: {},
     )
     assert kept == {"pelican": (0.0, 9.0), "court": (0.5, 9.0)}
     assert openers == {"pelican", "court"}
@@ -254,7 +254,7 @@ def test_only_the_new_clips_are_judged_in_a_later_round():
     footage_judge.vet_footage(
         {"a": (0.0, 9.0), "court": (0.0, 9.0)},
         _check_from({"a": GOOD, "court": COURT, "b": GOOD}, seen),
-        lambda count: {"b": (0.0, 9.0)},
+        lambda rejected: {"b": (0.0, 9.0)},
     )
     assert seen == [["a", "court"], ["b"]]
 

@@ -13,6 +13,7 @@ import footage_judge
 import knowledge
 import persona as personas
 import research
+import shot_list
 import video_review
 from formats import LONG, VideoFormat, resolve_format
 from gpt import (
@@ -24,6 +25,7 @@ from gpt import (
     strengthen_opening,
     generate_script,
     get_search_terms,
+    NARRATION_WORDS_PER_SECOND,
     select_music_theme,
     target_words_for,
     words_for_seconds,
@@ -505,8 +507,12 @@ def run_generation_pipeline(
         # Not held: an outage at this step would otherwise hold every video.
         emit("[!] The script went out without a fact check.", "warning")
 
-    search_terms = get_search_terms(
-        data["videoSubject"], fmt.search_term_count, script, ai_model
+    # A search term per line, where the format asks for it; [] falls back to
+    # terms for the whole video.
+    beats = (
+        shot_list.plan_beats(data["videoSubject"], script, generate_response)
+        if fmt.shot_list
+        else []
     )
 
     video_urls = []
@@ -532,6 +538,46 @@ def run_generation_pipeline(
         searches.append(entry)
         return entry
 
+    # Which beat each clip was found for, by URL, and each beat's searches.
+    beat_of: dict = {}
+    beat_searches: list = []
+
+    def take_for_beat(index: int, count: int) -> int:
+        """Up to `count` clips no video slot has used, from one beat's searches."""
+        taken = 0
+        for entry in beat_searches[index]:
+            for found_url in entry["urls"]:
+                if taken >= count:
+                    return taken
+                if found_url not in clip_origin:
+                    video_urls.append(found_url)
+                    clip_origin[found_url] = entry
+                    beat_of[found_url] = index
+                    taken += 1
+        return taken
+
+    for index, beat in enumerate(beats):
+        needed = shot_list.clips_wanted(
+            beat, NARRATION_WORDS_PER_SECOND, fmt.max_clip_duration
+        )
+        entries = [search(beat.term, "beat", min_dur)]
+        # One spare for the footage check to swap in; the backup only when
+        # the term itself cannot supply it.
+        if len(entries[0]["urls"]) <= needed and beat.backup:
+            entries.append(search(beat.backup, "beat-backup", min_dur))
+        beat_searches.append(entries)
+        take_for_beat(index, needed)
+
+    if beats and not video_urls:
+        emit("[!] No footage for any line; choosing it for the whole video.", "warning")
+        beats = []
+        beat_of.clear()
+
+    search_terms = (
+        []
+        if beats
+        else get_search_terms(data["videoSubject"], fmt.search_term_count, script, ai_model)
+    )
     found_per_term = [search(term, "script", min_dur) for term in search_terms]
 
     # Round-robin rather than taking a fixed share from each term and stopping:
@@ -552,9 +598,10 @@ def run_generation_pipeline(
                     video_urls.append(found_urls[depth])
                     clip_origin[found_urls[depth]] = entry
 
-    collect(found_per_term)
+    if not beats:
+        collect(found_per_term)
 
-    if len(video_urls) < wanted:
+    if not beats and len(video_urls) < wanted:
         # A narrow subject starves the search, and what arrives instead is
         # whatever loosely matched one word of it — a mushroom video came back
         # with a cartoon orangutan because the term was "umbrella". Two things
@@ -608,6 +655,10 @@ def run_generation_pipeline(
         def term_of(path: str) -> str:
             return clip_origin.get(url_for_path.get(path), {}).get("term", "")
 
+        def line_of(path: str) -> str:
+            index = beat_of.get(url_for_path.get(path))
+            return beats[index].text if index is not None else ""
+
         def check(paths: list) -> dict:
             guard_cancelled()
             frames = []
@@ -616,14 +667,23 @@ def run_generation_pipeline(
                     path, windows[path][0] + OPENING_SAMPLE_SECONDS, fmt, ffmpeg_binary
                 )
                 if jpeg:
-                    frames.append(footage_judge.Frame(path, jpeg, term_of(path)))
+                    frames.append(
+                        footage_judge.Frame(path, jpeg, term_of(path), line_of(path))
+                    )
             return footage_judge.judge(frames, data["videoSubject"], script)
 
-        def replace(count: int) -> dict:
-            # From every search run so far, in the same round-robin, taking
-            # results no clip has used yet.
+        def replace(rejected: list) -> dict:
             before = len(video_urls)
-            collect(searches, len(video_urls) + count)
+            if beats:
+                # Each from the searches for the line it was meant to show.
+                for path in rejected:
+                    index = beat_of.get(url_for_path.get(path))
+                    if index is not None:
+                        take_for_beat(index, 1)
+            else:
+                # From every search run so far, in the same round-robin,
+                # taking results no clip has used yet.
+                collect(searches, len(video_urls) + len(rejected))
             found = find_usable_footage(
                 download(video_urls[before:]), fmt, keep_all_if_none=False
             )
@@ -723,28 +783,71 @@ def run_generation_pipeline(
     temp_audio = AudioFileClip(tts_path)
     try:
         usable_paths = [path for path in video_paths if path in footage]
-        # One shot per clip only holds while each shot can be long enough.
-        # Below this many clips the run needs more shots than it has footage,
-        # and the video starts repeating itself part way through.
-        least_clips = math.ceil(temp_audio.duration / fmt.max_clip_duration)
-        if len(usable_paths) < least_clips:
-            emit(
-                f"[!] Only {len(usable_paths)} clips for {temp_audio.duration:.0f}s; "
-                f"{least_clips} are needed to avoid repeating footage.",
-                "warning",
+        starts = {path: start for path, (start, _) in footage.items()}
+        if beats:
+            by_beat = shot_list.beat_of_each(
+                beats, usable_paths, lambda path: beat_of.get(url_for_path.get(path))
             )
-        ordered_paths = promote_strongest_opening(
-            usable_paths,
-            TEMP_DIR / f"{job_id}-openings",
-            ffmpeg_binary,
-            starts={path: start for path, (start, _) in footage.items()},
-            eligible=openers,
-        )
-        combined_video_path = combine_videos(
-            ordered_paths, temp_audio.duration, n_threads or 2, fmt,
-            on_segments=note_segments,
-            footage=footage,
-        )
+            # The strongest of the first line's clips opens the video; the
+            # order elsewhere follows the narration.
+            first = next((i for i, paths in enumerate(by_beat) if paths), None)
+            if first is not None:
+                by_beat[first] = promote_strongest_opening(
+                    by_beat[first],
+                    TEMP_DIR / f"{job_id}-openings",
+                    ffmpeg_binary,
+                    starts=starts,
+                    eligible=openers,
+                )
+            windows = shot_list.beat_windows(
+                beats,
+                shot_list.narrated_sentences(script),
+                personas.read_cues(subtitles_path),
+                temp_audio.duration,
+            )
+            segments = shot_list.plan_segments(
+                windows,
+                [[(path, footage[path][1]) for path in paths] for paths in by_beat],
+                fmt.max_clip_duration,
+            )
+            emit(
+                "[+] Footage cut to the narration: "
+                + ", ".join(
+                    f'"{beat.term}"@{start:.1f}s'
+                    for beat, (start, _), paths in zip(beats, windows, by_beat)
+                    if paths
+                ),
+                "info",
+            )
+            combined_video_path = combine_videos(
+                usable_paths, temp_audio.duration, n_threads or 2, fmt,
+                on_segments=note_segments,
+                footage=footage,
+                segments=segments,
+            )
+        else:
+            # One shot per clip only holds while each shot can be long enough.
+            # Below this many clips the run needs more shots than it has
+            # footage, and the video starts repeating itself part way through.
+            least_clips = math.ceil(temp_audio.duration / fmt.max_clip_duration)
+            if len(usable_paths) < least_clips:
+                emit(
+                    f"[!] Only {len(usable_paths)} clips for {temp_audio.duration:.0f}s; "
+                    f"{least_clips} are needed to avoid repeating footage.",
+                    "warning",
+                )
+            ordered_paths = promote_strongest_opening(
+                usable_paths,
+                TEMP_DIR / f"{job_id}-openings",
+                ffmpeg_binary,
+                starts=starts,
+                eligible=openers,
+            )
+            combined_video_path = combine_videos(
+                ordered_paths, temp_audio.duration, n_threads or 2, fmt,
+                on_segments=note_segments,
+                footage=footage,
+            )
     finally:
         temp_audio.close()
 

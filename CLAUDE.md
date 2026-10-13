@@ -53,7 +53,8 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
   → research.py: Firecrawl search → sources; knowledge.py: best pages read in full,
      verbatim facts stored (knowledge_pages, facts) and added to the brief
   → gpt.py: generate_script() via Claude (writer.py; no local model)
-  → gpt.py: get_search_terms() → JSON keywords
+  → shot_list.py: script split into beats, a search term each (Shorts);
+     gpt.py: get_search_terms() → JSON keywords (long form, or fallback)
   → search.py: Pexels API → download stock clips to temp/
   → tiktokvoice.py: TTS per sentence → MP3 chunks (threaded)
   → video.py: generate_subtitles() → .srt (AssemblyAI or local timestamps)
@@ -83,6 +84,7 @@ User input (Frontend) → POST /api/generate → generation_jobs (Postgres queue
 | `writer.py` | Claude API client: retries, fallback model, refusal handling, per-call cost logging |
 | `video.py` | Video processing: combine clips, burn subtitles, merge audio, mix ducked background music |
 | `search.py` | Pexels stock video search and download |
+| `shot_list.py` | A Short's footage by beat: a search term per line, shots cut to the captions' timing |
 | `tiktokvoice.py` | TikTok TTS API (60+ voices, 300-char chunking, threaded) |
 | `youtube.py` | YouTube upload via google-auth-oauthlib token file (Backend/youtube_token.json); youtube_auth.py creates it once |
 | `utils.py` | Path constants, env validation, ImageMagick detection |

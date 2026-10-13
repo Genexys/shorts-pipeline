@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from logstream import log
-from speech import split_sentences
+from speech import sentence_starts, split_sentences
 from utils import PROJECT_ROOT
 
 ARENA = "arena"
@@ -125,29 +125,6 @@ def choose_poses(persona: Persona, sentences: Sequence[str], ask) -> List[str]:
     if not isinstance(poses, list) or len(poses) != len(sentences):
         return fallback_poses(len(sentences))
     return [p if p in persona.poses else persona.default_pose for p in poses]
-
-
-def _letters(text: str) -> int:
-    return len(re.sub(r"[^0-9A-Za-z]", "", text or ""))
-
-
-def sentence_starts(sentences: Sequence[str], cues: Sequence[Tuple[float, float, str]]) -> List[float]:
-    """When each sentence begins, from the caption cues.
-
-    Cues carry the script's own words on the narration's timing, so walking
-    them by letters reaches each sentence's first word whatever the cue width.
-    """
-    if not cues:
-        return [0.0] * len(sentences)
-    starts, before, consumed, index = [], 0, 0, 0
-    for sentence in sentences:
-        # Skip the cues that hold the sentences already placed.
-        while index < len(cues) - 1 and consumed + _letters(cues[index][2]) <= before:
-            consumed += _letters(cues[index][2])
-            index += 1
-        starts.append(cues[index][0])
-        before += _letters(sentence)
-    return starts
 
 
 def pose_plan(

@@ -68,6 +68,11 @@ class VideoFormat:
     # Fades on the picture itself, in seconds. 0 disables.
     video_fade_in_seconds: float
     video_fade_out_seconds: float
+    # Footage chosen line by line and cut to the narration (shot_list.py),
+    # rather than one pool of clips for the whole video played in search
+    # order. Long form keeps the pool: its sections are minutes long and its
+    # clips twelve seconds, so a shot per line is not what it needs.
+    shot_list: bool = False
 
     @property
     def aspect_ratio(self) -> float:
@@ -173,6 +178,7 @@ SHORT = VideoFormat(
     # and fading out fights the loop.
     video_fade_in_seconds=0.0,
     video_fade_out_seconds=0.0,
+    shot_list=True,
 )
 
 LONG = VideoFormat(

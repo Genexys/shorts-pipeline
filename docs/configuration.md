@@ -207,6 +207,32 @@ the autopilot uses it unattended.
 
 ## Stock footage
 
+**A Short's footage follows the narration.** After the fact check, Claude
+splits the script into beats: a sentence, or a few in a row, that one picture
+can carry. Each beat gets its own search term and a broader backup term. The
+backup is searched only when the first term can't supply a spare clip. Each
+beat downloads enough clips that no shot runs past the five-second cap.
+
+Once the narration is recorded, every beat plays from the caption holding its
+first word up to the next beat's. Two exceptions:
+
+- a beat with no usable clip gives its time to the beat before;
+- so does a beat under 1.5 seconds, because a cut that quick reads as a glitch.
+
+The strongest of the first beat's clips opens the video. The log shows the
+plan as `Shot list: 1 "walking through doorway" | 2-3 "..."` and the timing as
+`Footage cut to the narration: "<term>"@<seconds>s, ...`.
+
+Before this, a Short got four or five terms for the whole video, and the shots
+played in the order the searches returned them, whatever was being said.
+
+Two cases fall back to that old way:
+
+- the plan fails, or doesn't cover every sentence in order;
+- no beat finds any footage.
+
+Long videos always use the old way.
+
 Two libraries are searched per term and the results interleaved, so neither
 fills a video on its own. Pixabay is optional: with `PIXABAY_API_KEY` empty
 the pipeline uses Pexels alone, exactly as before.
@@ -254,8 +280,13 @@ Generic footage that suits the topic passes. These are rejected:
   modern rocket for a 1957 launch;
 - horror imagery in a story that isn't horror.
 
+With footage chosen by beat, each frame also comes with the line it plays
+under, and a clip that line would contradict or that a viewer wouldn't connect
+with it is rejected too.
+
 A rejected clip is logged as `Not using <file> ("<term>"): <kind>, <problem>`
-and replaced by the next unused search result. The replacements are checked
+and replaced by the next unused search result, from its own beat's searches
+when footage is chosen by beat. The replacements are checked
 too, for two rounds at most. Only real footage may open the video, since the
 opening is otherwise picked for contrast and cartoons have the most. One
 request covers a Short's ten frames and costs about a cent.
