@@ -67,7 +67,9 @@ causes, firsts, onlys, records. Take each claim as the sentence makes it,
 with its links to the rest of the script: "zookeepers read the same signal"
 claims that zookeepers and the animals read one signal, not only that
 zookeepers measure something; "those cues" claims the cues are the ones just
-named. Judge each one:
+named. A sign-off or exclamation that states no fact of its own ("FACT...
+CONFIRMED.", "The final blow?") is the narrator's delivery, not a claim: do
+not list it, and keep it in the script word for word. Judge each claim:
 - "supported": the evidence says it, or it is uncontroversial common
   knowledge that any encyclopedia states plainly.
 - "unsupported": the evidence does not say it and it is not common

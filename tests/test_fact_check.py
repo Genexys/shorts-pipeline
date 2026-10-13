@@ -232,3 +232,12 @@ def test_an_overlong_corrected_title_is_not_used():
     ask = Asker(json.dumps({"problems": ["p"], "title": "x" * 150, "description": "D2"}))
     title, description, _ = fact_check.check_metadata(FIXED, "T", "D", ask)
     assert title == "T" and description == "D2"
+
+
+def test_the_persona_sign_off_is_not_a_claim():
+    # On 2026-10-13 a probe of the TITAN persona lost "FACT... CONFIRMED." to
+    # the check, judged unsupported as "the doorway effect is settled fact".
+    ask = Asker(reply([], SCRIPT))
+    fact_check.check_script("pacemaker", SCRIPT, EVIDENCE, ask)
+    assert '"FACT...\nCONFIRMED."' in ask.prompts[0]
+    assert "not a claim" in ask.prompts[0]
