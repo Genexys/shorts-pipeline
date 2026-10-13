@@ -14,6 +14,12 @@ shown — goes to a Claude model with the subject, the narration and the term
 that found it. A cartoon, or a clip that would mislead, is replaced by the
 next search result. Realistic renders are kept but never open the video.
 
+A clip chosen for one line of the narration is held to that line, and
+loosely related is not enough: on 2026-10-13 a stylized microscope passed
+under "thermal cameras were prohibitively expensive", and a skeleton in a
+classroom under the 1985 date. A line left with nothing that passes gets one
+more search term (shot_list.rescue_terms) rather than a picture that misleads.
+
 Optional by construction, like writer.py: with no ANTHROPIC_API_KEY, with
 FOOTAGE_MODEL=off, or on any failure, every clip is used as before.
 """
@@ -76,7 +82,11 @@ For each clip, decide:
   is neither; or there is nothing to see (blank, blurred, a title card).
   When a clip comes with the line it plays under, judge it against that line
   too: it does not fit when it shows something the line would contradict, or
-  something a viewer would not connect with what is being said.
+  something a viewer would not connect with what is being said. Near enough
+  is not enough here: if the viewer would have to guess how the picture
+  relates to the words, it does not fit. Nor does a stylized graphic, or a
+  render of something else, under a line about a real object, person or
+  place.
 - problem: a few words naming what is wrong, or "" when it fits.
 
 {listing}"""
