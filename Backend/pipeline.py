@@ -564,7 +564,7 @@ def run_generation_pipeline(
         # One spare for the footage check to swap in; the backup only when
         # the term itself cannot supply it.
         if len(entries[0]["urls"]) <= needed and beat.backup:
-            entries.append(search(beat.backup, "beat-backup", min_dur))
+            entries.append(search(beat.backup, shot_list.BACKUP_PASS, min_dur))
         beat_searches.append(entries)
         take_for_beat(index, needed)
 
@@ -675,11 +675,23 @@ def run_generation_pipeline(
         def replace(rejected: list) -> dict:
             before = len(video_urls)
             if beats:
-                # Each from the searches for the line it was meant to show.
+                # Each from the searches for the line it was meant to show,
+                # the backup term's first.
                 for path in rejected:
                     index = beat_of.get(url_for_path.get(path))
-                    if index is not None:
-                        take_for_beat(index, 1)
+                    if index is None:
+                        continue
+                    backup = beats[index].backup
+                    searched = any(
+                        entry["search_pass"] == shot_list.BACKUP_PASS
+                        for entry in beat_searches[index]
+                    )
+                    if backup and not searched:
+                        beat_searches[index].append(
+                            search(backup, shot_list.BACKUP_PASS, min_dur)
+                        )
+                    beat_searches[index] = shot_list.backup_first(beat_searches[index])
+                    take_for_beat(index, 1)
             else:
                 # From every search run so far, in the same round-robin,
                 # taking results no clip has used yet.
