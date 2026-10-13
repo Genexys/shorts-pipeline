@@ -37,6 +37,8 @@ MIN_BEATS = 3
 # A beat shorter than this is not given a shot of its own: its time goes to
 # the beat before. A cut every second reads as a glitch, not as an edit.
 MIN_BEAT_SECONDS = 1.5
+# The search pass of a beat's backup term, as stored with its stock clips.
+BACKUP_PASS = "beat-backup"
 
 PROMPT = """\
 These are the sentences of a short factual video, narrated over stock footage.
@@ -181,6 +183,18 @@ def plan_beats(subject: str, script: str, ask: Callable[[str, str], str]) -> Lis
         "info",
     )
     return beats
+
+
+def backup_first(entries: list) -> list:
+    """A beat's searches with its backup term's first, the rest in order.
+
+    For replacing a rejected clip. Once the footage check has turned one down,
+    the next result for the same term is usually more of the same: on
+    2026-10-13 "hemlock plant" offered a tree trunk, dahlias and a mossy wall,
+    and "henbane flower" a mallow, poppies and a delphinium, so both lines
+    lost their footage while the backup terms were never searched.
+    """
+    return sorted(entries, key=lambda entry: entry["search_pass"] != BACKUP_PASS)
 
 
 def clips_wanted(beat: Beat, words_per_second: float, max_clip_seconds: float) -> int:

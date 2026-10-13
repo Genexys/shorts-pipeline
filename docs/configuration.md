@@ -285,8 +285,11 @@ under, and a clip that line would contradict or that a viewer wouldn't connect
 with it is rejected too.
 
 A rejected clip is logged as `Not using <file> ("<term>"): <kind>, <problem>`
-and replaced by the next unused search result, from its own beat's searches
-when footage is chosen by beat. The replacements are checked
+and replaced by the next unused search result. When footage is chosen by
+beat, the replacement comes from that beat's own searches, and its backup term
+is searched and tried first. More results for a term that has just failed are
+usually more of the same: on 2026-10-13 "hemlock plant" offered a tree trunk,
+dahlias and a mossy wall. The replacements are checked
 too, for two rounds at most. Only real footage may open the video, since the
 opening is otherwise picked for contrast and cartoons have the most. One
 request covers a Short's ten frames and costs about a cent.

@@ -113,6 +113,14 @@ def test_a_long_line_gets_enough_clips_that_no_shot_outruns_the_cap():
     assert shot_list.clips_wanted(Beat(0, 0, "Short.", "t", ""), 2.26, 5.0) == 1
 
 
+def test_a_rejected_clip_is_replaced_from_the_backup_term_first():
+    term = {"term": "hemlock plant", "search_pass": "beat", "urls": ["t1", "t2"]}
+    backup = {"term": "wild herbs", "search_pass": shot_list.BACKUP_PASS, "urls": ["b1"]}
+    assert shot_list.backup_first([term, backup]) == [backup, term]
+    # With no backup searched, the order is untouched.
+    assert shot_list.backup_first([term]) == [term]
+
+
 # -- the timing ------------------------------------------------------------------------
 
 
