@@ -339,6 +339,6 @@ def test_an_unreadable_clip_gives_no_frame(tmp_path):
 
 def test_a_replacement_batch_that_is_all_black_adds_nothing(monkeypatch):
     monkeypatch.setattr(video, "probe_duration", lambda path: 10.0)
-    monkeypatch.setattr(video, "detect_black_spans", lambda path, probed, fmt: [(0.0, 4.0)])
+    monkeypatch.setattr(video, "detect_black_spans", lambda path, probed, fmt: [(0.0, 10.0)])
     assert video.find_usable_footage(["a.mp4"], SHORT, keep_all_if_none=False) == {}
     assert video.find_usable_footage(["a.mp4"], SHORT) == {"a.mp4": (0.0, 10.0)}
