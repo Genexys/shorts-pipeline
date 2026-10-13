@@ -225,3 +225,46 @@ def test_the_footage_check_is_told_the_line_a_clip_plays_under(monkeypatch):
     footage_judge.judge(frames, "knuckles", SCRIPT)
     text = calls[0]["messages"][0]["content"][0]["text"]
     assert 'found by "MRI scanner", plays while the narrator says: "Scientists filmed it' in text
+    assert "Near enough" in text and "stylized graphic" in text
+
+
+# -- a line left without footage ------------------------------------------------------
+
+
+THERMAL = (
+    "But thermal cameras were prohibitively expensive.",
+    ["thermal camera", "infrared camera"],
+    ["abstract glowing heater, not a thermal camera", "beach aerial, not thermal camera"],
+)
+
+
+def test_a_line_without_footage_is_given_a_new_term_knowing_why():
+    prompts = []
+
+    def ask(prompt, model):
+        prompts.append(prompt)
+        return '{"terms": ["infrared thermometer screen"]}'
+
+    assert shot_list.rescue_terms("metal and wood", [THERMAL], ask) == [
+        "infrared thermometer screen"
+    ]
+    assert "Terms tried: thermal camera, infrared camera" in prompts[0]
+    assert "beach aerial, not thermal camera" in prompts[0]
+
+
+def test_a_term_already_tried_is_not_searched_again():
+    reply = '{"terms": ["Thermal Camera", "hand on radiator"]}'
+    lines = [THERMAL, ("Wood is an insulator.", ["hand on wood"], [])]
+    assert shot_list.rescue_terms("s", lines, lambda p, m: reply) == ["", "hand on radiator"]
+
+
+def test_a_short_or_broken_reply_leaves_lines_without_a_term():
+    lines = [THERMAL, THERMAL]
+    assert shot_list.rescue_terms("s", lines, lambda p, m: '{"terms": ["x"]}') == ["x", ""]
+    assert shot_list.rescue_terms("s", lines, lambda p, m: "no json") == ["", ""]
+
+    def fail(prompt, model):
+        raise RuntimeError("down")
+
+    assert shot_list.rescue_terms("s", lines, fail) == ["", ""]
+    assert shot_list.rescue_terms("s", [], fail) == []

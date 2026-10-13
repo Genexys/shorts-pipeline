@@ -651,6 +651,8 @@ def run_generation_pipeline(
     openers = None
     if footage_judge.is_enabled():
         windows = dict(footage)
+        # Every verdict, so a line left without footage can say why.
+        verdicts_seen: dict = {}
 
         def term_of(path: str) -> str:
             return clip_origin.get(url_for_path.get(path), {}).get("term", "")
@@ -670,7 +672,9 @@ def run_generation_pipeline(
                     frames.append(
                         footage_judge.Frame(path, jpeg, term_of(path), line_of(path))
                     )
-            return footage_judge.judge(frames, data["videoSubject"], script)
+            verdicts = footage_judge.judge(frames, data["videoSubject"], script)
+            verdicts_seen.update(verdicts)
+            return verdicts
 
         def replace(rejected: list) -> dict:
             before = len(video_urls)
@@ -708,6 +712,64 @@ def run_generation_pipeline(
             replace,
             describe=lambda path: f'{os.path.basename(path)} ("{term_of(path)}")',
         )
+
+        # A line whose terms found nothing that passed would be spoken over
+        # the picture of the line before. One more term each, chosen knowing
+        # why the clips were turned down, and their clips checked once.
+        shown = {beat_of.get(url_for_path.get(path)) for path in footage}
+        empty = [index for index in range(len(beats)) if index not in shown]
+        if empty:
+            terms = shot_list.rescue_terms(
+                data["videoSubject"],
+                [
+                    (
+                        beats[index].text,
+                        [entry["term"] for entry in beat_searches[index]],
+                        [
+                            verdict.problem or verdict.kind
+                            for path, verdict in verdicts_seen.items()
+                            if beat_of.get(url_for_path.get(path)) == index
+                            and not verdict.keep
+                        ],
+                    )
+                    for index in empty
+                ],
+                generate_response,
+            )
+            before = len(video_urls)
+            for index, term in zip(empty, terms):
+                if term:
+                    # First, so the clips come from the new term and not
+                    # from further down the ones that already failed.
+                    beat_searches[index].insert(
+                        0, search(term, shot_list.RESCUE_PASS, min_dur)
+                    )
+                    take_for_beat(index, shot_list.RESCUE_CLIPS)
+            found = find_usable_footage(
+                download(video_urls[before:]), fmt, keep_all_if_none=False
+            )
+            windows.update(found)
+            if found:
+                emit(
+                    f"[+] Checking {len(found)} clip(s) for "
+                    f"{len(empty)} line(s) without footage.",
+                    "info",
+                )
+            verdicts = check(list(found)) if found else {}
+            for path, window in found.items():
+                verdict = verdicts.get(path)
+                if verdict is None or verdict.keep:
+                    footage[path] = window
+                    if verdict is None or verdict.kind == footage_judge.FOOTAGE:
+                        openers.add(path)
+                else:
+                    emit(
+                        f'[!] Not using {os.path.basename(path)} ("{term_of(path)}"): '
+                        f"{verdict.kind}"
+                        + (f", {verdict.problem}" if verdict.problem else "")
+                        + ".",
+                        "warning",
+                    )
 
     emit("[+] Script generated!", "success")
 

@@ -285,7 +285,9 @@ Generic footage that suits the topic passes. These are rejected:
 
 With footage chosen by beat, each frame also comes with the line it plays
 under, and a clip that line would contradict or that a viewer wouldn't connect
-with it is rejected too.
+with it is rejected too. Loosely related is not enough for such a clip, and
+neither is a stylized graphic, or a render of something else, under a line
+about a real object, person or place.
 
 A rejected clip is logged as `Not using <file> ("<term>"): <kind>, <problem>`
 and replaced by the next unused search result. When footage is chosen by
@@ -296,6 +298,13 @@ dahlias and a mossy wall. The replacements are checked
 too, for two rounds at most. Only real footage may open the video, since the
 opening is otherwise picked for contrast and cartoons have the most. One
 request covers a Short's ten frames and costs about a cent.
+
+A beat that still has no clip after that would be spoken over the picture of
+the beat before. Instead Claude is asked once, for all such beats together,
+for a new term each, given the line, the terms tried and why their clips were
+rejected. Two clips per new term are downloaded and checked once (logged as
+`Checking N clip(s) for M line(s) without footage.`). A beat whose rescue
+clips fail too gives its time to the beat before, as before.
 
 The check never fails a job. With no `ANTHROPIC_API_KEY`, with
 `FOOTAGE_MODEL=off`, or when a request fails, clips are used unchecked. If

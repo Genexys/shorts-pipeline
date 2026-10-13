@@ -39,6 +39,10 @@ MIN_BEATS = 3
 MIN_BEAT_SECONDS = 1.5
 # The search pass of a beat's backup term, as stored with its stock clips.
 BACKUP_PASS = "beat-backup"
+# And of the term asked for once both of a beat's terms came to nothing.
+RESCUE_PASS = "beat-rescue"
+# Clips taken for a rescued beat: one to show, one in case the first fails.
+RESCUE_CLIPS = 2
 
 PROMPT = """\
 These are the sentences of a short factual video, narrated over stock footage.
@@ -183,6 +187,67 @@ def plan_beats(subject: str, script: str, ask: Callable[[str, str], str]) -> Lis
         "info",
     )
     return beats
+
+
+RESCUE_PROMPT = """\
+A short factual video is narrated over stock footage, a search term per line.
+For the lines below, every clip the terms found was turned down, so the
+narrator would speak them over some other line's picture. Give each line one
+new stock search term.
+
+Video subject: {subject}
+
+{lines}
+
+- 1-3 words naming something a camera can film that a stock library would
+  have, and that a viewer would connect with the line at once.
+- Learn from why the clips were turned down: when the search returned renders
+  or abstract shapes, name a plain physical object or a person doing
+  something; when it returned the wrong thing, name it more concretely.
+- Not one of the terms already tried, nor a reworded copy of one.
+
+Return ONLY a JSON object, one term per line in the order given:
+{{"terms": ["...", "..."]}}
+"""
+
+
+def rescue_terms(
+    subject: str,
+    lines: Sequence[Tuple[str, Sequence[str], Sequence[str]]],
+    ask: Callable[[str, str], str],
+) -> List[str]:
+    """A new search term for each line whose footage was all turned down.
+
+    `lines` holds each line's (text, terms tried, why its clips were turned
+    down). On 2026-10-13 that was a line in each of three Shorts: "thermal
+    camera" and "infrared camera" found a heater and a beach, so the line
+    about thermal cameras played over a drawn microscope. Returns "" for a
+    line with no usable answer; never raises.
+    """
+    if not lines:
+        return []
+    listing = "\n\n".join(
+        f'Line {number}: "{text}"\n'
+        f"Terms tried: {', '.join(tried) or 'none'}\n"
+        f"Turned down: {'; '.join(problems) or 'no reason given'}"
+        for number, (text, tried, problems) in enumerate(lines, 1)
+    )
+    try:
+        reply = ask(RESCUE_PROMPT.format(subject=subject.strip(), lines=listing), "")
+        match = re.search(r"\{.*\}", reply or "", re.DOTALL)
+        terms = json.loads(match.group())["terms"] if match else []
+    except Exception as err:
+        log(f"[!] No new terms for the lines without footage ({err}).", "warning")
+        return [""] * len(lines)
+    if not isinstance(terms, list):
+        terms = []
+    answers = []
+    for index, (_, tried, _) in enumerate(lines):
+        term = str(terms[index]).strip() if index < len(terms) else ""
+        if term.lower() in {t.lower() for t in tried}:
+            term = ""
+        answers.append(term)
+    return answers
 
 
 def backup_first(entries: list) -> list:
