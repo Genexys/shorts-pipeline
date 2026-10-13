@@ -550,7 +550,8 @@ correction is then checked again. What that reading finds is corrected once
 more, within the same limits measured against the original, and read a third
 time; anything still unsupported holds the video. A claim is judged as its
 sentence makes it, so "zookeepers read the same signal" is not passed as
-"zookeepers measure hormones".
+"zookeepers measure hormones". A sign-off that states no fact, such as the
+TITAN persona's "FACT... CONFIRMED.", is not a claim and stays in the script.
 
 Every pinned correction before 2026-10-12 was this kind of miss: Kelsey's
 hands given to Doolittle, "created" for "helped create", "Edison's Rival" for
