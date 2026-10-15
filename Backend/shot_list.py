@@ -59,7 +59,8 @@ Beats:
   order, each in exactly one beat.
 - Aim for {low} to {high} beats. Start a new beat where the picture should
   change: a new object, place, person or step. Keep a very short sentence with
-  its neighbour.
+  its neighbour, and a closing catchphrase that states nothing with the
+  sentence before it.
 
 Search terms:
 - 1-3 words naming something a camera can film and a stock library would
@@ -103,6 +104,20 @@ def narrated_sentences(script: str) -> List[str]:
         for section in split_sections(for_narration(script))
         for sentence in split_sentences(section)
     ]
+
+
+def without_sign_off(text: str, sign_off: str) -> str:
+    """A beat's words without the persona's catchphrase, for judging its footage.
+
+    On 2026-10-14 the Teflon Short's last beat ended on "FACT... CONFIRMED.",
+    and the footage check turned down a pancake clip because pancakes "don't
+    relate to 'fact confirmed'". Nothing does; the picture is for the rest.
+    """
+    words = re.findall(r"[0-9A-Za-z]+", sign_off or "")
+    if not words:
+        return text
+    pattern = r"[^0-9A-Za-z]*".join(re.escape(word) for word in words)
+    return re.sub(rf"\s*\b{pattern}\b[^0-9A-Za-z\s]*", "", text, flags=re.IGNORECASE).strip()
 
 
 def beat_range(word_count: int, sentence_count: int) -> Tuple[int, int]:

@@ -50,6 +50,9 @@ class Persona:
     mascot_dir: Path
     poses: Tuple[str, ...]
     default_pose: str
+    # The closing catchphrase the rules ask for. It states nothing, so no
+    # picture is held to it (shot_list.without_sign_off).
+    sign_off: str = ""
 
 
 PERSONAS = {
@@ -71,6 +74,7 @@ PERSONAS = {
         mascot_dir=PROJECT_ROOT / "assets" / "mascot" / "titan",
         poses=(TALKING, HYPED, IMPRESSED, CELEBRATING),
         default_pose=TALKING,
+        sign_off="FACT... CONFIRMED.",
     ),
 }
 

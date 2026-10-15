@@ -14,7 +14,7 @@ Use `.env.example` as your template.
 | `ANTHROPIC_API_KEY` | **Required.** Claude writes every step — see [The writer](#the-writer). The worker refuses to start without it. |
 | `SCRIPT_MODEL` | *Optional.* Model for the writer's calls — see [The writer](#the-writer). | `claude-opus-5-5` |
 | `SCRIPT_FALLBACK_MODEL` | *Optional.* Second Claude model, used only while `SCRIPT_MODEL` is overloaded or down — see [The writer](#the-writer). Unset uses the default; set to an empty value for no fallback. | `claude-sonnet-5-5` |
-| `FOOTAGE_MODEL` | *Optional.* Model that looks at a frame of every stock clip before it is used — see [Stock footage](#stock-footage). Needs `ANTHROPIC_API_KEY`; `off` turns the check off. | `claude-sonnet-5-5` |
+| `FOOTAGE_MODEL` | *Optional.* Model that looks at frames of every stock clip before it is used — see [Stock footage](#stock-footage). Needs `ANTHROPIC_API_KEY`; `off` turns the check off. | `claude-sonnet-5-5` |
 | `FIRECRAWL_API_KEY` | *Optional.* Grounds scripts in real search results and lists the sources in the description — see [Research](#research). Empty writes scripts with no specifics at all. |
 
 ## Optional
@@ -271,7 +271,8 @@ as `Black in the combined video at ...`.
 2026-10-03 the tomato Short opened on an AI-drawn pelican selling fish
 ("vegetable market stall"), the Neanderthal one on a cartoon dog with a bone,
 and a tennis court stood in for the Supreme Court. So after the black check,
-the frame each shot opens on, cropped as it will be shown, goes to
+the frame each shot opens on and one three seconds in (when the clip's
+usable part runs that long), cropped as they will be shown, go to
 `FOOTAGE_MODEL` (Sonnet by default) with the subject, the narration and the
 term that found it. The model sorts it into real footage, a realistic render or
 a cartoon, and says whether a viewer would accept it as illustrating the video.
@@ -287,17 +288,23 @@ With footage chosen by beat, each frame also comes with the line it plays
 under, and a clip that line would contradict or that a viewer wouldn't connect
 with it is rejected too. Loosely related is not enough for such a clip, and
 neither is a stylized graphic, or a render of something else, under a line
-about a real object, person or place.
+about a real object, person or place. The same kind of thing passes, though,
+when it differs only in a detail a viewer wouldn't notice: a stainless pan
+under a line about non-stick pans, a blue tit under great tits. A persona's
+closing catchphrase ("FACT... CONFIRMED.") is left out of the line, since no
+picture can show it.
 
-A rejected clip is logged as `Not using <file> ("<term>"): <kind>, <problem>`
-and replaced by the next unused search result. When footage is chosen by
+A rejected clip is logged as
+`Not using <file> ("<term>"): <kind>, <problem> (<what it shows>)` and a kept
+one as `Using <file> ("<term>"): <kind> (<what it shows>)`. A rejected clip is
+replaced by the next unused search result. When footage is chosen by
 beat, the replacement comes from that beat's own searches, and its backup term
 is searched and tried first. More results for a term that has just failed are
 usually more of the same: on 2026-10-13 "hemlock plant" offered a tree trunk,
 dahlias and a mossy wall. The replacements are checked
 too, for two rounds at most. Only real footage may open the video, since the
 opening is otherwise picked for contrast and cartoons have the most. One
-request covers a Short's ten frames and costs about a cent.
+request covers a Short's clips and costs one to two cents.
 
 A beat that still has no clip after that would be spoken over the picture of
 the beat before. Instead Claude is asked once, for all such beats together,

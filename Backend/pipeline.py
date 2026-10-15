@@ -44,6 +44,8 @@ from utils import (
 )
 from video import (
     OPENING_SAMPLE_SECONDS,
+    CHECK_LATER_SECONDS,
+    MIN_CHECK_LATER_SECONDS,
     combine_videos,
     find_usable_footage,
     make_silence,
@@ -659,19 +661,34 @@ def run_generation_pipeline(
 
         def line_of(path: str) -> str:
             index = beat_of.get(url_for_path.get(path))
-            return beats[index].text if index is not None else ""
+            if index is None:
+                return ""
+            return shot_list.without_sign_off(
+                beats[index].text, character.sign_off if character else ""
+            )
 
         def check(paths: list) -> dict:
             guard_cancelled()
             frames = []
             for path in paths:
-                jpeg = sample_frame(
-                    path, windows[path][0] + OPENING_SAMPLE_SECONDS, fmt, ffmpeg_binary
-                )
-                if jpeg:
-                    frames.append(
-                        footage_judge.Frame(path, jpeg, term_of(path), line_of(path))
+                start, seconds = windows[path]
+                jpeg = sample_frame(path, start + OPENING_SAMPLE_SECONDS, fmt, ffmpeg_binary)
+                if not jpeg:
+                    continue
+                later = min(CHECK_LATER_SECONDS, seconds - OPENING_SAMPLE_SECONDS)
+                frames.append(
+                    footage_judge.Frame(
+                        path,
+                        jpeg,
+                        term_of(path),
+                        line_of(path),
+                        later=(
+                            sample_frame(path, start + later, fmt, ffmpeg_binary) or b""
+                            if later >= MIN_CHECK_LATER_SECONDS
+                            else b""
+                        ),
                     )
+                )
             verdicts = footage_judge.judge(frames, data["videoSubject"], script)
             verdicts_seen.update(verdicts)
             return verdicts
@@ -758,18 +775,14 @@ def run_generation_pipeline(
             verdicts = check(list(found)) if found else {}
             for path, window in found.items():
                 verdict = verdicts.get(path)
+                if verdict is not None:
+                    footage_judge.log_verdict(
+                        f'{os.path.basename(path)} ("{term_of(path)}")', verdict
+                    )
                 if verdict is None or verdict.keep:
                     footage[path] = window
                     if verdict is None or verdict.kind == footage_judge.FOOTAGE:
                         openers.add(path)
-                else:
-                    emit(
-                        f'[!] Not using {os.path.basename(path)} ("{term_of(path)}"): '
-                        f"{verdict.kind}"
-                        + (f", {verdict.problem}" if verdict.problem else "")
-                        + ".",
-                        "warning",
-                    )
 
     emit("[+] Script generated!", "success")
 
