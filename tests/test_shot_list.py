@@ -268,3 +268,21 @@ def test_a_short_or_broken_reply_leaves_lines_without_a_term():
 
     assert shot_list.rescue_terms("s", lines, fail) == ["", ""]
     assert shot_list.rescue_terms("s", [], fail) == []
+
+
+# -- the sign-off ---------------------------------------------------------------------
+
+
+def test_the_sign_off_is_left_out_of_the_line_footage_is_judged_by():
+    # 2026-10-14: pancakes "don't relate to 'fact confirmed'".
+    sign_off = "FACT... CONFIRMED."
+    assert (
+        shot_list.without_sign_off("Pancakes slide right off. FACT... CONFIRMED.", sign_off)
+        == "Pancakes slide right off."
+    )
+    assert shot_list.without_sign_off("Fact, confirmed!", sign_off) == ""
+    assert shot_list.without_sign_off("A fact few confirmed.", sign_off) == "A fact few confirmed."
+
+
+def test_without_a_persona_the_line_is_unchanged():
+    assert shot_list.without_sign_off("FACT... CONFIRMED.", "") == "FACT... CONFIRMED."

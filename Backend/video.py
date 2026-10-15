@@ -1737,6 +1737,11 @@ def make_silence(seconds: float, output_path: str) -> str:
 # the viewer actually sees first.
 OPENING_SAMPLE_SECONDS = 0.5
 
+# The footage check's second frame, counted from where the shot starts: about
+# the middle of a Short's shot. A clip whose window ends sooner gets none.
+CHECK_LATER_SECONDS = 3.0
+MIN_CHECK_LATER_SECONDS = 1.5
+
 # The frame the footage check (footage_judge.py) sees, at a size a model reads
 # comfortably and cheaply: about 200 image tokens for a Short.
 CHECK_FRAME_LONG_SIDE = 512

@@ -110,6 +110,83 @@ def test_every_frame_goes_with_its_search_term_and_the_story(monkeypatch):
     assert 'Clip 2: found by "supreme court building"' in prompt
 
 
+def test_a_clip_is_shown_by_its_first_frame_and_one_a_few_seconds_in(monkeypatch):
+    # 2026-10-14: an empty glass at half a second, espresso pouring after it.
+    _configured(monkeypatch)
+    calls = []
+    _fake_client(monkeypatch, [_response([])], calls)
+    frames = [
+        Frame("1.mp4", b"first", "spilling drink shirt", later=b"later"),
+        Frame("2.mp4", b"only", "soaked shirt"),
+    ]
+
+    footage_judge.judge(frames, SUBJECT, NARRATION)
+
+    content = calls[0]["messages"][0]["content"]
+    shown = [
+        base64.standard_b64decode(block["source"]["data"]) if block["type"] == "image"
+        else block["text"]
+        for block in content[1:]
+    ]
+    assert shown == ["Clip 1:", b"first", b"later", "Clip 2:", b"only"]
+    assert "by both frames" in content[0]["text"]
+
+
+def test_the_same_kind_of_thing_passes_despite_a_detail(monkeypatch):
+    # 2026-10-14: a stainless pan turned down three times under non-stick.
+    _configured(monkeypatch)
+    calls = []
+    _fake_client(monkeypatch, [_response([])], calls)
+    footage_judge.judge(_frames("non-stick pan"), SUBJECT, NARRATION)
+    prompt = calls[0]["messages"][0]["content"][0]["text"]
+    assert "same kind of thing" in prompt and "stainless pan" in prompt
+    # The historical rule still stands.
+    assert "a modern rocket or building standing in for a historical" in prompt
+
+
+def test_what_the_model_saw_is_kept_with_the_verdict(monkeypatch):
+    _configured(monkeypatch)
+    _fake_client(
+        monkeypatch,
+        [
+            _response(
+                [
+                    {
+                        "clip": 1,
+                        "kind": "footage",
+                        "fits": True,
+                        "shows": " espresso pouring into a glass ",
+                        "problem": "",
+                    }
+                ]
+            )
+        ],
+        [],
+    )
+    verdicts = footage_judge.judge(_frames("spilling drink shirt"), SUBJECT, NARRATION)
+    assert verdicts["1.mp4"].shows == "espresso pouring into a glass"
+
+
+def test_a_kept_clip_is_logged_with_what_it_shows(monkeypatch):
+    lines = []
+    monkeypatch.setattr(footage_judge, "log", lambda message, level: lines.append(message))
+    footage_judge.vet_footage(
+        {"1.mp4": (0.0, 5.0), "2.mp4": (0.0, 5.0)},
+        _check_from(
+            {
+                "1.mp4": Verdict(FOOTAGE, True, "", "espresso pouring into a glass"),
+                "2.mp4": Verdict(FOOTAGE, False, "a tennis court", "a tennis match"),
+            }
+        ),
+        lambda rejected: {},
+        rounds=0,
+    )
+    assert lines == [
+        "[+] Using 1.mp4: footage (espresso pouring into a glass).",
+        "[!] Not using 2.mp4: footage, a tennis court (a tennis match).",
+    ]
+
+
 def test_verdicts_are_filed_under_their_clips(monkeypatch):
     _configured(monkeypatch)
     _fake_client(

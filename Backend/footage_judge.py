@@ -9,8 +9,8 @@ which cartoons have most of. The same videos showed a tennis court for
 Sputnik one an American rocket. No search term could have avoided those; only
 looking at the picture can.
 
-So one frame per clip — the one the viewer sees first, cropped as it will be
-shown — goes to a Claude model with the subject, the narration and the term
+So frames of each clip — the one the viewer sees first, cropped as it will be
+shown, and one a few seconds later — go to a Claude model with the subject, the narration and the term
 that found it. A cartoon, or a clip that would mislead, is replaced by the
 next search result. Realistic renders are kept but never open the video.
 
@@ -19,6 +19,15 @@ loosely related is not enough: on 2026-10-13 a stylized microscope passed
 under "thermal cameras were prohibitively expensive", and a skeleton in a
 classroom under the 1985 date. A line left with nothing that passes gets one
 more search term (shot_list.rescue_terms) rather than a picture that misleads.
+But near enough is not the same as a detail: on 2026-10-14 a stainless pan was
+turned down three times under a line about non-stick ones, and a blue tit
+under great tits, neither of which a viewer would have minded. The same kind
+of thing passes.
+
+One frame was not enough either: the wet T-shirt Short of 2026-10-14 opened on
+an empty glass under an espresso machine, judged at half a second in, and the
+coffee pouring for the next four seconds was never seen. So a second frame, a
+few seconds in, goes with the first.
 
 Optional by construction, like writer.py: with no ANTHROPIC_API_KEY, with
 FOOTAGE_MODEL=off, or on any failure, every clip is used as before.
@@ -59,8 +68,10 @@ KINDS = (FOOTAGE, RENDER, CARTOON)
 
 PROMPT = """\
 You are checking stock footage for a short factual video before it is cut
-together. Each image is the first frame the viewer will see of one clip,
-cropped as it will be shown, and comes with the stock search term that found it.
+together. Each clip comes as the first frame the viewer will see and, mostly,
+a second frame from a few seconds later, cropped as they will be shown, with
+the stock search term that found it. Judge the clip by both frames: it fits
+only if what the viewer sees in either would.
 
 Video subject: {subject}
 
@@ -86,7 +97,12 @@ For each clip, decide:
   is not enough here: if the viewer would have to guess how the picture
   relates to the words, it does not fit. Nor does a stylized graphic, or a
   render of something else, under a line about a real object, person or
-  place.
+  place. But the same kind of thing the line names counts as showing it,
+  even when it differs in a detail a viewer would not notice or mind: a
+  stainless pan under a line about non-stick pans, a blue tit under great
+  tits, any shirt for a shirt. Only when the line turns on that very detail,
+  or the difference contradicts the story as above, does it not fit.
+- shows: a few words on what the frames show.
 - problem: a few words naming what is wrong, or "" when it fits.
 
 {listing}"""
@@ -102,9 +118,10 @@ SCHEMA = {
                     "clip": {"type": "integer"},
                     "kind": {"type": "string", "enum": list(KINDS)},
                     "fits": {"type": "boolean"},
+                    "shows": {"type": "string"},
                     "problem": {"type": "string"},
                 },
-                "required": ["clip", "kind", "fits", "problem"],
+                "required": ["clip", "kind", "fits", "shows", "problem"],
                 "additionalProperties": False,
             },
         }
@@ -123,6 +140,8 @@ class Frame:
     term: str
     # The narration it plays under, when footage is chosen line by line.
     line: str = ""
+    # A frame from a few seconds in, or b"" when the clip has none to give.
+    later: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -130,6 +149,8 @@ class Verdict:
     kind: str
     fits: bool
     problem: str
+    # What the model saw, so a clip that passed can be looked into too.
+    shows: str = ""
 
     @property
     def keep(self) -> bool:
@@ -171,16 +192,18 @@ def _ask(frames: Sequence[Frame], subject: str, narration: str) -> Dict[str, Ver
     ]
     for number, frame in enumerate(frames, 1):
         content.append({"type": "text", "text": f"Clip {number}:"})
-        content.append(
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": base64.standard_b64encode(frame.jpeg).decode("ascii"),
-                },
-            }
-        )
+        for jpeg in (frame.jpeg, frame.later):
+            if jpeg:
+                content.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": base64.standard_b64encode(jpeg).decode("ascii"),
+                        },
+                    }
+                )
     response = _client().messages.create(
         model=model_name(),
         max_tokens=MAX_TOKENS,
@@ -203,7 +226,10 @@ def _ask(frames: Sequence[Frame], subject: str, narration: str) -> Dict[str, Ver
         number = item["clip"]
         if 1 <= number <= len(frames):
             verdicts[frames[number - 1].path] = Verdict(
-                kind=item["kind"], fits=bool(item["fits"]), problem=item["problem"].strip()
+                kind=item["kind"],
+                fits=bool(item["fits"]),
+                problem=item["problem"].strip(),
+                shows=str(item.get("shows") or "").strip(),
             )
     return verdicts
 
@@ -231,6 +257,20 @@ def judge(frames: Sequence[Frame], subject: str, narration: str) -> Dict[str, Ve
 
 
 Footage = Dict[str, Tuple[float, float]]
+
+
+def log_verdict(clip: str, verdict: Verdict) -> None:
+    """One line per judged clip, the ones kept too, with what the model saw."""
+    seen = f" ({verdict.shows})" if verdict.shows else ""
+    if verdict.keep:
+        log(f"[+] Using {clip}: {verdict.kind}{seen}.", "info")
+    else:
+        log(
+            f"[!] Not using {clip}: {verdict.kind}"
+            + (f", {verdict.problem}" if verdict.problem else "")
+            + f"{seen}.",
+            "warning",
+        )
 
 
 def vet_footage(
@@ -262,6 +302,8 @@ def vet_footage(
         dropped: List[str] = []
         for path, window in pending.items():
             verdict = verdicts.get(path)
+            if verdict is not None:
+                log_verdict(describe(path), verdict)
             if verdict is None or verdict.keep:
                 kept[path] = window
                 if verdict is None or verdict.kind == FOOTAGE:
@@ -269,12 +311,6 @@ def vet_footage(
                 continue
             dropped.append(path)
             rejected[path] = window
-            log(
-                f"[!] Not using {describe(path)}: {verdict.kind}"
-                + (f", {verdict.problem}" if verdict.problem else "")
-                + ".",
-                "warning",
-            )
         if not dropped or round_number == rounds:
             break
         pending = replace(dropped)
