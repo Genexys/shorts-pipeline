@@ -372,6 +372,20 @@ def plan_segments(
     return segments
 
 
+def borrow_for(
+    index: int, fitting: Sequence[str], index_of: Callable[[str], Optional[int]]
+) -> Optional[str]:
+    """Which of the clips judged to fit an empty line plays under it, or None.
+
+    Not one from the line next to it when another fits: that one is already
+    on screen either side, and showing it longer is what the borrowing is for
+    avoiding.
+    """
+    neighbours = {index - 1, index + 1}
+    ranked = sorted(fitting, key=lambda path: index_of(path) in neighbours)
+    return ranked[0] if ranked else None
+
+
 def beat_of_each(
     beats: Sequence[Beat], paths: Sequence[str], index_of: Callable[[str], Optional[int]]
 ) -> List[List[str]]:

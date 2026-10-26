@@ -317,8 +317,13 @@ A beat that still has no clip after that would be spoken over the picture of
 the beat before. Instead Claude is asked once, for all such beats together,
 for a new term each, given the line, the terms tried and why their clips were
 rejected. Two clips per new term are downloaded and checked once (logged as
-`Checking N clip(s) for M line(s) without footage.`). A beat whose rescue
-clips fail too shares its time with the beats either side.
+`Checking N clip(s) for M line(s) without footage.`). If the rescue clips fail
+too, the video's own clips are judged against that line, and one that fits
+(preferably not the clip of the line next to it) plays under it as well,
+logged as `Line N has no footage of its own; showing <file> ("<term>") under
+it too.` A clip shown a second time carries on from where it stopped rather
+than replaying the same frames. Only when nothing fits does the beat share
+its time with the beats either side.
 
 The check never fails a job. With no `ANTHROPIC_API_KEY`, with
 `FOOTAGE_MODEL=off`, or when a request fails, clips are used unchecked. If

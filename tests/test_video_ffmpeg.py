@@ -687,3 +687,27 @@ def test_promote_strongest_opening_picks_the_one_with_contrast(tmp_path):
         [str(flat), str(busy)], tmp_path / "work"
     )
     assert ordered[0] == str(busy)
+
+
+# -- a clip shown twice, and captions too wide ---------------------------------------
+
+
+def test_a_clip_shown_again_carries_on_from_where_it_stopped():
+    footage = {"a.mp4": (1.0, 10.0), "b.mp4": (0.0, 4.0)}
+    starts = video.segment_starts(
+        [("a.mp4", 4.0), ("b.mp4", 3.0), ("a.mp4", 4.0), ("b.mp4", 3.0), ("a.mp4", 4.0)],
+        footage,
+    )
+    assert [start for _, _, start in starts] == [1.0, 0.0, 5.0, 0.0, 1.0]
+
+
+def test_a_plain_caption_too_wide_for_the_frame_is_scaled_down():
+    # 2026-10-26: "AUTO-HEMORRHAGING." ran off both edges.
+    assert video.plain_fit("ONION") == 100
+    scale = video.plain_fit("AUTO-HEMORRHAGING.")
+    assert scale < 100
+    line = "Dialogue: 0,0:00:00.00,0:00:00.50,Default,,0,0,0,,AUTO-HEMORRHAGING."
+    assert video.fit_plain_dialogue(line).endswith(
+        rf"{{\fscx{scale}\fscy{scale}}}AUTO-HEMORRHAGING."
+    )
+    assert video.fit_plain_dialogue(line.replace("AUTO-HEMORRHAGING.", "ONION")).endswith(",ONION")

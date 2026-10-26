@@ -651,6 +651,9 @@ def run_generation_pipeline(
     # both judge the frames each shot will actually show.
     footage = find_usable_footage(video_paths, fmt)
     openers = None
+    # A line left without footage of its own, and a clip from elsewhere in the
+    # video that was judged to fit it: beat index to path.
+    borrowed: dict = {}
     if footage_judge.is_enabled():
         windows = dict(footage)
         # Every verdict, so a line left without footage can say why.
@@ -667,7 +670,8 @@ def run_generation_pipeline(
                 beats[index].text, character.sign_off if character else ""
             )
 
-        def check(paths: list) -> dict:
+        def check(paths: list, line: Optional[str] = None) -> dict:
+            """Verdicts on `paths`, each judged against its own line or `line`."""
             guard_cancelled()
             frames = []
             for path in paths:
@@ -681,7 +685,7 @@ def run_generation_pipeline(
                         path,
                         jpeg,
                         term_of(path),
-                        line_of(path),
+                        line_of(path) if line is None else line,
                         later=(
                             sample_frame(path, start + later, fmt, ffmpeg_binary) or b""
                             if later >= MIN_CHECK_LATER_SECONDS
@@ -690,7 +694,8 @@ def run_generation_pipeline(
                     )
                 )
             verdicts = footage_judge.judge(frames, data["videoSubject"], script)
-            verdicts_seen.update(verdicts)
+            if line is None:
+                verdicts_seen.update(verdicts)
             return verdicts
 
         def replace(rejected: list) -> dict:
@@ -784,6 +789,39 @@ def run_generation_pipeline(
                     if verdict is None or verdict.kind == footage_judge.FOOTAGE:
                         openers.add(path)
 
+        # A line still without footage would hand its time to the clips either
+        # side, and they were judged against their own lines, not this one: on
+        # 2026-10-26 the horned lizard Short opened on a lizard that was not
+        # one, chosen for "a lizard first aims", and the Blue Flame one held an
+        # aerial of a salt pan for its last 18 s. So the video's own clips are
+        # judged against the line, and one that fits plays under it too.
+        shown = {beat_of.get(url_for_path.get(path)) for path in footage}
+        for index in [i for i in range(len(beats)) if i not in shown]:
+            line = shot_list.without_sign_off(
+                beats[index].text, character.sign_off if character else ""
+            )
+            if not line:
+                continue
+            verdicts = check(list(footage), line)
+            choice = shot_list.borrow_for(
+                index,
+                [
+                    path
+                    for path in footage
+                    if verdicts.get(path) is not None
+                    and verdicts[path].keep
+                    and verdicts[path].kind == footage_judge.FOOTAGE
+                ],
+                lambda path: beat_of.get(url_for_path.get(path)),
+            )
+            if choice:
+                borrowed[index] = choice
+                emit(
+                    f"[+] Line {index + 1} has no footage of its own; showing "
+                    f'{os.path.basename(choice)} ("{term_of(choice)}") under it too.',
+                    "info",
+                )
+
     emit("[+] Script generated!", "success")
 
     guard_cancelled()
@@ -875,6 +913,9 @@ def run_generation_pipeline(
             by_beat = shot_list.beat_of_each(
                 beats, usable_paths, lambda path: beat_of.get(url_for_path.get(path))
             )
+            for index, path in borrowed.items():
+                if path in footage and not by_beat[index]:
+                    by_beat[index] = [path]
             # The strongest of the first line's clips opens the video; the
             # order elsewhere follows the narration.
             first = next((i for i, paths in enumerate(by_beat) if paths), None)
