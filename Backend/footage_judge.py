@@ -10,8 +10,8 @@ Sputnik one an American rocket. No search term could have avoided those; only
 looking at the picture can.
 
 So frames of each clip — the one the viewer sees first, cropped as it will be
-shown, and one a few seconds later — go to a Claude model with the subject, the narration and the term
-that found it. A cartoon, or a clip that would mislead, is replaced by the
+shown, and one a few seconds later — go to a Claude model with the subject,
+the narration and the term that found it. A cartoon, or a clip that would mislead, is replaced by the
 next search result. Realistic renders are kept but never open the video.
 
 A clip chosen for one line of the narration is held to that line, and
@@ -19,10 +19,15 @@ loosely related is not enough: on 2026-10-13 a stylized microscope passed
 under "thermal cameras were prohibitively expensive", and a skeleton in a
 classroom under the 1985 date. A line left with nothing that passes gets one
 more search term (shot_list.rescue_terms) rather than a picture that misleads.
+Nudity and blood are never shown: on 2026-10-18 the shower curtain Short
+showed a bather's bare back, and on 10-19 the paper cut Short a bloody wound.
+
 But near enough is not the same as a detail: on 2026-10-14 a stainless pan was
 turned down three times under a line about non-stick ones, and a blue tit
 under great tits, neither of which a viewer would have minded. The same kind
-of thing passes.
+of thing passes, as far as a viewer could take it for the one named: on
+2026-10-20 to 10-23 an iguana and a chameleon stood in for horned lizards, an
+SUV for the Blue Flame rocket car, and convex mirrors for a concave spoon.
 
 One frame was not enough either: the wet T-shirt Short of 2026-10-14 opened on
 an empty glass under an espresso machine, judged at half a second in, and the
@@ -90,7 +95,9 @@ For each clip, decide:
   court for "supreme court"); it contradicts the story (another country's
   flag or landmarks, a modern rocket or building standing in for a historical
   one the narration names); it is horror or Halloween imagery in a story that
-  is neither; or there is nothing to see (blank, blurred, a title card).
+  is neither; it shows nudity or a bloody wound, which a general audience
+  should not be shown whatever the story; or there is nothing to see (blank,
+  blurred, a title card).
   When a clip comes with the line it plays under, judge it against that line
   too: it does not fit when it shows something the line would contradict, or
   something a viewer would not connect with what is being said. Near enough
@@ -100,8 +107,15 @@ For each clip, decide:
   place. But the same kind of thing the line names counts as showing it,
   even when it differs in a detail a viewer would not notice or mind: a
   stainless pan under a line about non-stick pans, a blue tit under great
-  tits, any shirt for a shirt. Only when the line turns on that very detail,
-  or the difference contradicts the story as above, does it not fit.
+  tits, any shirt for a shirt. That is for things a viewer could take for
+  the one named. A clearly different animal, vehicle or object does not
+  fit, least of all when the claim is about that very thing: an iguana or a
+  chameleon under a line about horned lizards, a vintage road car or a
+  modern SUV for a record-breaking rocket car. Nor does a picture that shows
+  the opposite of what the line explains, such as a convex mirror, which
+  shows an upright image, under a line about a concave one turning the
+  image upside down. Only when the line turns on the detail, or the
+  difference contradicts the story as above, does it not fit.
 - shows: a few words on what the frames show.
 - problem: a few words naming what is wrong, or "" when it fits.
 

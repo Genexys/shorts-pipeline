@@ -216,8 +216,11 @@ beat downloads enough clips that no shot runs past the five-second cap.
 Once the narration is recorded, every beat plays from the caption holding its
 first word up to the next beat's. Two exceptions:
 
-- a beat with no usable clip gives its time to the beat before;
-- so does a beat under 1.5 seconds, because a cut that quick reads as a glitch.
+- a beat with no usable clip shares its time between the beats either side
+  (all of it to its one neighbour at the start or end), so no picture is held
+  over several lines it does not show;
+- a beat under 1.5 seconds gives its time to the beat before, because a cut
+  that quick reads as a glitch.
 
 The strongest of the first beat's clips opens the video. The log shows the
 plan as `Shot list: 1 "walking through doorway" | 2-3 "..."` and the timing as
@@ -290,7 +293,11 @@ with it is rejected too. Loosely related is not enough for such a clip, and
 neither is a stylized graphic, or a render of something else, under a line
 about a real object, person or place. The same kind of thing passes, though,
 when it differs only in a detail a viewer wouldn't notice: a stainless pan
-under a line about non-stick pans, a blue tit under great tits. A persona's
+under a line about non-stick pans, a blue tit under great tits. A clearly
+different animal, vehicle or object does not (an iguana for a horned lizard,
+an SUV for a rocket car), nor does a picture showing the opposite of what the
+line explains (a convex mirror for a concave one). Nudity and bloody wounds
+are rejected whatever the story. A persona's
 closing catchphrase ("FACT... CONFIRMED.") is left out of the line, since no
 picture can show it.
 
@@ -311,7 +318,7 @@ the beat before. Instead Claude is asked once, for all such beats together,
 for a new term each, given the line, the terms tried and why their clips were
 rejected. Two clips per new term are downloaded and checked once (logged as
 `Checking N clip(s) for M line(s) without footage.`). A beat whose rescue
-clips fail too gives its time to the beat before, as before.
+clips fail too shares its time with the beats either side.
 
 The check never fails a job. With no `ANTHROPIC_API_KEY`, with
 `FOOTAGE_MODEL=off`, or when a request fails, clips are used unchecked. If
@@ -410,7 +417,9 @@ curtain", and a hedge such as "this is not the sole mechanism" is kept as one.
 
 Facts are stored **verbatim**: each is a sentence that appears word for word on
 the page it cites, so nothing can be invented on the way in. Reference lists,
-navigation, maintenance tags and sentences addressed to the reader are dropped.
+navigation, maintenance tags, readers' comments and sentences addressed to the
+reader are dropped: comment sections are excluded from the scrape, and the page
+is cut at a "Comments" or "Related content" heading.
 A sentence whose subject is only "he", "she" or "they" is stored together with
 the earlier sentence in its paragraph that names them, with "…" marking any
 sentences in between, since on its own it is a fact about nobody. Pages stored

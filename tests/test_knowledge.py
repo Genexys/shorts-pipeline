@@ -45,6 +45,50 @@ def test_clean_markdown_stops_at_the_references():
     assert "identifier" not in text
 
 
+BREATH_PAGE = """# Why is your breath sometimes warm and sometimes cold
+
+### Explanation
+
+With your mouth open most of the air which reaches your hand has come out of your mouth.
+
+## Related Content
+
+#### [Future Fridges](https://www.thenakedscientists.com/articles/interviews/future-fridges)
+
+## Comments
+
+### [Laminar?](https://www.thenakedscientists.com/comment/1#comment-1)
+
+The open mouth stream is less turbulent and perhaps even near laminar flow.
+"""
+
+
+def test_clean_markdown_stops_at_readers_comments():
+    # 2026-10-23: a reader's guess went on air as the explanation.
+    text = " ".join(knowledge.clean_markdown(BREATH_PAGE))
+    assert "has come out of your mouth" in text
+    assert "laminar" not in text and "Fridges" not in text
+    assert " ".join(knowledge.clean_markdown("Kept.\n\n## 12 Comments\n\nA guess.")) == "Kept."
+
+
+def test_clean_markdown_keeps_a_papers_discussion():
+    text = " ".join(knowledge.clean_markdown("## Results\n\nIt worked.\n\n## Discussion\n\nSo it is."))
+    assert "So it is." in text
+
+
+def test_comment_sections_are_left_out_of_the_scrape(monkeypatch):
+    sent = {}
+
+    def post(url, headers, json, timeout):
+        sent.update(json)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(knowledge, "api_key", lambda: "fc-test")
+    monkeypatch.setattr(knowledge.requests, "post", post)
+    assert knowledge.fetch_markdown("https://example.com/a") is None
+    assert "#comments" in sent["excludeTags"] and sent["onlyMainContent"] is True
+
+
 def test_clean_markdown_keeps_an_editorial_letter_and_drops_a_tag():
     text = " ".join(knowledge.clean_markdown(WIKI_PAGE))
     assert '"the smell is' in text

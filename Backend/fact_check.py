@@ -77,7 +77,10 @@ not list it, and keep it in the script word for word. Judge each claim:
   ("helped create" told as "created", a hypothesis told as settled, a
   correlation told as a cause, "one of the first" told as "the first"); or
   it credits the wrong person, place or year for something the evidence
-  credits elsewhere.
+  credits elsewhere. A person the script names by surname alone, or
+  without saying who they are, before introducing them is unsupported too:
+  the viewer cannot tell who did it. Fix it with the full name and role the
+  evidence gives ("Art Fry, a 3M colleague"), or without the name.
 - "wrong": the evidence or well-established knowledge contradicts it.
 
 If every claim is supported, return the script unchanged. Otherwise rewrite

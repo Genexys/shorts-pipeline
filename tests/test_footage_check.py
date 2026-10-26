@@ -144,6 +144,27 @@ def test_the_same_kind_of_thing_passes_despite_a_detail(monkeypatch):
     assert "a modern rocket or building standing in for a historical" in prompt
 
 
+def test_a_clearly_different_animal_or_vehicle_does_not_pass(monkeypatch):
+    # 2026-10-20 to 10-23: an iguana for horned lizards, an SUV for a rocket car.
+    _configured(monkeypatch)
+    calls = []
+    _fake_client(monkeypatch, [_response([])], calls)
+    footage_judge.judge(_frames("horned lizard"), SUBJECT, NARRATION)
+    prompt = " ".join(calls[0]["messages"][0]["content"][0]["text"].split())
+    assert "could take for the one named" in prompt
+    assert "an iguana or a chameleon under a line about horned lizards" in prompt
+    assert "convex mirror" in prompt
+
+
+def test_nudity_and_blood_never_fit(monkeypatch):
+    _configured(monkeypatch)
+    calls = []
+    _fake_client(monkeypatch, [_response([])], calls)
+    footage_judge.judge(_frames("person showering"), SUBJECT, NARRATION)
+    prompt = " ".join(calls[0]["messages"][0]["content"][0]["text"].split())
+    assert "nudity or a bloody wound" in prompt
+
+
 def test_what_the_model_saw_is_kept_with_the_verdict(monkeypatch):
     _configured(monkeypatch)
     _fake_client(

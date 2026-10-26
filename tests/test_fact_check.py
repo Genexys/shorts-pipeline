@@ -241,3 +241,9 @@ def test_the_persona_sign_off_is_not_a_claim():
     fact_check.check_script("pacemaker", SCRIPT, EVIDENCE, ask)
     assert '"FACT...\nCONFIRMED."' in ask.prompts[0]
     assert "not a claim" in ask.prompts[0]
+
+
+def test_a_bare_surname_is_caught_and_introduced():
+    # 2026-10-19: "Then Fry used makeshift sticky notes", Fry never introduced.
+    prompt = " ".join(fact_check.CHECK_PROMPT.split())
+    assert "surname alone" in prompt and "Art Fry, a 3M colleague" in prompt
