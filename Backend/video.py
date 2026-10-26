@@ -990,11 +990,15 @@ def combine_videos(
         "-map",
         "[vout]",
         "-an",
-        *encoder_args(threads, final=False),
     ]
-    command.append(str(combined_video_path))
 
-    subprocess.run(command, check=True, capture_output=True, text=True)
+    run_encode(
+        lambda: [
+            *command,
+            *encoder_args(threads, final=False),
+            str(combined_video_path),
+        ]
+    )
     report_black_spans(str(combined_video_path), float(max_duration), fmt)
     return str(combined_video_path)
 
@@ -1400,19 +1404,20 @@ def generate_video(
         str: "output.mp4", relative to the project root.
     """
     output_path = TEMP_DIR / "output.mp4"
-    command = build_render_command(
-        combined_video_path,
-        tts_path,
-        subtitles_path,
-        str(output_path),
-        threads,
-        subtitles_position,
-        text_color,
-        fmt,
-        caption_style,
-        mascot,
+    run_encode(
+        lambda: build_render_command(
+            combined_video_path,
+            tts_path,
+            subtitles_path,
+            str(output_path),
+            threads,
+            subtitles_position,
+            text_color,
+            fmt,
+            caption_style,
+            mascot,
+        )
     )
-    subprocess.run(command, check=True, capture_output=True, text=True)
     return "output.mp4"
 
 
@@ -1469,6 +1474,30 @@ def nvenc_available() -> bool:
         "info" if available else "warning",
     )
     return available
+
+
+def run_encode(build_command: Callable[[], List[str]]) -> None:
+    """Runs an ffmpeg encode, moving to libx264 if NVENC stops working.
+
+    The probe runs once per process, and the worker lives for days: a WSL host
+    that sleeps or updates its driver leaves the container without CUDA
+    (cuInit fails), and every job after that failed on the cached answer. On
+    an NVENC failure the GPU is probed again; if it is gone, the command is
+    rebuilt for the software encoder and run once more. If the GPU still works,
+    the failure was something else and is raised as it was.
+    """
+    command = build_command()
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        return
+    except subprocess.CalledProcessError:
+        if NVENC_CODEC not in command:
+            raise
+        _encoder_cache.pop(NVENC_CODEC, None)
+        if nvenc_available():
+            raise
+    log(f"[!] {NVENC_CODEC} stopped working; encoding with {SOFTWARE_CODEC}.", "warning")
+    subprocess.run(build_command(), check=True, capture_output=True, text=True)
 
 
 def encoder_args(threads: int, final: bool) -> List[str]:

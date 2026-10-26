@@ -157,13 +157,21 @@ def test_a_lone_clip_holds_the_whole_line_rather_than_restarting():
     assert segments == [("one.mp4", 6.5)]
 
 
-def test_a_line_with_no_clips_gives_its_time_to_the_line_before():
+def test_a_line_with_no_clips_shares_its_time_with_the_lines_either_side():
+    # 2026-10-18: a television studio held 11.7 s over three lines about toast.
     segments = shot_list.plan_segments(
-        [(0.0, 3.0), (3.0, 5.0), (5.0, 8.0)],
+        [(0.0, 3.0), (3.0, 9.0), (9.0, 12.0)],
         [[("a.mp4", 12.0)], [], [("c.mp4", 12.0)]],
-        5.0,
+        10.0,
     )
-    assert segments == [("a.mp4", 5.0), ("c.mp4", 3.0)]
+    assert segments == [("a.mp4", 6.0), ("c.mp4", 6.0)]
+
+
+def test_a_line_with_no_clips_at_the_end_goes_to_the_line_before():
+    segments = shot_list.plan_segments(
+        [(0.0, 3.0), (3.0, 5.0)], [[("a.mp4", 12.0)], []], 5.0
+    )
+    assert segments == [("a.mp4", 5.0)]
 
 
 def test_a_line_too_short_for_a_shot_is_not_cut_to():

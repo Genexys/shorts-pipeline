@@ -320,28 +320,42 @@ def plan_segments(
     """The (path, seconds) shots in playing order, one beat after another.
 
     `clips` holds each beat's (path, usable seconds), in the order they should
-    play. A beat with no clips, or too short for a shot, gives its time to the
-    beat before it; one at the very start gives it to the beat after.
+    play. A beat too short for a shot gives its time to the beat before it. A
+    beat with no clips shares its time between the beats either side, so that
+    neither picture is held over all of it: on 2026-10-18 the toast Short held
+    a television studio for 11.7 s across three lines about toast, and the
+    opossum one a woman in bed for 12.4 s. One at the very start or end gives
+    it all to its one neighbour.
 
     Raises:
         ValueError: If no beat has a clip.
     """
-    kept: List[list] = []
+    lengths = [end - start for start, end in windows]
+    shown: List[bool] = []
     carried = 0.0
-    for (start, end), sources in zip(windows, clips):
-        length = end - start
-        if sources and length + carried >= MIN_BEAT_SECONDS and (
-            not kept or length >= MIN_BEAT_SECONDS
-        ):
-            kept.append([length + carried, list(sources)])
-            carried = 0.0
-        elif kept:
-            kept[-1][0] += length
-        else:
-            carried += length
-    if not kept:
+    for length, sources in zip(lengths, clips):
+        ok = bool(sources) and length + carried >= MIN_BEAT_SECONDS and (
+            not any(shown) or length >= MIN_BEAT_SECONDS
+        )
+        shown.append(ok)
+        carried = 0.0 if ok else carried + length
+    if not any(shown):
         raise ValueError("No beat has a clip to show.")
-    kept[-1][0] += carried
+    shown_at = [index for index, ok in enumerate(shown) if ok]
+    extra = {index: 0.0 for index in shown_at}
+    for index, ok in enumerate(shown):
+        if ok:
+            continue
+        before = [i for i in shown_at if i < index]
+        after = [i for i in shown_at if i > index]
+        if before and after and not clips[index]:
+            extra[before[-1]] += lengths[index] / 2
+            extra[after[0]] += lengths[index] / 2
+        elif before:
+            extra[before[-1]] += lengths[index]
+        else:
+            extra[after[0]] += lengths[index]
+    kept: List[list] = [[lengths[i] + extra[i], list(clips[i])] for i in shown_at]
 
     segments: List[Tuple[str, float]] = []
     for index, (length, sources) in enumerate(kept):

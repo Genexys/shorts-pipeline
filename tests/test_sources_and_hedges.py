@@ -162,3 +162,9 @@ def test_an_anchor_line_loses_to_the_notes():
     rules = " ".join(gpt.anchor_rules("Thomas Edison's first hydroelectric plant").split())
     assert "Where the notes disagree with it, the notes win." in rules
     assert "If you include it, say when it did happen." in rules
+
+
+def test_a_person_is_introduced_by_full_name_and_role():
+    rules = " ".join(gpt.RESEARCH_RULES.split())
+    assert "full name and who they are" in rules
+    assert "never a bare surname" in rules

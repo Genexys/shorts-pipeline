@@ -133,6 +133,7 @@ docker compose -f docker-compose.yml -f compose.win.yml up -d --force-recreate w
 - Upload skipped with `No valid YouTube credentials`: `secrets/youtube_token.json` is missing or invalid; recreate it on a machine with a browser (docs/deploy.md). If the file is there on the host, the container has an empty mount instead — see "Empty mounts after a reboot" above.
 - `worker` or `autopilot` log `refuses to start`: `REQUIRE_MOUNTS` is on and the container cannot see its token or songs. Check from inside, `docker compose exec worker ls /app/secrets /app/Songs`, then recreate the container.
 - Renders are still slow on Windows with `compose.win.yml`: the GPU reservation succeeded but `FFMPEG_BINARY` did not take effect. Check `docker compose ... exec worker printenv FFMPEG_BINARY`; if it is empty, MoviePy is using the imageio binary, which has no nvenc.
+- `h264_nvenc stopped working; encoding with libx264` in the worker log: the container lost CUDA (`cuInit` fails), typically after the WSL host slept or its driver updated. The job finishes on the CPU; recreate the worker to get the GPU back.
 - `h264_nvenc` fails with `Cannot load libnvidia-encode.so`: `NVIDIA_DRIVER_CAPABILITIES` is missing `video`. The default capability set grants compute only.
 - Files in `output/` are owned by root: containers run as root; `sudo chown -R $USER output` if you need to edit them.
 - `worker` or `autopilot` restart a few times right after a host reboot: `restart: always` ignores `depends_on`, so they can start before Postgres answers; they settle within a minute.

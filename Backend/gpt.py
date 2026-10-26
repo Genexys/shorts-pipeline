@@ -1279,6 +1279,8 @@ def drop_weak_ending(script: str, floor: int, cut_short: bool = False) -> str:
 # - A Soutra Short called an excavator's reading "proof".
 # - A pacemaker Short opened, and was titled, "invented the pacemaker" from a
 #   source that said "helped create".
+# - The Post-it Short of 2026-10-19 said "Then Fry used makeshift sticky notes",
+#   copied from a page that had introduced Art Fry paragraphs earlier.
 RESEARCH_RULES = """
     Use the numbered research notes below as your only source of specifics.
     Concrete detail is wanted: figures, dates, place names and named studies
@@ -1313,6 +1315,10 @@ RESEARCH_RULES = """
     is about whoever that note, or the page title beside it, names — which may
     not be the person this video is about. If neither names anyone, leave the
     note out rather than guess who it was.
+    Introduce a person the first time they appear, with their full name and
+    who they are as the notes give them ("Art Fry, a 3M colleague"), never a
+    bare surname the viewer has not heard before. If the notes do not say who
+    someone is, tell the story without the name.
     Where the notes do not support a specific, write the general statement
     instead. Do not cite the notes by number, and do not mention that notes
     exist.

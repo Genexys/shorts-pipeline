@@ -246,6 +246,65 @@ def test_nvenc_availability_is_probed_once(monkeypatch):
     assert len(calls) == 1
 
 
+def _fake_encoder(monkeypatch, gpu_works: bool, nvenc_encode_fails: bool = True):
+    """subprocess.run where the probe reflects the GPU and encodes may fail."""
+    import subprocess
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        is_probe = "nullsrc=size=256x256:duration=0.1:rate=10" in command
+        uses_nvenc = video.NVENC_CODEC in command
+        if uses_nvenc and (not gpu_works if is_probe else nvenc_encode_fails):
+            raise subprocess.CalledProcessError(1, command, stderr="cuInit(0) failed")
+        return None
+
+    monkeypatch.setattr(video.subprocess, "run", fake_run)
+    monkeypatch.setattr(video, "_encoder_cache", {video.NVENC_CODEC: True})
+    return calls
+
+
+def _build():
+    return ["ffmpeg", "-i", "in.mp4", *video.encoder_args(0, final=True), "out.mp4"]
+
+
+def test_run_encode_falls_back_to_software_when_the_gpu_is_gone(monkeypatch):
+    calls = _fake_encoder(monkeypatch, gpu_works=False)
+
+    video.run_encode(_build)
+
+    assert video.SOFTWARE_CODEC in calls[-1]
+    assert video.nvenc_available() is False
+
+
+def test_run_encode_reraises_when_the_gpu_still_works(monkeypatch):
+    import subprocess
+
+    _fake_encoder(monkeypatch, gpu_works=True)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        video.run_encode(_build)
+    assert video.nvenc_available() is True
+
+
+def test_run_encode_reraises_a_software_failure_without_retrying(monkeypatch):
+    import subprocess
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(video.subprocess, "run", fake_run)
+    monkeypatch.setattr(video, "_encoder_cache", {video.NVENC_CODEC: False})
+
+    with pytest.raises(subprocess.CalledProcessError):
+        video.run_encode(_build)
+    assert len(calls) == 1
+
+
 # -- format-driven subtitles ------------------------------------------------
 
 

@@ -223,6 +223,11 @@ def is_configured() -> bool:
 # -- reading a page ---------------------------------------------------------------
 
 
+# Comment sections, left out of the page before it is read; _END_OF_CONTENT
+# catches the ones these miss by their heading.
+COMMENT_SELECTORS = ["#comments", ".comments", ".comment-list", "#respond", "#disqus_thread"]
+
+
 def fetch_markdown(url: str) -> Optional[str]:
     """The page's main content as markdown, or None. Never raises."""
     key = api_key()
@@ -232,7 +237,12 @@ def fetch_markdown(url: str) -> Optional[str]:
         response = requests.post(
             SCRAPE_URL,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"url": url, "formats": ["markdown"], "onlyMainContent": True},
+            json={
+                "url": url,
+                "formats": ["markdown"],
+                "onlyMainContent": True,
+                "excludeTags": COMMENT_SELECTORS,
+            },
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -246,12 +256,19 @@ def fetch_markdown(url: str) -> Optional[str]:
 
 
 # Where a page stops being about its subject. Everything from the first of
-# these headings on is citations, link lists and navigation; on the Wikipedia
-# article on petrichor it was the source of every false "fact" the first
-# version of this extractor kept.
+# these headings on is citations, link lists, navigation or readers' comments;
+# on the Wikipedia article on petrichor it was the source of every false
+# "fact" the first version of this extractor kept. Comments went on 2026-10-26:
+# the breath Short of 10-23 gave as its explanation a guess a reader left
+# under the Naked Scientists experiment in 2017 ("perhaps even near laminar
+# flow"), which sat below "## Related Content" and "## Comments". Not
+# "Discussion": in a paper that is where the findings are.
 _END_OF_CONTENT = re.compile(
     r"^#{1,6}\s*(?:see also|references|citations|notes|footnotes|sources|"
-    r"bibliography|further reading|external links|related (?:articles|posts|stories))\b",
+    r"bibliography|further reading|external links|"
+    r"related (?:articles|posts|stories|content|reading)|"
+    r"(?:\d+\s+|reader\s+|user\s+)?comments?|"
+    r"leave a (?:reply|comment)|add (?:a |new )?comment|join the (?:conversation|discussion))\b",
     re.IGNORECASE | re.MULTILINE,
 )
 # A link target, allowing one level of parentheses inside it:
