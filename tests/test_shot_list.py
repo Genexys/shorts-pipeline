@@ -294,3 +294,15 @@ def test_the_sign_off_is_left_out_of_the_line_footage_is_judged_by():
 
 def test_without_a_persona_the_line_is_unchanged():
     assert shot_list.without_sign_off("FACT... CONFIRMED.", "") == "FACT... CONFIRMED."
+
+
+# -- an empty line borrows a clip -----------------------------------------------------
+
+
+def test_an_empty_line_borrows_a_fitting_clip_from_further_away_first():
+    # 2026-10-26: "Horned lizards can shoot blood…" opened on the next line's
+    # lizard, which was not a horned lizard; the one that was played later.
+    index = {"generic.mp4": 1, "horned.mp4": 3}.get
+    assert shot_list.borrow_for(0, ["generic.mp4", "horned.mp4"], index) == "horned.mp4"
+    assert shot_list.borrow_for(0, ["generic.mp4"], index) == "generic.mp4"
+    assert shot_list.borrow_for(0, [], index) is None

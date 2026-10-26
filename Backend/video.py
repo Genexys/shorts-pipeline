@@ -916,6 +916,28 @@ def report_black_spans(
     return spans
 
 
+def segment_starts(
+    segments: Sequence[Tuple[str, float]], footage: Dict[str, Tuple[float, float]]
+) -> List[Tuple[str, float, float]]:
+    """Each shot with the second its clip is played from.
+
+    A clip shown a second time carries on from where it stopped, while its
+    usable footage lasts, rather than replaying the same frames: a line can
+    borrow another line's clip (pipeline), and a short video cycles its
+    clips. Past the usable footage it starts over.
+    """
+    played: Dict[str, float] = {}
+    out = []
+    for path, duration in segments:
+        start, usable = footage.get(path, (0.0, 0.0))
+        offset = played.get(path, 0.0)
+        if offset + duration > usable:
+            offset = 0.0
+        played[path] = offset + duration
+        out.append((path, duration, start + offset))
+    return out
+
+
 def combine_videos(
     video_paths: List[str],
     max_duration: float,
@@ -954,7 +976,6 @@ def combine_videos(
 
     if footage is None:
         footage = find_usable_footage(video_paths, fmt)
-    starts = {path: start for path, (start, _) in footage.items()}
     if segments is None:
         sources = [(path, footage[path][1]) for path in video_paths if path in footage]
         cap = effective_clip_cap(
@@ -975,8 +996,7 @@ def combine_videos(
     log(f"[+] {len(segments)} segments covering {max_duration:.1f}s.", "info")
 
     command = [_ffmpeg_binary(), "-y"]
-    for path, duration in segments:
-        start = starts.get(path, 0.0)
+    for path, duration, start in segment_starts(segments, footage):
         if start > 0:
             # An input seek, so the decoder skips the black instead of the
             # filter graph receiving and discarding it.
@@ -1208,6 +1228,45 @@ def burn_fire(lines: List[str], fmt: VideoFormat = SHORT) -> List[str]:
 
 CAPTION_STYLES = ("plain", "fire")
 
+# The plain captions' font, measured the way fire_fit measures the fire one.
+SUBTITLE_FONT_FILE = "bold_font.ttf"
+_plain_fonts: Dict[int, object] = {}
+
+
+def plain_fit(text: str, fmt: VideoFormat = SHORT) -> int:
+    """Percent scale at which a plain caption's longest word fits the frame.
+
+    libass wraps a caption at its spaces, so only a single word can outgrow
+    the frame, and it then runs off both edges: "AUTO-HEMORRHAGING." did in
+    the horned lizard Short of 2026-10-26. 100 for ordinary words.
+    """
+    words = "".join(
+        " " if ASS_UNTOUCHED.fullmatch(part) else part
+        for part in ASS_UNTOUCHED.split(text)
+    ).split()
+    if not words:
+        return 100
+    font = _plain_fonts.get(fmt.subtitle_font_size)
+    if font is None:
+        from PIL import ImageFont
+
+        font = ImageFont.truetype(str(FONTS_DIR / SUBTITLE_FONT_FILE), fmt.subtitle_font_size)
+        _plain_fonts[fmt.subtitle_font_size] = font
+    width = max(font.getlength(word) for word in words) + 2 * SUBTITLE_OUTLINE
+    room = fmt.width - 2 * SUBTITLE_SIDE_MARGIN_PX
+    return min(100, int(100 * room / width))
+
+
+def fit_plain_dialogue(line: str, fmt: VideoFormat = SHORT) -> str:
+    """A `Dialogue:` line, scaled down when a word in it would not fit."""
+    fields = line.split(",", 9)
+    if len(fields) < 10:
+        return line
+    scale = plain_fit(fields[9], fmt)
+    if scale < 100:
+        fields[9] = rf"{{\fscx{scale}\fscy{scale}}}" + fields[9]
+    return ",".join(fields)
+
 
 def patch_ass_script(
     script: str, subtitles_position: str, text_colour: str, fmt: VideoFormat = SHORT,
@@ -1248,6 +1307,11 @@ def patch_ass_script(
     lines = end_dialogue_before_next(lines)
     if caption_style == "fire":
         lines = burn_fire(lines, fmt)
+    else:
+        lines = [
+            fit_plain_dialogue(line, fmt) if line.lstrip().startswith("Dialogue:") else line
+            for line in lines
+        ]
     return "\n".join(lines) + "\n"
 
 
