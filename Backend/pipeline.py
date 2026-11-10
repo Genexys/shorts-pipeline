@@ -654,6 +654,9 @@ def run_generation_pipeline(
     # A line left without footage of its own, and a clip from elsewhere in the
     # video that was judged to fit it: beat index to path.
     borrowed: dict = {}
+    # Clips of this video judged to fit a line, for the shot cap after the
+    # narration: (line, paths to leave out) -> paths. None with the check off.
+    fitting_clips: Optional[Callable[[str, set], list]] = None
     if footage_judge.is_enabled():
         windows = dict(footage)
         # Every verdict, so a line left without footage can say why.
@@ -795,6 +798,20 @@ def run_generation_pipeline(
         # one, chosen for "a lizard first aims", and the Blue Flame one held an
         # aerial of a salt pan for its last 18 s. So the video's own clips are
         # judged against the line, and one that fits plays under it too.
+        def fits_line(line: str, leave_out: set) -> list:
+            """The video's clips, other than `leave_out`, judged real footage for `line`."""
+            candidates = [path for path in footage if path not in leave_out]
+            verdicts = check(candidates, line) if candidates else {}
+            return [
+                path
+                for path in candidates
+                if verdicts.get(path) is not None
+                and verdicts[path].keep
+                and verdicts[path].kind == footage_judge.FOOTAGE
+            ]
+
+        fitting_clips = fits_line
+
         shown = {beat_of.get(url_for_path.get(path)) for path in footage}
         for index in [i for i in range(len(beats)) if i not in shown]:
             line = shot_list.without_sign_off(
@@ -802,17 +819,11 @@ def run_generation_pipeline(
             )
             if not line:
                 continue
-            verdicts = check(list(footage), line)
             choice = shot_list.borrow_for(
                 index,
-                [
-                    path
-                    for path in footage
-                    if verdicts.get(path) is not None
-                    and verdicts[path].keep
-                    and verdicts[path].kind == footage_judge.FOOTAGE
-                ],
+                fits_line(line, set()),
                 lambda path: beat_of.get(url_for_path.get(path)),
+                avoid={borrowed[index - 1]} if index - 1 in borrowed else (),
             )
             if choice:
                 borrowed[index] = choice
@@ -933,6 +944,31 @@ def run_generation_pipeline(
                 personas.read_cues(subtitles_path),
                 temp_audio.duration,
             )
+            # No shot past MAX_HOLD_SECONDS while another clip of the video
+            # fits the line: the time a beat takes over from empty lines is
+            # known only now, from the narration.
+            held = shot_list.held_lengths(windows, by_beat)
+            for index, paths in enumerate(by_beat):
+                wanted = shot_list.extra_clips_wanted(held[index], len(paths))
+                if not wanted or fitting_clips is None:
+                    continue
+                line = shot_list.without_sign_off(
+                    beats[index].text, character.sign_off if character else ""
+                )
+                neighbours = {index - 1, index + 1}
+                extra = sorted(
+                    fitting_clips(line, set(paths)) if line else [],
+                    key=lambda path: beat_of.get(url_for_path.get(path)) in neighbours,
+                )[:wanted]
+                if extra:
+                    emit(
+                        f"[+] Line {index + 1} would hold {held[index] / len(paths):.1f}s "
+                        "of one shot; adding "
+                        + ", ".join(f'{os.path.basename(path)} ("{term_of(path)}")' for path in extra)
+                        + ".",
+                        "info",
+                    )
+                    by_beat[index] = list(paths) + extra
             segments = shot_list.plan_segments(
                 windows,
                 [[(path, footage[path][1]) for path in paths] for paths in by_beat],

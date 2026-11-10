@@ -285,7 +285,10 @@ Generic footage that suits the topic passes. These are rejected:
 - something else that only shares a word with the term;
 - a picture that contradicts the story, such as another country's flag or a
   modern rocket for a 1957 launch;
-- horror imagery in a story that isn't horror.
+- horror imagery in a story that isn't horror;
+- nothing to see: blank, blurred, a title card, a green screen or chroma-key
+  plate. A clip whose sampled frames are all near-black (mean brightness under
+  30 of 255) is turned down without asking the model.
 
 With footage chosen by beat, each frame also comes with the line it plays
 under, and a clip that line would contradict or that a viewer wouldn't connect
@@ -323,7 +326,13 @@ too, the video's own clips are judged against that line, and one that fits
 logged as `Line N has no footage of its own; showing <file> ("<term>") under
 it too.` A clip shown a second time carries on from where it stopped rather
 than replaying the same frames. Only when nothing fits does the beat share
-its time with the beats either side.
+its time with the beats either side. Two empty lines in a row do not borrow
+the same clip while another fits.
+
+No shot is held longer than 8 seconds while another clip of the video fits the
+line. Once the narration fixes how long each beat lasts, a beat that would
+hold its clip longer gets more of the video's clips judged to fit its line,
+logged as `Line N would hold X s of one shot; adding <file> ("<term>").`
 
 The check never fails a job. With no `ANTHROPIC_API_KEY`, with
 `FOOTAGE_MODEL=off`, or when a request fails, clips are used unchecked. If
@@ -360,7 +369,9 @@ With the key set, a subject needs at least two sources on topic. When the
 source judge keeps fewer, the content words of the subject are searched once
 more; if that still leaves fewer than two, no video is made. The job fails
 with `Too few sources`, without a retry, and the autopilot gives the slot to
-another topic. It used to write such a script without specifics: on
+another topic. The judge also drops pages whose purpose is not explaining:
+sermons and devotional posts, shops' and tour operators' pages, service
+companies' marketing blogs. It used to write such a script without specifics: on
 2026-10-12 one about animals signalling through their droppings named no
 animal, and the fact check held it.
 
@@ -634,7 +645,11 @@ frames are taken from the finished file, captions burned in, and read by
 `VIDEO_REVIEW_MODEL` (Sonnet 5.5 by default; `off` turns it off) alongside the
 narration. It looks for black frames, footage unrelated to the narration,
 wrong captions, burned-in text and watermarks. A major problem holds the
-upload; a minor one is logged.
+upload; a minor one is logged. Two rules are applied to the model's answer:
+unrelated footage in the first 5 seconds is major (the opossum Short of
+2026-11-03 opened on a sloth, rated minor, and went out), and a "misspelt"
+caption whose quoted words all appear in the narration is minor (the X-ray
+Short was held for "SKELETONS", spelt as the script spells it).
 
 With no model available, a check is skipped rather than failed, and the video
 goes out as before. An outage must not hold every video. The checks cost about

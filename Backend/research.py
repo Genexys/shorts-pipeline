@@ -275,6 +275,9 @@ def gather(queries: Sequence[str], limit: int = DEFAULT_RESULT_COUNT) -> List[So
 # reference hosts first, and both papers were on nih.gov, so they were the
 # pages read in full — thirteen of the pacemaker Short's fourteen stored facts
 # were about loop recorders, and both papers were cited in the description.
+# In the fortnight to 2026-11-10 a Christian radio station's devotional post
+# explained why pasta boils over, twice, a science-toy shop supplied "a billion
+# or so" bubbles in a soda can, and a travel agency what Buzz Aldrin saw.
 RELEVANCE_PROMPT = """
     A video is being written about this subject:
     {subject}
@@ -283,7 +286,10 @@ RELEVANCE_PROMPT = """
     itself: the same event, phenomenon, experiment, object or person. Drop a
     result that merely shares words with it, one about a different thing with a
     similar name, and any that is a product listing, a shop, an advert, a
-    school test item or a forum answer, even when it is on topic.
+    school test item or a forum answer, even when it is on topic. Drop too a
+    page whose purpose is something other than explaining: a sermon or
+    devotional post, a shop's or a tour operator's page, a service company's
+    marketing blog. They repeat what they have heard, without saying where from.
 
 {listing}
 

@@ -440,3 +440,39 @@ def test_a_replacement_batch_that_is_all_black_adds_nothing(monkeypatch):
     monkeypatch.setattr(video, "detect_black_spans", lambda path, probed, fmt: [(0.0, 10.0)])
     assert video.find_usable_footage(["a.mp4"], SHORT, keep_all_if_none=False) == {}
     assert video.find_usable_footage(["a.mp4"], SHORT) == {"a.mp4": (0.0, 10.0)}
+
+
+
+# -- a clip too dark to see -----------------------------------------------------------
+
+
+def _jpeg(level):
+    buffer = io.BytesIO()
+    Image.new("RGB", (32, 48), (level, level, level)).save(buffer, "JPEG")
+    return buffer.getvalue()
+
+
+def test_a_clip_too_dark_to_see_is_turned_down_without_asking(monkeypatch):
+    # 2026-11-03: an empty tabletop at 18 of 255 passed under the bread line.
+    _configured(monkeypatch)
+    calls = []
+    _fake_client(monkeypatch, [_response([{"clip": 1, "kind": "footage", "fits": True,
+                                           "shows": "a pot", "problem": ""}])], calls)
+    frames = [
+        Frame("dark.mp4", _jpeg(10), "bread slice", later=_jpeg(12)),
+        Frame("fade.mp4", _jpeg(5), "pot", later=_jpeg(120)),
+    ]
+    verdicts = footage_judge.judge(frames, SUBJECT, NARRATION)
+    assert not verdicts["dark.mp4"].keep and "dark" in verdicts["dark.mp4"].problem
+    assert verdicts["fade.mp4"].keep
+    images = [b for b in calls[0]["messages"][0]["content"] if b["type"] == "image"]
+    assert len(images) == 2
+
+
+def test_a_green_screen_plate_counts_as_nothing_to_see(monkeypatch):
+    _configured(monkeypatch)
+    calls = []
+    _fake_client(monkeypatch, [_response([])], calls)
+    footage_judge.judge(_frames("phone screen"), SUBJECT, NARRATION)
+    prompt = " ".join(calls[0]["messages"][0]["content"][0]["text"].split())
+    assert "chroma-key plate" in prompt and "too dark to make out" in prompt

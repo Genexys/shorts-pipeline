@@ -5,6 +5,7 @@ Run:  uv run python Backend/autopilot.py
 
 import functools
 import os
+import re
 import sys
 import textwrap
 import time
@@ -77,7 +78,21 @@ TICK_SECONDS = 60
 CLEANUP_INTERVAL_SECONDS = 3600
 TOPIC_ATTEMPTS = 3
 TOPIC_FAILURE_NOTIFY_AFTER = 10
-RECENT_TOPICS_LIMIT = 50
+# Every topic the channel has used, not the last few: on 2026-10-30 to 11-10
+# twenty of thirty-six topics were ones it had made two to six weeks before
+# (the kettle, toast, a spoon three times), once they had fallen out of a
+# fifty-topic window. A year of four a day is about 20k tokens of prompt.
+RECENT_TOPICS_LIMIT = 2000
+# A drafted topic sharing this share of its content words with one already
+# used is the same video again, however it is worded ("quieter right before
+# it boils" for "quieter just before it boils"): 60 % of them when two words
+# are shared, half when three or more are. Two shared words at half is too
+# loose: "a straw looks broken in a glass of water" is not "a glass of water
+# sweats".
+REPEAT_OVERLAP = 0.6
+REPEAT_OVERLAP_LOOSE = 0.5
+REPEAT_MIN_SHARED = 2
+REPEAT_MANY_SHARED = 3
 TOPIC_MIN_WORDS = 4
 TOPIC_MAX_WORDS = 12
 ERROR_TEXT_LIMIT = 500
@@ -164,6 +179,44 @@ def build_notifier(config: AutopilotConfig) -> Callable[[str], bool]:
     )
 
 
+# Words that say nothing about which video a topic is. The senses too: "your
+# voice sound" is in helium and in recordings, which are two videos.
+_TOPIC_STOPWORDS = set(
+    """a an and are as at be but by can do does for from get gets go goes had has
+    have how in into is it its just make makes not of off on or out over right so
+    some than that the their them then there they this to too up was way were what
+    when where which while who why will with you your yours
+    feel feels look looks seem seems sound sounds turn turns stay stays keep keeps""".split()
+)
+
+
+def topic_words(subject: str) -> set:
+    """A topic's content words, singular and lower case."""
+    words = set()
+    for word in re.findall(r"[a-z]+", (subject or "").lower()):
+        if len(word) < 3 or word in _TOPIC_STOPWORDS:
+            continue
+        if word.endswith("s") and not word.endswith("ss") and len(word) > 3:
+            word = word[:-1]
+        words.add(word)
+    return words
+
+
+def repeats_topic(subject: str, used: Sequence[str]) -> Optional[str]:
+    """The used topic `subject` would be a second video of, or None."""
+    words = topic_words(subject)
+    if not words:
+        return None
+    for old in used:
+        shared = len(words & topic_words(old))
+        ratio = shared / len(words)
+        if (shared >= REPEAT_MIN_SHARED and ratio >= REPEAT_OVERLAP) or (
+            shared >= REPEAT_MANY_SHARED and ratio >= REPEAT_OVERLAP_LOOSE
+        ):
+            return old
+    return None
+
+
 def build_topic_prompt(
     niche: str,
     recent: list[str],
@@ -237,8 +290,9 @@ def performance_block(best: Sequence[str], worst: Sequence[str]) -> str:
         lines.append("Lost the most viewers at once:")
         lines += [f"- {subject}" for subject in worst]
     lines.append(
-        "Openings set in the viewer's own day (a spoon, a jar lid, their own "
-        "voice) kept the most; openings on a name, a place or a species kept the "
+        "These are the kind of topic to look for, never topics to make again. "
+        "Openings set in the viewer's own day, on an object or a sensation they "
+        "know, kept the most; openings on a name, a place or a species kept the "
         "fewest."
     )
     return "\n        ".join(lines) + "\n\n        "
@@ -587,6 +641,23 @@ class Autopilot:
                 log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
                 continue
             subject = " ".join(subject.split())
+            repeated = repeats_topic(subject, recent)
+            if repeated and register != ANNIVERSARY:
+                # The anniversary's anchor belongs to its own subject, so only
+                # the other registers can fall back to a candidate.
+                fresh = [
+                    " ".join(str(c).split())
+                    for c in (candidates if isinstance(candidates, list) else [])
+                    if isinstance(c, str) and not repeats_topic(c, recent)
+                    and TOPIC_MIN_WORDS <= len(str(c).split()) <= TOPIC_MAX_WORDS
+                ]
+                if fresh:
+                    log(f"[-] '{subject}' would repeat '{repeated}'; using '{fresh[0]}'.", "warning")
+                    subject, repeated = fresh[0], None
+            if repeated:
+                last_problem = f"'{subject}' repeats '{repeated}'"
+                log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
+                continue
             # An anniversary topic must carry the event it came from; nothing
             # else downstream can recover it.
             picked = parsed.get("anchor") if isinstance(parsed, dict) else None

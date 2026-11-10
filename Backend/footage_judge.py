@@ -39,6 +39,7 @@ FOOTAGE_MODEL=off, or on any failure, every clip is used as before.
 """
 
 import base64
+import io
 import json
 import os
 from dataclasses import dataclass
@@ -62,6 +63,10 @@ BATCH_SIZE = 20
 # How many times rejected clips are replaced by the next search results.
 # The second round is for replacements that turn out no better.
 REPLACEMENT_ROUNDS = 2
+# Mean luminance, of 255, below which a frame shows nothing a viewer can make
+# out. Night footage that reads, such as an opossum under a spotlight, is
+# brighter than this.
+DARK_LEVEL = 30
 # Of the narration, enough to know the story; a long video's script is
 # thousands of words, and the subject line carries most of it anyway.
 NARRATION_CHARS = 1500
@@ -97,7 +102,8 @@ For each clip, decide:
   one the narration names); it is horror or Halloween imagery in a story that
   is neither; it shows nudity or a bloody wound, which a general audience
   should not be shown whatever the story; or there is nothing to see (blank,
-  blurred, a title card).
+  blurred, too dark to make out, a title card, a green or blue screen, or a
+  chroma-key plate with tracking markers).
   When a clip comes with the line it plays under, judge it against that line
   too: it does not fit when it shows something the line would contradict, or
   something a viewer would not connect with what is being said. Near enough
@@ -248,15 +254,46 @@ def _ask(frames: Sequence[Frame], subject: str, narration: str) -> Dict[str, Ver
     return verdicts
 
 
+def brightness(jpeg: bytes) -> Optional[float]:
+    """A frame's mean luminance, 0 to 255, or None if it cannot be read."""
+    try:
+        from PIL import Image, ImageStat
+
+        with Image.open(io.BytesIO(jpeg)) as image:
+            return float(ImageStat.Stat(image.convert("L")).mean[0])
+    except Exception:
+        return None
+
+
+def too_dark(frame: Frame) -> bool:
+    """Whether every frame taken of a clip is too dark to make anything out.
+
+    The black check looks for black; a dim kitchen is not black, and nor was
+    the bread Short's empty tabletop of 2026-11-03 (mean 18 of 255) or the
+    pasta Short's pot handle (12). Both passed the model too. Both frames must
+    be dark, so a clip that fades up is still judged.
+    """
+    levels = [brightness(jpeg) for jpeg in (frame.jpeg, frame.later) if jpeg]
+    return bool(levels) and all(level is not None and level < DARK_LEVEL for level in levels)
+
+
 def judge(frames: Sequence[Frame], subject: str, narration: str) -> Dict[str, Verdict]:
     """A verdict per clip, keyed by path. Never raises.
 
     A clip missing from the result was not judged and is used as it is: a
     batch that fails costs its clips their check, not the video its footage.
+    A clip too dark to see is turned down without asking.
     """
     if not frames or not is_enabled():
         return {}
     verdicts: Dict[str, Verdict] = {}
+    visible = []
+    for frame in frames:
+        if too_dark(frame):
+            verdicts[frame.path] = Verdict(FOOTAGE, False, "too dark to make out", "a near-black frame")
+        else:
+            visible.append(frame)
+    frames = visible
     for start in range(0, len(frames), BATCH_SIZE):
         batch = list(frames[start : start + BATCH_SIZE])
         try:
