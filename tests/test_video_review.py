@@ -87,3 +87,33 @@ def test_a_failing_model_publishes_as_before(monkeypatch, tmp_path, clip):
 
     result = video_review.review(str(clip), "n", 4.0, tmp_path / "work", ask=boom)
     assert not result.checked and result.problems == []
+
+
+# -- severity settled against what can be checked -------------------------------------
+
+
+NARRATION_XRAY = "By January 1896, physicians were already using it to see the skeletons of living patients."
+
+
+def test_unrelated_footage_in_the_opening_holds_the_video():
+    # 2026-11-03: a sloth for 7.6 s under "An opossum playing dead", rated minor.
+    settled = video_review.settle(
+        [Problem(1, "unrelated", MINOR, "a sloth, not an opossum", 2.0),
+         Problem(5, "unrelated", MINOR, "a lynx for bobcats", 21.0)],
+        "An opossum playing dead is not pretending.",
+    )
+    assert [p.severity for p in settled] == [MAJOR, MINOR]
+
+
+def test_a_misspelling_the_script_does_not_have_is_not_held():
+    # 2026-11-08: held for "SKELETONS", spelt as the script spells it.
+    note = 'Caption reads "SKELETONS" but is misspelt as "SKELETONS" with an extra letter'
+    settled = video_review.settle([Problem(11, "caption", MAJOR, note, 33.0)], NARRATION_XRAY)
+    assert settled[0].severity == MINOR
+    real = video_review.settle([Problem(11, "caption", MAJOR, 'reads "SKELTONS"', 33.0)], NARRATION_XRAY)
+    assert real[0].severity == MAJOR
+
+
+def test_the_prompt_rates_a_wrong_animal_major():
+    prompt = " ".join(video_review.PROMPT.split())
+    assert "different animal, vehicle or object" in prompt

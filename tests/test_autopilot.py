@@ -1102,3 +1102,61 @@ def test_success_message_reports_both_fallbacks_at_once(
     message = notifications[0]
     assert "narrated with tiktok" in message
     assert "written by llama3.1:8b" in message
+
+
+# -- topics the channel has already made ---------------------------------------------
+
+
+def test_a_reworded_topic_is_recognised_as_one_already_made():
+    # 2026-11-09 and 10-17: the same video, two weeks apart.
+    used = ["Why does a kettle get quieter just before it boils?"]
+    assert autopilot.repeats_topic("Why does a kettle get quieter right before it boils?", used)
+    assert autopilot.repeats_topic(
+        "Trained pigeons were proposed to guide missiles toward enemy ships",
+        ["Pigeons were once trained to guide US military missiles"],
+    )
+
+
+def test_topics_sharing_a_word_or_two_are_not_repeats():
+    assert not autopilot.repeats_topic(
+        "Why does a straw look broken in a glass of water?",
+        ["Why does a glass of water sweat on a hot day?"],
+    )
+    assert not autopilot.repeats_topic(
+        "Why does a banana turn black faster in the fridge?",
+        ["Why does bread go stale faster in the fridge than frozen?"],
+    )
+    assert not autopilot.repeats_topic(
+        "Why does helium make your voice sound squeaky?",
+        ["Why does your voice sound different on recordings?"],
+    )
+
+
+def test_a_repeated_pick_falls_back_to_a_fresh_candidate(session_factory, tmp_path, notifications):
+    reply = json.dumps({
+        "candidates": [
+            "Why does a kettle get quieter right before it boils?",
+            "Why does a cracked bell sound wrong until widened?",
+        ],
+        "subject": "Why does a kettle get quieter right before it boils?",
+    })
+    pilot = Autopilot(_config(), session_factory, lambda text: notifications.append(text) or True,
+                      lambda p, m: reply, tmp_path)
+    with session_factory() as session:
+        add_topic(session, "Why does a kettle get quieter just before it boils?", None, "manual")
+        topic, _ = pilot.generate_topic(session)
+    assert topic.subject == "Why does a cracked bell sound wrong until widened?"
+
+
+def test_the_prompt_lists_every_topic_and_no_example_to_copy(session_factory, tmp_path, notifications):
+    prompts = []
+    pilot = Autopilot(_config(), session_factory, lambda text: notifications.append(text) or True,
+                      lambda p, m: prompts.append(p) or "nope", tmp_path)
+    with session_factory() as session:
+        for number in range(60):
+            add_topic(session, f"Old topic number {number} about tides and moons", None, "manual")
+        pilot.generate_topic(session)
+    assert "Old topic number 0 about" in prompts[0] and "Old topic number 59 about" in prompts[0]
+    block = autopilot.performance_block(["Why a spoon in soup gets hot"], [])
+    assert "never topics to make again" in block
+    assert "a spoon, a jar lid" not in block

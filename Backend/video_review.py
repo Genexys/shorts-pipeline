@@ -17,8 +17,9 @@ as before.
 import base64
 import json
 import os
+import re
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
@@ -40,6 +41,10 @@ NARRATION_CHARS = 2000
 
 MAJOR = "major"
 MINOR = "minor"
+# The opening decides whether a Short is watched, and what it shows is what
+# the viewer takes the subject to be: on 2026-11-03 the opossum Short opened
+# for 7.6 s on what the review itself called a sloth, rated minor, and went out.
+OPENING_SECONDS = 5.0
 KINDS = ("black", "unrelated", "caption", "text_overlay", "watermark", "other")
 
 PROMPT = """\
@@ -58,7 +63,11 @@ Report only real problems a viewer would notice:
 - "watermark": a stock site's watermark or logo.
 - "other": anything else that would embarrass the channel.
 Severity "major" means the video should not go out until a person has looked;
-"minor" means worth knowing but publishable. An empty list is the normal answer.
+"minor" means worth knowing but publishable. A clip showing a different animal,
+vehicle or object than the one the narration names at that point is major: the
+viewer takes it for the thing named. A caption is misspelt only if its letters
+differ from the narration's word; do not report one that matches. An empty list
+is the normal answer.
 """
 
 SCHEMA = {
@@ -194,6 +203,32 @@ def parse_problems(text: str, times: Sequence[float]) -> List[Problem]:
     return problems
 
 
+def _quoted(note: str) -> List[str]:
+    return [word for word in re.findall(r"[\"“']([A-Za-z][A-Za-z'-]+)[\"”']", note) if len(word) > 2]
+
+
+def settle(problems: Sequence[Problem], narration: str) -> List[Problem]:
+    """The problems with their severity checked against what can be checked.
+
+    Unrelated footage in the opening is major whatever the model said. A
+    misspelt caption whose quoted words are all in the narration is not one:
+    the captions are the script's own words, and on 2026-11-08 the X-ray Short
+    was held for "SKELETONS", spelt as the script spells it.
+    """
+    words = {word.lower() for word in re.findall(r"[A-Za-z'-]+", narration or "")}
+    settled = []
+    for problem in problems:
+        severity = problem.severity
+        if problem.kind == "unrelated" and problem.seconds <= OPENING_SECONDS:
+            severity = MAJOR
+        elif problem.kind == "caption" and severity == MAJOR:
+            quoted = _quoted(problem.note)
+            if quoted and all(word.lower() in words for word in quoted):
+                severity = MINOR
+        settled.append(replace(problem, severity=severity))
+    return settled
+
+
 def review(
     video_path: str,
     narration: str,
@@ -209,7 +244,7 @@ def review(
     if not frames:
         return Review()
     try:
-        problems = (ask or _ask)(frames, narration)
+        problems = settle((ask or _ask)(frames, narration), narration)
     except Exception as err:
         log(f"[!] Video review unavailable ({writer.scrub(str(err))}).", "warning")
         return Review()

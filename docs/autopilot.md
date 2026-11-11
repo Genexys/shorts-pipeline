@@ -31,7 +31,7 @@ Autopilot jobs are created with two attempts: a transient failure (TTS down, a C
 
 ## Topics
 
-Every subject ever used is stored in the `topics` table with a normalized form (lowercase, letters, digits and spaces). Duplicates are rejected, and the last 50 subjects are passed to the model with an instruction not to repeat them.
+Every subject ever used is stored in the `topics` table with a normalized form (lowercase, letters, digits and spaces). Exact duplicates are rejected, and every used subject (up to 2000) is passed to the model with an instruction not to repeat or paraphrase them. A pick that still shares most of its content words with a used subject (60 % of them with two shared, half with three or more) is a repeat: the autopilot logs `'<pick>' would repeat '<old>'`, takes the first of the model's other candidates that is not one, and asks again if none is. Until 2026-11-10 only the last 50 subjects were shown, and twenty of thirty-six topics in the fortnight before were videos the channel had already made. The channel's best Shorts are shown as the kind of topic to look for, never as topics to make again.
 
 Add your own topics ahead of time:
 

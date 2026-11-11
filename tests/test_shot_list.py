@@ -306,3 +306,26 @@ def test_an_empty_line_borrows_a_fitting_clip_from_further_away_first():
     assert shot_list.borrow_for(0, ["generic.mp4", "horned.mp4"], index) == "horned.mp4"
     assert shot_list.borrow_for(0, ["generic.mp4"], index) == "generic.mp4"
     assert shot_list.borrow_for(0, [], index) is None
+
+
+
+# -- no shot held too long ------------------------------------------------------------
+
+
+def test_each_line_is_told_how_long_its_clips_will_hold():
+    # 2026-11-01: the last line took over two empty ones and held 17.7 s.
+    held = shot_list.held_lengths(
+        [(0.0, 5.0), (5.0, 21.0), (21.0, 30.0), (30.0, 38.7)],
+        [["a"], ["b"], [], []],
+    )
+    assert held == pytest.approx([5.0, 33.7, 0.0, 0.0])
+    assert shot_list.extra_clips_wanted(33.7, 1) == 4
+    assert shot_list.extra_clips_wanted(6.0, 1) == 0
+    assert shot_list.extra_clips_wanted(0.0, 0) == 0
+
+
+def test_two_empty_lines_in_a_row_do_not_borrow_the_same_clip():
+    # 2026-11-10: lines 4 and 5 of the spoon Short both borrowed one clip.
+    index = {"spoon.mp4": 0, "face.mp4": 8}.get
+    assert shot_list.borrow_for(5, ["spoon.mp4", "face.mp4"], index, avoid={"spoon.mp4"}) == "face.mp4"
+    assert shot_list.borrow_for(5, ["spoon.mp4"], index, avoid={"spoon.mp4"}) == "spoon.mp4"

@@ -22,7 +22,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, Collection, List, Optional, Sequence, Tuple
 
 from logstream import log
 from speech import _letters, for_narration, sentence_starts, split_sections, split_sentences
@@ -43,6 +43,9 @@ BACKUP_PASS = "beat-backup"
 RESCUE_PASS = "beat-rescue"
 # Clips taken for a rescued beat: one to show, one in case the first fails.
 RESCUE_CLIPS = 2
+# The longest one shot may be held. Past it the picture reads as a still: on
+# 2026-11-01 a pan steamed for 17.7 s, nearly half the hot-pan Short.
+MAX_HOLD_SECONDS = 8.0
 
 PROMPT = """\
 These are the sentences of a short factual video, narrated over stock footage.
@@ -312,16 +315,13 @@ def beat_windows(
     return list(zip(beat_starts, ends))
 
 
-def plan_segments(
-    windows: Sequence[Tuple[float, float]],
-    clips: Sequence[Sequence[Tuple[str, float]]],
-    max_clip_seconds: float,
-) -> List[Tuple[str, float]]:
-    """The (path, seconds) shots in playing order, one beat after another.
+def held_lengths(
+    windows: Sequence[Tuple[float, float]], clips: Sequence[Sequence[object]]
+) -> List[float]:
+    """How long each beat's clips will be on screen; 0 for a beat not shown.
 
-    `clips` holds each beat's (path, usable seconds), in the order they should
-    play. A beat too short for a shot gives its time to the beat before it. A
-    beat with no clips shares its time between the beats either side, so that
+    A beat too short for a shot gives its time to the beat before it. A beat
+    with no clips shares its time between the beats either side, so that
     neither picture is held over all of it: on 2026-10-18 the toast Short held
     a television studio for 11.7 s across three lines about toast, and the
     opossum one a woman in bed for 12.4 s. One at the very start or end gives
@@ -342,20 +342,39 @@ def plan_segments(
     if not any(shown):
         raise ValueError("No beat has a clip to show.")
     shown_at = [index for index, ok in enumerate(shown) if ok]
-    extra = {index: 0.0 for index in shown_at}
+    held = [lengths[i] if ok else 0.0 for i, ok in enumerate(shown)]
     for index, ok in enumerate(shown):
         if ok:
             continue
         before = [i for i in shown_at if i < index]
         after = [i for i in shown_at if i > index]
         if before and after and not clips[index]:
-            extra[before[-1]] += lengths[index] / 2
-            extra[after[0]] += lengths[index] / 2
+            held[before[-1]] += lengths[index] / 2
+            held[after[0]] += lengths[index] / 2
         elif before:
-            extra[before[-1]] += lengths[index]
+            held[before[-1]] += lengths[index]
         else:
-            extra[after[0]] += lengths[index]
-    kept: List[list] = [[lengths[i] + extra[i], list(clips[i])] for i in shown_at]
+            held[after[0]] += lengths[index]
+    return held
+
+
+def plan_segments(
+    windows: Sequence[Tuple[float, float]],
+    clips: Sequence[Sequence[Tuple[str, float]]],
+    max_clip_seconds: float,
+) -> List[Tuple[str, float]]:
+    """The (path, seconds) shots in playing order, one beat after another.
+
+    `clips` holds each beat's (path, usable seconds), in the order they should
+    play, and each beat holds the time held_lengths gives it.
+
+    Raises:
+        ValueError: If no beat has a clip.
+    """
+    held = held_lengths(windows, clips)
+    kept: List[list] = [
+        [seconds, list(sources)] for seconds, sources in zip(held, clips) if seconds > 0
+    ]
 
     segments: List[Tuple[str, float]] = []
     for index, (length, sources) in enumerate(kept):
@@ -373,17 +392,31 @@ def plan_segments(
 
 
 def borrow_for(
-    index: int, fitting: Sequence[str], index_of: Callable[[str], Optional[int]]
+    index: int,
+    fitting: Sequence[str],
+    index_of: Callable[[str], Optional[int]],
+    avoid: Collection[str] = (),
 ) -> Optional[str]:
     """Which of the clips judged to fit an empty line plays under it, or None.
 
     Not one from the line next to it when another fits: that one is already
     on screen either side, and showing it longer is what the borrowing is for
-    avoiding.
+    avoiding. Nor one in `avoid`, the clip the line before borrowed: on
+    2026-11-10 the spoon Short gave lines 4 and 5 the same clip, which then
+    played under both without a cut.
     """
     neighbours = {index - 1, index + 1}
-    ranked = sorted(fitting, key=lambda path: index_of(path) in neighbours)
+    ranked = sorted(
+        fitting, key=lambda path: (path in avoid, index_of(path) in neighbours)
+    )
     return ranked[0] if ranked else None
+
+
+def extra_clips_wanted(held_seconds: float, clip_count: int) -> int:
+    """More clips a beat needs so that no shot of it runs past MAX_HOLD_SECONDS."""
+    if clip_count <= 0 or held_seconds <= 0:
+        return 0
+    return max(0, math.ceil(held_seconds / MAX_HOLD_SECONDS) - clip_count)
 
 
 def beat_of_each(

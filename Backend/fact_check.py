@@ -80,7 +80,9 @@ not list it, and keep it in the script word for word. Judge each claim:
   credits elsewhere. A person the script names by surname alone, or
   without saying who they are, before introducing them is unsupported too:
   the viewer cannot tell who did it. Fix it with the full name and role the
-  evidence gives ("Art Fry, a 3M colleague"), or without the name.
+  evidence gives ("Art Fry, a 3M colleague"), or without the name. So is a
+  "she", "he", "it" or "they" the script never names: "her poo becomes the
+  male's clue" with no animal named says nothing a viewer can check.
 - "wrong": the evidence or well-established knowledge contradicts it.
 
 If every claim is supported, return the script unchanged. Otherwise rewrite
