@@ -222,6 +222,10 @@ first word up to the next beat's. Two exceptions:
 - a beat under 1.5 seconds gives its time to the beat before, because a cut
   that quick reads as a glitch.
 
+A beat's clips can run out just short of its end, leaving a shot under 0.9 s.
+Within the video the next beat starts that much sooner; at the very end the
+nearest earlier shot whose clip has footage to spare runs that much longer.
+
 The strongest of the first beat's clips opens the video. The log shows the
 plan as `Shot list: 1 "walking through doorway" | 2-3 "..."` and the timing as
 `Footage cut to the narration: "<term>"@<seconds>s, ...`.

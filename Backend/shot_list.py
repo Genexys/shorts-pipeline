@@ -26,7 +26,7 @@ from typing import Callable, Collection, List, Optional, Sequence, Tuple
 
 from logstream import log
 from speech import _letters, for_narration, sentence_starts, split_sections, split_sentences
-from video import MIN_SHOT_SECONDS, effective_clip_cap, plan_clip_segments
+from video import FRAME_EPSILON, MIN_SHOT_SECONDS, effective_clip_cap, plan_clip_segments
 
 # Roughly one beat per this many words, so a 80-word Short gets six to ten.
 # Fewer and a beat outlasts its picture; more and a shot is over before the
@@ -388,6 +388,32 @@ def plan_segments(
         if len(planned) > 1 and planned[-1][1] < MIN_SHOT_SECONDS and index + 1 < len(kept):
             kept[index + 1][0] += planned.pop()[1]
         segments.extend(planned)
+    return _absorb_final_sliver(segments, clips)
+
+
+def _absorb_final_sliver(
+    segments: List[Tuple[str, float]],
+    clips: Sequence[Sequence[Tuple[str, float]]],
+) -> List[Tuple[str, float]]:
+    """The shots, with a sliver at the very end folded into a shot before it.
+
+    The last beat has no next one to give a sliver to, so it played: 0.4 s of
+    the first old computer again at the end of the web Short of 2026-11-12.
+    The nearest earlier shot whose clip has the footage to spare runs that
+    much longer instead; the cuts after it come as late, a fraction of a
+    second against the captions, which reads better than a flash. With no
+    footage to spare anywhere the sliver stays.
+    """
+    if len(segments) < 2 or segments[-1][1] >= MIN_SHOT_SECONDS:
+        return segments
+    usable = {path: seconds for beat in clips for path, seconds in beat}
+    sliver = segments[-1][1]
+    for index in range(len(segments) - 2, -1, -1):
+        path, seconds = segments[index]
+        if usable.get(path, 0.0) - FRAME_EPSILON >= seconds + sliver:
+            out = list(segments[:-1])
+            out[index] = (path, seconds + sliver)
+            return out
     return segments
 
 
