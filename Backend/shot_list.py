@@ -71,6 +71,9 @@ Search terms:
 - Show what that beat's words are about. When they are about something no
   camera can film (a feeling, a number, a process inside the body), show the
   real thing a viewer would connect with it: the person, the object, the place.
+- When a beat names a real person, show their work, their place or their
+  object, never a generic person ("scientist", "woman in lab coat"): a
+  viewer takes whoever is on screen for the person named.
 - Take the term from what is meant, never from figures of speech. A script
   that calls an onion's irritant "tear gas" needs onions, not riot footage.
 - Never an abstract noun ("mechanism", "process", "system", "memory") and

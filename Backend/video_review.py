@@ -65,7 +65,9 @@ Report only real problems a viewer would notice:
 Severity "major" means the video should not go out until a person has looked;
 "minor" means worth knowing but publishable. A clip showing a different animal,
 vehicle or object than the one the narration names at that point is major: the
-viewer takes it for the thing named. A caption is misspelt only if its letters
+viewer takes it for the thing named. That includes a related species (a fire
+salamander or an axolotl for a ribbed newt) and a stock actor shown while the
+narration names a real person. A caption is misspelt only if its letters
 differ from the narration's word; do not report one that matches. An empty list
 is the normal answer.
 """

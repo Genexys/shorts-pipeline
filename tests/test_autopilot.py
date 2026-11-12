@@ -1160,3 +1160,39 @@ def test_the_prompt_lists_every_topic_and_no_example_to_copy(session_factory, tm
     block = autopilot.performance_block(["Why a spoon in soup gets hot"], [])
     assert "never topics to make again" in block
     assert "a spoon, a jar lid" not in block
+
+
+# -- footage that does not exist ------------------------------------------------------
+
+
+def test_a_topic_whose_subject_no_stock_library_has_is_redrawn(session_factory, tmp_path, notifications):
+    # 2026-11-12: the Iberian ribbed newt Short had fire salamanders instead.
+    answers = iter([
+        json.dumps({"candidates": [], "subject": "The Iberian ribbed newt stabs with its own ribs",
+                    "must_show": "Iberian ribbed newt"}),
+        json.dumps({"candidates": [], "subject": "Why does a cracked bell sound wrong until widened?",
+                    "must_show": ""}),
+    ])
+    prompts, asked = [], []
+    pilot = Autopilot(
+        _config(), session_factory, lambda text: notifications.append(text) or True,
+        lambda p, m: prompts.append(p) or next(answers), tmp_path,
+        stock_has=lambda thing: asked.append(thing) or False,
+    )
+    with session_factory() as session:
+        topic, _ = pilot.generate_topic(session)
+    assert topic.subject == "Why does a cracked bell sound wrong until widened?"
+    assert asked == ["Iberian ribbed newt"]
+    assert 'No stock footage could be found of "Iberian ribbed newt"' in prompts[1]
+
+
+def test_a_stock_check_that_cannot_run_lets_the_topic_through(session_factory, tmp_path, notifications):
+    reply = json.dumps({"candidates": [], "subject": "The Texas horned lizard squirts blood at coyotes",
+                        "must_show": "horned lizard"})
+    pilot = Autopilot(
+        _config(), session_factory, lambda text: notifications.append(text) or True,
+        lambda p, m: reply, tmp_path, stock_has=lambda thing: None,
+    )
+    with session_factory() as session:
+        topic, _ = pilot.generate_topic(session)
+    assert topic.subject == "The Texas horned lizard squirts blood at coyotes"

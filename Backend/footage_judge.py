@@ -25,9 +25,12 @@ showed a bather's bare back, and on 10-19 the paper cut Short a bloody wound.
 But near enough is not the same as a detail: on 2026-10-14 a stainless pan was
 turned down three times under a line about non-stick ones, and a blue tit
 under great tits, neither of which a viewer would have minded. The same kind
-of thing passes, as far as a viewer could take it for the one named: on
-2026-10-20 to 10-23 an iguana and a chameleon stood in for horned lizards, an
-SUV for the Blue Flame rocket car, and convex mirrors for a concave spoon.
+of everyday thing passes. A named one does not: on 2026-10-20 to 10-23 an
+iguana and a chameleon stood in for horned lizards, an SUV for the Blue Flame
+rocket car, and convex mirrors for a concave spoon; on 11-12 fire salamanders
+and an axolotl for the Iberian ribbed newt, and on 11-11 a stock model in a lab
+coat for the engineer Patricia Yang. A related species is the wrong one, and a
+stand-in for a real person is taken for them.
 
 One frame was not enough either: the wet T-shirt Short of 2026-10-14 opened on
 an empty glass under an espresso machine, judged at half a second in, and the
@@ -110,18 +113,21 @@ For each clip, decide:
   is not enough here: if the viewer would have to guess how the picture
   relates to the words, it does not fit. Nor does a stylized graphic, or a
   render of something else, under a line about a real object, person or
-  place. But the same kind of thing the line names counts as showing it,
-  even when it differs in a detail a viewer would not notice or mind: a
-  stainless pan under a line about non-stick pans, a blue tit under great
-  tits, any shirt for a shirt. That is for things a viewer could take for
-  the one named. A clearly different animal, vehicle or object does not
-  fit, least of all when the claim is about that very thing: an iguana or a
-  chameleon under a line about horned lizards, a vintage road car or a
-  modern SUV for a record-breaking rocket car. Nor does a picture that shows
-  the opposite of what the line explains, such as a convex mirror, which
-  shows an upright image, under a line about a concave one turning the
-  image upside down. Only when the line turns on the detail, or the
-  difference contradicts the story as above, does it not fit.
+  place. But a picture of the same kind of everyday thing counts as showing
+  it, even when it differs in a detail a viewer would not notice or mind: a
+  stainless pan under a line about non-stick pans, any shirt for a shirt,
+  any kettle for a kettle. That allowance is for ordinary things, not named
+  ones. When the line or the subject names a particular species, breed,
+  model, building or person, only that one fits, and a related one is the
+  wrong one however alike they look: a fire salamander or an axolotl under
+  a line about the Iberian ribbed newt, an iguana or a chameleon under a
+  line about horned lizards, a vintage road car or a modern SUV for a
+  record-breaking rocket car. Under a line that names a real person, a stock
+  actor or anyone else a viewer could take for them does not fit (a model in
+  a lab coat as "Patricia Yang"); their work, their place or their object
+  can. Nor does a picture that shows the opposite of what the line explains,
+  such as a convex mirror, which shows an upright image, under a line about
+  a concave one turning the image upside down.
 - shows: a few words on what the frames show.
 - problem: a few words naming what is wrong, or "" when it fits.
 
@@ -252,6 +258,63 @@ def _ask(frames: Sequence[Frame], subject: str, narration: str) -> Dict[str, Ver
                 shows=str(item.get("shows") or "").strip(),
             )
     return verdicts
+
+
+AVAILABLE_PROMPT = """\
+These are thumbnails of the first stock-footage results for "{thing}". A short
+factual video would need real camera footage of {thing} itself. Does at least
+one thumbnail show it: that very species, model, building or object, not a
+related or look-alike one, and not a cartoon, drawing or render?"""
+
+AVAILABLE_SCHEMA = {
+    "type": "object",
+    "properties": {"found": {"type": "boolean"}},
+    "required": ["found"],
+    "additionalProperties": False,
+}
+
+
+def shows_thing(jpegs: Sequence[bytes], thing: str) -> Optional[bool]:
+    """Whether any of the stock thumbnails shows `thing`; None if it cannot tell.
+
+    Asked before a topic is chosen, so the channel does not make a video about
+    an animal no library has: the Iberian ribbed newt Short of 2026-11-12 had
+    fire salamanders and an axolotl instead, and was held. Never raises.
+    """
+    if not jpegs or not thing.strip() or not is_enabled():
+        return None
+    content: List[dict] = [{"type": "text", "text": AVAILABLE_PROMPT.format(thing=thing.strip())}]
+    for jpeg in jpegs:
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/jpeg",
+                "data": base64.standard_b64encode(jpeg).decode("ascii"),
+            },
+        })
+    try:
+        response = _client().messages.create(
+            model=model_name(),
+            max_tokens=MAX_TOKENS,
+            messages=[{"role": "user", "content": content}],
+            output_config={
+                "effort": EFFORT,
+                "format": {"type": "json_schema", "schema": AVAILABLE_SCHEMA},
+            },
+        )
+        writer.record_usage(
+            getattr(response, "model", None) or model_name(),
+            getattr(response, "usage", None),
+            "the stock footage look-up",
+        )
+        if getattr(response, "stop_reason", None) == "refusal":
+            return None
+        text = next(block.text for block in response.content if block.type == "text")
+        return bool(json.loads(text)["found"])
+    except Exception as err:
+        log(f"[!] Could not check stock footage of '{thing}' ({writer.scrub(str(err))}).", "warning")
+        return None
 
 
 def brightness(jpeg: bytes) -> Optional[float]:
