@@ -658,7 +658,11 @@ def run_generation_pipeline(
     # narration: (line, paths to leave out) -> paths. None with the check off.
     fitting_clips: Optional[Callable[[str, set], list]] = None
     if footage_judge.is_enabled():
-        windows = dict(footage)
+        # Where each clip's usable footage starts and how long it runs. Not
+        # `windows`: that name holds the beats' timing later on, and check()
+        # reads this one after it is set: on 2026-11-12 the shot cap called
+        # check() then, and the web Short failed on a list indexed by a path.
+        clip_windows = dict(footage)
         # Every verdict, so a line left without footage can say why.
         verdicts_seen: dict = {}
 
@@ -678,7 +682,7 @@ def run_generation_pipeline(
             guard_cancelled()
             frames = []
             for path in paths:
-                start, seconds = windows[path]
+                start, seconds = clip_windows[path]
                 jpeg = sample_frame(path, start + OPENING_SAMPLE_SECONDS, fmt, ffmpeg_binary)
                 if not jpeg:
                     continue
@@ -728,7 +732,7 @@ def run_generation_pipeline(
             found = find_usable_footage(
                 download(video_urls[before:]), fmt, keep_all_if_none=False
             )
-            windows.update(found)
+            clip_windows.update(found)
             return found
 
         footage, openers = footage_judge.vet_footage(
@@ -773,7 +777,7 @@ def run_generation_pipeline(
             found = find_usable_footage(
                 download(video_urls[before:]), fmt, keep_all_if_none=False
             )
-            windows.update(found)
+            clip_windows.update(found)
             if found:
                 emit(
                     f"[+] Checking {len(found)} clip(s) for "
@@ -949,8 +953,8 @@ def run_generation_pipeline(
             # known only now, from the narration.
             held = shot_list.held_lengths(windows, by_beat)
             for index, paths in enumerate(by_beat):
-                wanted = shot_list.extra_clips_wanted(held[index], len(paths))
-                if not wanted or fitting_clips is None:
+                more = shot_list.extra_clips_wanted(held[index], len(paths))
+                if not more or fitting_clips is None:
                     continue
                 line = shot_list.without_sign_off(
                     beats[index].text, character.sign_off if character else ""
@@ -959,7 +963,7 @@ def run_generation_pipeline(
                 extra = sorted(
                     fitting_clips(line, set(paths)) if line else [],
                     key=lambda path: beat_of.get(url_for_path.get(path)) in neighbours,
-                )[:wanted]
+                )[:more]
                 if extra:
                     emit(
                         f"[+] Line {index + 1} would hold {held[index] / len(paths):.1f}s "
