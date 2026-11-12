@@ -10,6 +10,7 @@ import json
 import pytest
 
 import shot_list
+import video
 from footage_judge import Frame
 import footage_judge
 from shot_list import Beat
@@ -329,3 +330,22 @@ def test_two_empty_lines_in_a_row_do_not_borrow_the_same_clip():
     index = {"spoon.mp4": 0, "face.mp4": 8}.get
     assert shot_list.borrow_for(5, ["spoon.mp4", "face.mp4"], index, avoid={"spoon.mp4"}) == "face.mp4"
     assert shot_list.borrow_for(5, ["spoon.mp4"], index, avoid={"spoon.mp4"}) == "spoon.mp4"
+
+
+def test_a_sliver_at_the_very_end_goes_to_a_shot_with_footage_to_spare():
+    # 2026-11-12: 0.4 s of the first old computer again at the end.
+    segments = shot_list.plan_segments(
+        [(0.0, 5.0), (5.0, 16.1)],
+        [[("phone.mp4", 12.0)], [("computer.mp4", 5.5), ("monitor.mp4", 5.2)]],
+        5.5,
+    )
+    assert all(seconds >= video.MIN_SHOT_SECONDS for _, seconds in segments)
+    assert sum(seconds for _, seconds in segments) == pytest.approx(16.1)
+    assert [path for path, _ in segments][-1] == "monitor.mp4"
+
+
+def test_a_final_sliver_stays_when_no_clip_has_footage_to_spare():
+    segments = shot_list.plan_segments(
+        [(0.0, 11.1)], [[("a.mp4", 5.5), ("b.mp4", 5.2)]], 5.5
+    )
+    assert sum(seconds for _, seconds in segments) == pytest.approx(11.1)
