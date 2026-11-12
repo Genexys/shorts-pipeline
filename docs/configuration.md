@@ -298,12 +298,17 @@ With footage chosen by beat, each frame also comes with the line it plays
 under, and a clip that line would contradict or that a viewer wouldn't connect
 with it is rejected too. Loosely related is not enough for such a clip, and
 neither is a stylized graphic, or a render of something else, under a line
-about a real object, person or place. The same kind of thing passes, though,
-when it differs only in a detail a viewer wouldn't notice: a stainless pan
-under a line about non-stick pans, a blue tit under great tits. A clearly
-different animal, vehicle or object does not (an iguana for a horned lizard,
-an SUV for a rocket car), nor does a picture showing the opposite of what the
-line explains (a convex mirror for a concave one). Nudity and bloody wounds
+about a real object, person or place. The same kind of everyday thing passes,
+though, when it differs only in a detail a viewer wouldn't notice: a stainless
+pan under a line about non-stick pans, any kettle for a kettle. A named one
+does not: when the line or the subject names a particular species, breed,
+model, building or person, only that one fits, and a related one is wrong
+however alike (a fire salamander or an axolotl for the Iberian ribbed newt, an
+iguana for a horned lizard, an SUV for a rocket car). A stock actor under a
+line naming a real person is rejected, since viewers take them for that
+person, and the shot list searches for the person's work, place or object
+instead. Nor does a picture pass that shows the opposite of what the line
+explains (a convex mirror for a concave one). Nudity and bloody wounds
 are rejected whatever the story. A persona's
 closing catchphrase ("FACT... CONFIRMED.") is left out of the line, since no
 picture can show it.

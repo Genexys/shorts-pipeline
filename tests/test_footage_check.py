@@ -139,7 +139,7 @@ def test_the_same_kind_of_thing_passes_despite_a_detail(monkeypatch):
     _fake_client(monkeypatch, [_response([])], calls)
     footage_judge.judge(_frames("non-stick pan"), SUBJECT, NARRATION)
     prompt = calls[0]["messages"][0]["content"][0]["text"]
-    assert "same kind of thing" in prompt and "stainless pan" in prompt
+    assert "same kind of everyday thing" in prompt and "stainless pan" in prompt
     # The historical rule still stands.
     assert "a modern rocket or building standing in for a historical" in prompt
 
@@ -151,9 +151,22 @@ def test_a_clearly_different_animal_or_vehicle_does_not_pass(monkeypatch):
     _fake_client(monkeypatch, [_response([])], calls)
     footage_judge.judge(_frames("horned lizard"), SUBJECT, NARRATION)
     prompt = " ".join(calls[0]["messages"][0]["content"][0]["text"].split())
-    assert "could take for the one named" in prompt
     assert "an iguana or a chameleon under a line about horned lizards" in prompt
     assert "convex mirror" in prompt
+
+
+def test_a_named_species_or_person_allows_no_stand_in(monkeypatch):
+    # 2026-11-12: fire salamanders and an axolotl as the Iberian ribbed newt;
+    # 11-11: a stock model in a lab coat as Patricia Yang.
+    _configured(monkeypatch)
+    calls = []
+    _fake_client(monkeypatch, [_response([])], calls)
+    footage_judge.judge(_frames("newt"), SUBJECT, NARRATION)
+    prompt = " ".join(calls[0]["messages"][0]["content"][0]["text"].split())
+    assert "allowance is for ordinary things, not named ones" in prompt
+    assert "a fire salamander or an axolotl under a line about the Iberian ribbed newt" in prompt
+    assert "a stock actor or anyone else a viewer could take for them does not fit" in prompt
+    assert "blue tit" not in prompt
 
 
 def test_nudity_and_blood_never_fit(monkeypatch):
@@ -476,3 +489,27 @@ def test_a_green_screen_plate_counts_as_nothing_to_see(monkeypatch):
     footage_judge.judge(_frames("phone screen"), SUBJECT, NARRATION)
     prompt = " ".join(calls[0]["messages"][0]["content"][0]["text"].split())
     assert "chroma-key plate" in prompt and "too dark to make out" in prompt
+
+
+
+# -- is there footage of it at all ----------------------------------------------------
+
+
+def test_the_stock_look_up_asks_whether_any_thumbnail_shows_the_thing(monkeypatch):
+    _configured(monkeypatch)
+    calls = []
+    block = types.SimpleNamespace(type="text", text=json.dumps({"found": False}))
+    _fake_client(monkeypatch, [types.SimpleNamespace(content=[block], stop_reason="end_turn")], calls)
+    assert footage_judge.shows_thing([b"one", b"two"], "Iberian ribbed newt") is False
+    content = calls[0]["messages"][0]["content"]
+    text = " ".join(content[0]["text"].split())
+    assert "Iberian ribbed newt" in text and "not a related or look-alike one" in text
+    assert len([b for b in content if b["type"] == "image"]) == 2
+
+
+def test_the_stock_look_up_says_nothing_when_it_cannot_ask(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    assert footage_judge.shows_thing([b"one"], "newt") is None
+    _configured(monkeypatch)
+    _fake_client(monkeypatch, [RuntimeError("529")], [])
+    assert footage_judge.shows_thing([b"one"], "newt") is None

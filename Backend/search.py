@@ -3,7 +3,7 @@ import os
 import requests
 
 from itertools import zip_longest
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from logstream import log
 
@@ -107,6 +107,55 @@ def search_pixabay(query: str, api_key: str, it: int, min_dur: int) -> List[str]
         if best_url:
             urls.append(best_url)
     return urls
+
+
+def stock_previews(query: str, limit: int = 8) -> Optional[List[str]]:
+    """Thumbnail URLs of the first stock results for `query`.
+
+    For telling whether footage of a thing exists before a video is planned
+    around it, without downloading any. None when no library could be asked
+    (no key, or every request failed), so a failure is not read as "none".
+    """
+    pexels_key = os.getenv("PEXELS_API_KEY", "").strip()
+    pixabay_key = os.getenv("PIXABAY_API_KEY", "").strip()
+    previews: List[str] = []
+    asked = False
+    if pexels_key:
+        try:
+            response = requests.get(
+                "https://api.pexels.com/videos/search",
+                params={"query": query, "per_page": limit},
+                headers={"Authorization": pexels_key},
+                timeout=PEXELS_TIMEOUT,
+            )
+            response.raise_for_status()
+            asked = True
+            previews += [
+                item["image"] for item in response.json().get("videos") or [] if item.get("image")
+            ]
+        except Exception as err:
+            log(f"[-] Pexels preview search failed for '{query}': {err}", "warning")
+    if pixabay_key:
+        try:
+            response = requests.get(
+                "https://pixabay.com/api/videos/",
+                params={"key": pixabay_key, "q": query, "per_page": max(limit, 3)},
+                timeout=PIXABAY_TIMEOUT,
+            )
+            response.raise_for_status()
+            asked = True
+            for hit in response.json().get("hits") or []:
+                renditions = hit.get("videos") or {}
+                thumbnail = next(
+                    (r.get("thumbnail") for r in renditions.values() if r.get("thumbnail")), ""
+                )
+                if thumbnail:
+                    previews.append(thumbnail)
+        except Exception as err:
+            log(f"[-] Pixabay preview search failed for '{query}': {err}", "warning")
+    if not asked:
+        return None
+    return interleave(previews)[:limit]
 
 
 def interleave(*sources: List[str]) -> List[str]:

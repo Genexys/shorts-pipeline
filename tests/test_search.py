@@ -136,3 +136,32 @@ def test_search_still_works_when_one_library_is_empty(monkeypatch):
     monkeypatch.setattr(search, "search_pexels", lambda *a: ["p1", "p2"])
     monkeypatch.setattr(search, "search_pixabay", lambda *a: [])
     assert search.search_for_stock_videos("q", "key", 5, 10) == ["p1", "p2"]
+
+
+# -- previews, for telling whether footage of a thing exists -------------------------
+
+
+def test_previews_come_from_both_libraries(monkeypatch):
+    monkeypatch.setenv("PEXELS_API_KEY", "px")
+    monkeypatch.setenv("PIXABAY_API_KEY", "pb")
+
+    def get(url, **kwargs):
+        if "pexels" in url:
+            return FakeResponse({"videos": [{"image": "https://pexels/1.jpg"}, {"image": ""}]})
+        return FakeResponse({"hits": [{"videos": {"tiny": {"thumbnail": "https://pixabay/2.jpg"}}}]})
+
+    monkeypatch.setattr(search.requests, "get", get)
+    assert search.stock_previews("newt") == ["https://pexels/1.jpg", "https://pixabay/2.jpg"]
+
+
+def test_previews_are_unknown_when_no_library_could_be_asked(monkeypatch):
+    monkeypatch.setenv("PEXELS_API_KEY", "")
+    monkeypatch.setenv("PIXABAY_API_KEY", "")
+    assert search.stock_previews("newt") is None
+    monkeypatch.setenv("PEXELS_API_KEY", "px")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(search.requests, "get", boom)
+    assert search.stock_previews("newt") is None

@@ -4,6 +4,7 @@ Run:  uv run python Backend/autopilot.py
 """
 
 import functools
+import io
 import os
 import re
 import sys
@@ -12,6 +13,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional, Sequence
+
+import requests
+from PIL import Image
 
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -66,7 +70,9 @@ from repository import (
     topics_awaiting_result,
 )
 import anniversary
+import footage_judge
 import research
+import search
 from posts import generate_post
 from thumbnail import pick_still
 from startup_check import require_mounts
@@ -224,6 +230,7 @@ def build_topic_prompt(
     material: str = "",
     best: Sequence[str] = (),
     worst: Sequence[str] = (),
+    unavailable: Sequence[str] = (),
 ) -> str:
     # Substitution happens after dedent/strip (via .format, not an f-string): recent
     # subjects are unindented, and interpolating them before dedent would drag the
@@ -250,7 +257,12 @@ def build_topic_prompt(
         past in the first two seconds: the one whose surprising claim they can
         recognise from their own life at once.
 
-        Return ONLY a JSON object: {{"candidates": ["...", "..."], "subject": "..."}}
+        Also name, as a two- or three-word stock footage search term, the one
+        particular animal, person, object or place the chosen video cannot be
+        shown without ("horned lizard", "Citigroup Center"), or "" when ordinary
+        footage of everyday things will do (a kettle, a glass of water).
+        {unavailable}
+        Return ONLY a JSON object: {{"candidates": ["...", "..."], "subject": "...", "must_show": "..."}}
         """
     ).strip()
     material_block = (
@@ -269,6 +281,18 @@ def build_topic_prompt(
         material=material_block,
         performance=performance_block(best, worst),
         candidates=TOPIC_CANDIDATES,
+        unavailable=unavailable_block(unavailable),
+    )
+
+
+def unavailable_block(things: Sequence[str]) -> str:
+    """The things the stock libraries were found to have no footage of, or ""."""
+    if not things:
+        return ""
+    listed = ", ".join(f'"{thing}"' for thing in things)
+    return (
+        f"No stock footage could be found of {listed}; "
+        "do not choose a topic that needs it.\n"
     )
 
 
@@ -298,6 +322,41 @@ def performance_block(best: Sequence[str], worst: Sequence[str]) -> str:
     return "\n        ".join(lines) + "\n\n        "
 
 
+# Thumbnails looked at to tell whether stock footage of a thing exists.
+STOCK_PREVIEWS = 8
+PREVIEW_TIMEOUT_SECONDS = 20
+PREVIEW_SIDE = 384
+
+
+def stock_has(thing: str) -> Optional[bool]:
+    """Whether the stock libraries have real footage of `thing`; None if unknown.
+
+    Unknown (no keys, no model, a failed request) lets the topic through: a
+    check that cannot run must not stop the channel.
+    """
+    urls = search.stock_previews(thing, STOCK_PREVIEWS)
+    if urls is None:
+        return None
+    if not urls:
+        return False
+    jpegs = []
+    for url in urls:
+        try:
+            response = requests.get(url, timeout=PREVIEW_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            with Image.open(io.BytesIO(response.content)) as image:
+                # A thumbnail tells a newt from a salamander at this size, for a
+                # fifth of the tokens of the full preview.
+                image = image.convert("RGB")
+                image.thumbnail((PREVIEW_SIDE, PREVIEW_SIDE))
+                out = io.BytesIO()
+                image.save(out, "JPEG", quality=80)
+                jpegs.append(out.getvalue())
+        except Exception:
+            continue
+    return footage_judge.shows_thing(jpegs, thing) if jpegs else None
+
+
 class Autopilot:
     def __init__(
         self,
@@ -309,6 +368,7 @@ class Autopilot:
         fetch_metrics: Callable = fetch_metrics,
         generate_post: Callable = generate_post,
         send_photo: Callable = send_telegram_photo,
+        stock_has: Callable[[str], Optional[bool]] = stock_has,
     ) -> None:
         self.config = config
         self.session_factory = session_factory
@@ -318,6 +378,7 @@ class Autopilot:
         self.fetch_metrics = fetch_metrics
         self.generate_post = generate_post
         self.send_photo = send_photo
+        self.stock_has = stock_has
         self.failed_topic_ticks = 0
         self.topic_failure_notified = False
         self.last_cleanup_at: Optional[datetime] = None
@@ -619,9 +680,15 @@ class Autopilot:
 
         best = top_performing_subjects(session, "short", TOPIC_EXAMPLES, DIGEST_MIN_AGE_DAYS)
         worst = worst_performing_subjects(session, "short", TOPIC_EXAMPLES, DIGEST_MIN_AGE_DAYS)
-        prompt = build_topic_prompt(
-            self.config.niche, recent, register, material, best=best, worst=worst
-        )
+        unavailable: list = []
+
+        def topic_prompt() -> str:
+            return build_topic_prompt(
+                self.config.niche, recent, register, material,
+                best=best, worst=worst, unavailable=unavailable,
+            )
+
+        prompt = topic_prompt()
         last_problem = "no response"
         for attempt in range(1, TOPIC_ATTEMPTS + 1):
             try:
@@ -641,6 +708,7 @@ class Autopilot:
                 log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
                 continue
             subject = " ".join(subject.split())
+            picked_subject = subject
             repeated = repeats_topic(subject, recent)
             if repeated and register != ANNIVERSARY:
                 # The anniversary's anchor belongs to its own subject, so only
@@ -670,6 +738,16 @@ class Autopilot:
             if word_count < TOPIC_MIN_WORDS or word_count > TOPIC_MAX_WORDS:
                 last_problem = f"subject has {word_count} words: '{subject}'"
                 log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
+                continue
+            # What the video cannot be shown without, for the model's own pick;
+            # a fallback candidate came without one.
+            needed = parsed.get("must_show") if subject == picked_subject else None
+            must_show = " ".join(needed.split()) if isinstance(needed, str) else ""
+            if must_show and self.stock_has(must_show) is False:
+                unavailable.append(must_show)
+                last_problem = f"no stock footage of '{must_show}' for '{subject}'"
+                log(f"[-] Topic attempt {attempt}/{TOPIC_ATTEMPTS}: {last_problem}", "warning")
+                prompt = topic_prompt()
                 continue
             topic = add_topic(session, subject, self.config.niche, "claude")
             if topic is None:
