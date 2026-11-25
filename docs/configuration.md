@@ -81,6 +81,7 @@ See `docs/autopilot.md` for behaviour. All variables are read once at startup.
 | `REQUIRE_MOUNTS` | `true` makes `worker` and `autopilot` refuse to start when they cannot see the YouTube token (and, with `AUTOPILOT_USE_MUSIC` on, any `.mp3` under `Songs/`). For hosts where those are known to exist; catches the empty bind mounts Docker Desktop creates when WSL integration is late. See `docs/docker.md`. | `false` |
 | `TELEGRAM_BOT_TOKEN` | Bot token; empty logs notifications instead of sending. | empty |
 | `TELEGRAM_CHAT_ID` | Chat that receives notifications. | empty |
+| `HEALTHCHECK_URL` | Ping URL of an outside monitor, such as a healthchecks.io check. The autopilot pings it every 5 minutes while it can reach its database, and the monitor alerts when the pings stop. It catches the cases no Telegram alert can report, like a host that is off, asleep or cut off. Empty turns it off. It is a credential: keep it in `.env`. See [docs/docker.md](docker.md#staying-up-unattended). | empty |
 | `TZ` | Timezone for the window and the daily counter. | `UTC` |
 
 ## Background music

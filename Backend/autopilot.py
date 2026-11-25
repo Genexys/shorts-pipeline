@@ -18,6 +18,7 @@ import requests
 from PIL import Image
 
 from dotenv import load_dotenv
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from analytics import fetch_metrics
@@ -32,6 +33,7 @@ from autopilot_config import (
     week_start,
 )
 from db import SessionLocal, init_db
+from heartbeat import Heartbeat
 from gpt import (
     ANNIVERSARY,
     CURIO,
@@ -397,6 +399,15 @@ class Autopilot:
         )
 
     # -- tick ----------------------------------------------------------------
+
+    def database_reachable(self) -> bool:
+        try:
+            with self.session_factory() as session:
+                session.execute(text("SELECT 1"))
+            return True
+        except Exception as err:
+            log(f"[-] Database unreachable: {err}", "error")
+            return False
 
     def run_tick(self, now: datetime) -> None:
         for step in (
@@ -958,9 +969,14 @@ def main() -> int:
     pilot = Autopilot(config, SessionLocal, notify=build_notifier(config))
     log(f"[+] {pilot.start_message()}", "success")
     pilot.notify(pilot.start_message())
+    # After the mount check and the database: a ping means the autopilot is
+    # ready to work, not merely that its process is up.
+    heartbeat = Heartbeat.from_env()
+    log(f"[*] {heartbeat.describe()}", "info")
 
     while True:
         pilot.run_tick(datetime.now(timezone.utc))
+        heartbeat.beat(alive=pilot.database_reachable)
         time.sleep(TICK_SECONDS)
 
 

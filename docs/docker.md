@@ -126,6 +126,39 @@ Set `REQUIRE_MOUNTS=true` in `.env` on a host where the token and the music libr
 docker compose -f docker-compose.yml -f compose.win.yml up -d --force-recreate worker autopilot
 ```
 
+### Staying up unattended
+
+On 2026-11-04 the laptop running the stack lost power. It crashed while going into hibernation and stayed off until 11-07. Windows then booted and Docker Desktop started, but the Ubuntu distro holding the project only started at 15:51, when a terminal was opened. Until then the containers could not see their files. Nothing reported any of it. Two measures cover the two halves:
+
+**Start the distro without a terminal.** A scheduled task, `shorts-pipeline-wsl-keepalive`, starts `Ubuntu-22.04` 30 seconds after logon and holds it with a hidden `sleep infinity`. It checks again every 10 minutes and restarts the distro if it has stopped. It runs on battery and has no time limit; Task Scheduler's defaults would block it on battery and stop it after three days. Create it from PowerShell, as the user who runs Docker Desktop:
+
+```powershell
+$xml = @"
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>$env:USERDOMAIN\$env:USERNAME</UserId><Delay>PT30S</Delay>
+    <Repetition><Interval>PT10M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><UserId>$env:USERDOMAIN\$env:USERNAME</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>
+  <Actions Context="Author"><Exec><Command>C:\Windows\System32\conhost.exe</Command>
+    <Arguments>--headless C:\Windows\System32\wsl.exe -d Ubuntu-22.04 --exec sleep infinity</Arguments></Exec></Actions>
+</Task>
+"@
+Register-ScheduledTask -TaskName shorts-pipeline-wsl-keepalive -Xml $xml
+Start-ScheduledTask -TaskName shorts-pipeline-wsl-keepalive
+```
+
+`conhost.exe --headless` keeps a console window from opening every time the task runs. To remove the task: `Unregister-ScheduledTask -TaskName shorts-pipeline-wsl-keepalive`. It needs a logon. Windows here does not sign in by itself, so after a power cut someone still has to sign in.
+
+**Hear about it when the host is gone.** A machine that is off cannot send its own alert. Set `HEALTHCHECK_URL` to an outside monitor and the autopilot pings it every 5 minutes, once it has passed the mount check and while it can reach the database. The monitor alerts when the pings stop. On [healthchecks.io](https://healthchecks.io) (the free plan is enough):
+
+1. Create a check. Set the period to 5 minutes and the grace time to 30 minutes.
+2. Under Integrations, add Telegram. It sends to the chat you link, through its own bot.
+3. Copy the check's ping URL into `.env` as `HEALTHCHECK_URL="https://hc-ping.com/<uuid>"`, then recreate the autopilot: `docker compose -f docker-compose.yml -f compose.win.yml up -d --force-recreate --no-deps autopilot`.
+4. Check the log for `Heartbeat on: pinging the monitor every 5 min`, and that the check turns green.
+
+The ping URL is the check's only credential. It lives in `.env`, never in git, and never in the log.
+
 ## Troubleshooting
 
 - `api` never becomes healthy: `docker compose logs api`; usually a missing required variable (`ANTHROPIC_API_KEY`, `TIKTOK_SESSION_ID`, `PEXELS_API_KEY`).
