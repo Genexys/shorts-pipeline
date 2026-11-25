@@ -1221,3 +1221,14 @@ def test_success_message_lists_review_notes_that_did_not_hold(
     assert "review notes (not held)" in message
     assert "a cinema audience" in message
     assert "PRIVATE" not in message
+
+
+def test_database_reachable_feeds_the_heartbeat(pilot, capsys):
+    assert pilot.database_reachable() is True
+
+    def broken():
+        raise RuntimeError("connection refused")
+
+    pilot.session_factory = broken
+    assert pilot.database_reachable() is False
+    assert "Database unreachable" in capsys.readouterr().out
