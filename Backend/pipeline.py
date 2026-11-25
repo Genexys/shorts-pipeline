@@ -1143,6 +1143,7 @@ def run_generation_pipeline(
         probe_duration(final_output_path),
         TEMP_DIR / f"{job_id}-review",
         ffmpeg_binary,
+        shots=[(shot["start_seconds"], shot["duration_seconds"]) for shot in stock_clips],
     )
     for problem in looked.major:
         review_reasons.append(f"video review: {problem.describe()}")

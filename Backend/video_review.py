@@ -10,8 +10,16 @@ review, after publishing.
 Frames are taken at even intervals from the final file, with the captions
 burned in, and read by a vision model alongside the narration. A major problem
 holds the upload back as private, through the pipeline's review hold. Minor
-ones are recorded and logged. With the check off or failing, the video goes out
-as before.
+ones are recorded, logged and listed in the autopilot's report. With the check
+off or failing, the video goes out as before.
+
+What holds is decided here, not by the model's word alone. In the two weeks
+after 2026-11-11 the hold kept 15 of 59 Shorts private. Of the 14 still
+private on 2026-11-25, a look at each found 8 fine to publish: an opening the review itself called "acceptable but
+weak", generic rolling-mill footage under a line about foil, a balloon
+illustrating air pushing out. The ones worth holding all showed something the
+viewer would take for the thing named: a stock actor for a named doctor, a
+bluebottle for a hover fly, a modern clown doll for Edison's.
 """
 
 import base64
@@ -21,7 +29,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from logstream import log
 import writer
@@ -44,8 +52,15 @@ MINOR = "minor"
 # The opening decides whether a Short is watched, and what it shows is what
 # the viewer takes the subject to be: on 2026-11-03 the opossum Short opened
 # for 7.6 s on what the review itself called a sloth, rated minor, and went out.
+# A stand-in there holds however briefly it shows.
 OPENING_SECONDS = 5.0
-KINDS = ("black", "unrelated", "caption", "text_overlay", "watermark", "other")
+# Past the opening, a stand-in holds once the shots showing one add up to this
+# long. The held stand-ins of November ran 2.4 to 7.8 s; a shot that flashes
+# by under the name is noted, not held.
+STAND_IN_SECONDS = 3.0
+STAND_IN = "stand_in"
+UNRELATED = "unrelated"
+KINDS = ("black", UNRELATED, STAND_IN, "caption", "text_overlay", "watermark", "other")
 
 PROMPT = """\
 These are {count} frames taken at even intervals from a finished popular-science
@@ -55,21 +70,25 @@ burned in. Narration:
 
 Report only real problems a viewer would notice:
 - "black": a black, blank or frozen frame where footage should be.
+- "stand_in": footage the viewer would take for the specific animal, object,
+  place or real person the narration names at that point, but which shows
+  something else: a related species (a fire salamander or an axolotl for a
+  ribbed newt), another vehicle, object or doll than the one named, a stock
+  actor while the narration names a real person.
 - "unrelated": footage plainly about something else than the narration around
-  that point (generic but suitable stock footage is fine).
+  that point, which no viewer would take for the thing named (generic but
+  suitable stock footage is fine, and so is an obvious illustration, such as
+  a balloon for air that pushes out).
 - "caption": caption text that is garbled, misspelt, cut off or does not match
   the narration's words.
 - "text_overlay": the stock clip's own burned-in text, title or subtitles.
 - "watermark": a stock site's watermark or logo.
 - "other": anything else that would embarrass the channel.
 Severity "major" means the video should not go out until a person has looked;
-"minor" means worth knowing but publishable. A clip showing a different animal,
-vehicle or object than the one the narration names at that point is major: the
-viewer takes it for the thing named. That includes a related species (a fire
-salamander or an axolotl for a ribbed newt) and a stock actor shown while the
-narration names a real person. A caption is misspelt only if its letters
-differ from the narration's word; do not report one that matches. An empty list
-is the normal answer.
+"minor" means worth knowing but publishable. A stand-in is major: the viewer
+takes it for the thing named. A caption is misspelt only if its letters differ
+from the narration's word; do not report one that matches. An empty list is
+the normal answer.
 """
 
 SCHEMA = {
@@ -116,8 +135,16 @@ class Review:
     def major(self) -> List[Problem]:
         return [p for p in self.problems if p.severity == MAJOR]
 
+    @property
+    def minor(self) -> List[Problem]:
+        return [p for p in self.problems if p.severity == MINOR]
+
     def summary(self) -> dict:
-        return {"checked": self.checked, "problems": [p.describe() for p in self.problems]}
+        return {
+            "checked": self.checked,
+            "problems": [p.describe() for p in self.problems],
+            "minor": [p.describe() for p in self.minor],
+        }
 
 
 def model_name() -> str:
@@ -209,20 +236,60 @@ def _quoted(note: str) -> List[str]:
     return [word for word in re.findall(r"[\"“']([A-Za-z][A-Za-z'-]+)[\"”']", note) if len(word) > 2]
 
 
-def settle(problems: Sequence[Problem], narration: str) -> List[Problem]:
+def _shot_at(seconds: float, shots: Sequence[Tuple[float, float]]) -> Optional[int]:
+    for index, (start, duration) in enumerate(shots):
+        if start <= seconds < start + duration:
+            return index
+    return None
+
+
+def _stand_in_seconds(
+    problems: Sequence[Problem], shots: Optional[Sequence[Tuple[float, float]]]
+) -> Optional[float]:
+    """How long the shots showing a stand-in play, or None if that is unknown."""
+    if not shots:
+        return None
+    indexes = set()
+    for problem in problems:
+        if problem.kind != STAND_IN:
+            continue
+        index = _shot_at(problem.seconds, shots)
+        if index is None:
+            return None
+        indexes.add(index)
+    return sum(shots[index][1] for index in indexes)
+
+
+def settle(
+    problems: Sequence[Problem],
+    narration: str,
+    shots: Optional[Sequence[Tuple[float, float]]] = None,
+) -> List[Problem]:
     """The problems with their severity checked against what can be checked.
 
-    Unrelated footage in the opening is major whatever the model said. A
-    misspelt caption whose quoted words are all in the narration is not one:
-    the captions are the script's own words, and on 2026-11-08 the X-ray Short
-    was held for "SKELETONS", spelt as the script spells it.
+    `shots` is the footage timeline as (start, seconds) pairs, when known.
+
+    - A stand-in holds in the opening, and anywhere once the shots showing one
+      play for STAND_IN_SECONDS in all. Without a timeline it holds.
+    - Unrelated footage never holds: it is noted. On 2026-11-11..24 the review
+      held four Shorts on an opening it called "only a minor mismatch" or
+      "acceptable but weak", through a rule that made any unrelated opening
+      major. The case that rule was for, a sloth under "an opossum", is a
+      stand-in.
+    - A misspelt caption whose quoted words are all in the narration is not
+      one: the captions are the script's own words, and on 2026-11-08 the X-ray
+      Short was held for "SKELETONS", spelt as the script spells it.
     """
     words = {word.lower() for word in re.findall(r"[A-Za-z'-]+", narration or "")}
+    stand_in_seconds = _stand_in_seconds(problems, shots)
     settled = []
     for problem in problems:
         severity = problem.severity
-        if problem.kind == "unrelated" and problem.seconds <= OPENING_SECONDS:
-            severity = MAJOR
+        if problem.kind == STAND_IN:
+            long_enough = stand_in_seconds is None or stand_in_seconds >= STAND_IN_SECONDS
+            severity = MAJOR if long_enough or problem.seconds <= OPENING_SECONDS else MINOR
+        elif problem.kind == UNRELATED:
+            severity = MINOR
         elif problem.kind == "caption" and severity == MAJOR:
             quoted = _quoted(problem.note)
             if quoted and all(word.lower() in words for word in quoted):
@@ -238,15 +305,20 @@ def review(
     work_dir: Path,
     ffmpeg: str = "ffmpeg",
     ask: Optional[Callable[[Sequence[tuple], str], List[Problem]]] = None,
+    shots: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> Review:
-    """Looks at the finished video. Never raises."""
+    """Looks at the finished video. Never raises.
+
+    `shots` is the footage timeline as (start, seconds) pairs; it decides
+    whether a stand-in shows long enough to hold the video (see settle).
+    """
     if not is_enabled():
         return Review()
     frames = extract_frames(video_path, duration, work_dir, ffmpeg)
     if not frames:
         return Review()
     try:
-        problems = settle((ask or _ask)(frames, narration), narration)
+        problems = settle((ask or _ask)(frames, narration), narration, shots)
     except Exception as err:
         log(f"[!] Video review unavailable ({writer.scrub(str(err))}).", "warning")
         return Review()
