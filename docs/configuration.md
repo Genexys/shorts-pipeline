@@ -652,13 +652,25 @@ line is kept.
 **Video review** (`Backend/video_review.py`, recorded as `videoReview`). Twelve
 frames are taken from the finished file, captions burned in, and read by
 `VIDEO_REVIEW_MODEL` (Sonnet 5.5 by default; `off` turns it off) alongside the
-narration. It looks for black frames, footage unrelated to the narration,
-wrong captions, burned-in text and watermarks. A major problem holds the
-upload; a minor one is logged. Two rules are applied to the model's answer:
-unrelated footage in the first 5 seconds is major (the opossum Short of
-2026-11-03 opened on a sloth, rated minor, and went out), and a "misspelt"
-caption whose quoted words all appear in the narration is minor (the X-ray
-Short was held for "SKELETONS", spelt as the script spells it).
+narration. It looks for black frames, stand-ins, unrelated footage, wrong
+captions, burned-in text and watermarks. A major problem holds the upload; a
+minor one is logged and listed in the autopilot's Telegram report as a review
+note. What holds is settled in code, not by the model's word alone:
+
+- **Stand-in**, footage the viewer would take for the thing named but which is
+  something else (a related species, another object or doll, a stock actor
+  while a real person is named): holds in the first 5 seconds however brief,
+  and later once the shots showing stand-ins add up to 3 seconds
+  (`STAND_IN_SECONDS`), measured on the footage timeline. With no timeline it
+  holds. A shot that flashes by under the name is a note.
+- **Unrelated** footage, which no viewer would take for the thing named,
+  never holds. Until 2026-11-25 unrelated footage in the first 5 seconds held
+  the video. From 11-11 to 11-24 that held four Shorts on openings the review
+  itself called "a minor mismatch" or "acceptable but weak".
+- A "misspelt" caption whose quoted words all appear in the narration is minor
+  (the X-ray Short was held for "SKELETONS", spelt as the script spells it).
+- Black frames, burned-in text, watermarks and "other" keep the model's
+  severity.
 
 With no model available, a check is skipped rather than failed, and the video
 goes out as before. An outage must not hold every video. The checks cost about

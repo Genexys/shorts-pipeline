@@ -469,6 +469,7 @@ class Autopilot:
         written_locally = False
         uploaded_private = False
         review_reasons: list = []
+        review_notes: list = []
         for artifact in list_artifacts(session, job_id):
             metadata = artifact.metadata_json or {}
             if artifact.artifact_type == "video":
@@ -494,6 +495,7 @@ class Autopilot:
                     )
                 script_model = metadata.get("scriptModel") or ""
                 review_reasons = list(metadata.get("reviewReasons") or [])
+                review_notes = list((metadata.get("videoReview") or {}).get("minor") or [])
                 written_locally = (
                     bool(metadata.get("scriptLocal")) and metadata.get("format") == "long"
                 )
@@ -517,6 +519,13 @@ class Autopilot:
                 "🔒 uploaded as PRIVATE for review:\n"
                 + "\n".join(f"  • {reason}" for reason in review_reasons[:5])
                 + "\nCheck it, fix or pin a correction, then publish it by hand."
+            )
+        if review_notes:
+            # Minor findings do not hold the video. They used to be a line in
+            # the worker's log; here they can be looked at, or ignored.
+            warnings.append(
+                "📝 review notes (not held):\n"
+                + "\n".join(f"  • {note}" for note in review_notes[:3])
             )
         if script_warning:
             warnings.append(script_warning)

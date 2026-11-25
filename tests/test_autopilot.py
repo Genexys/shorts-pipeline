@@ -1196,3 +1196,28 @@ def test_a_stock_check_that_cannot_run_lets_the_topic_through(session_factory, t
     with session_factory() as session:
         topic, _ = pilot.generate_topic(session)
     assert topic.subject == "The Texas horned lizard squirts blood at coyotes"
+
+
+def test_success_message_lists_review_notes_that_did_not_hold(
+    pilot, session_factory, notifications
+):
+    with session_factory() as session:
+        job_id = _completed_job(session, "Salty seas")
+        add_artifact(
+            session, job_id, "video", f"output/{job_id}.mp4",
+            {"title": "Salty seas", "uploadError": None,
+             "videoReview": {"checked": True,
+                             "problems": ["unrelated at 2s: a cinema audience"],
+                             "minor": ["unrelated at 2s: a cinema audience"]}},
+        )
+        add_artifact(
+            session, job_id, "youtube_video", "https://youtu.be/abc",
+            {"videoId": "abc", "privacyStatus": "public"},
+        )
+
+    pilot.finish_completed_topics()
+
+    message = notifications[-1]
+    assert "review notes (not held)" in message
+    assert "a cinema audience" in message
+    assert "PRIVATE" not in message
